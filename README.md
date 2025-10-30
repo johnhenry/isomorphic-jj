@@ -44,6 +44,25 @@ const bugFixes = await jj.revset.evaluate('description(fix)');
 await jj.undo();
 ```
 
+### Git Interoperability
+
+Repositories created with the Git backend work seamlessly with standard Git tools:
+
+```bash
+cd test-repo
+
+# Use Git commands
+git log --oneline
+git show HEAD
+git diff
+
+# View branches
+git branch -a
+
+# The .jj directory is automatically ignored by Git
+git status  # Shows only your working files
+```
+
 ---
 
 ## Features
@@ -65,9 +84,12 @@ await jj.undo();
 - ✅ **Git backend integration**: Real Git commits from JJ changes (isomorphic-git)
 - ✅ **Colocated repositories**: Both .git and .jj directories work together
 - ✅ **Automatic commit creation**: describe() creates Git commits automatically
-- ⚠️ First-class conflicts (planned)
+- ✅ **First-class conflicts**: ConflictModel with detection, storage, and resolution
+- ✅ **Partial jj CLI compatibility**: Minimal .jj structure for Git interop
 - ⚠️ Multiple working copies (planned)
 - ⚠️ Browser OPFS support (planned)
+
+**Note on jj CLI compatibility**: Repositories created by isomorphic-jj work perfectly with Git (you can use `git log`, `git show`, etc.). Full jj CLI compatibility requires implementing jj's internal binary formats (protobuf-based), which is not currently a priority. Use the isomorphic-jj JavaScript API to interact with repositories.
 
 ---
 
