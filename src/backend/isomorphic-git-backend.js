@@ -57,6 +57,10 @@ export class IsomorphicGitBackend {
         dir: this.dir,
         defaultBranch: opts.defaultBranch || 'main',
       });
+
+      // Create .jj/repo structure for jj CLI compatibility
+      await this._createJJRepoStructure();
+
     } catch (error) {
       throw new JJError(
         'INIT_FAILED',
@@ -538,6 +542,63 @@ export class IsomorphicGitBackend {
         `Push failed: ${error.message}`,
         { remote: opts.remote, originalError: error }
       );
+    }
+  }
+
+  /**
+   * Create minimal .jj/repo structure for jj CLI compatibility
+   * @private
+   */
+  async _createJJRepoStructure() {
+    const jjDir = `${this.dir}/.jj`;
+    const jjRepo = `${jjDir}/repo`;
+
+    // Create directory structure
+    await this.fs.promises.mkdir(`${jjRepo}/store`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjRepo}/op_store`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjRepo}/op_heads/heads`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjRepo}/index`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjRepo}/submodule_store`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjDir}/working_copy`, { recursive: true });
+
+    // Write type files
+    await this.fs.promises.writeFile(`${jjRepo}/store/type`, 'git');
+    await this.fs.promises.writeFile(`${jjRepo}/store/git_target`, '../../../.git');
+    await this.fs.promises.writeFile(`${jjRepo}/op_store/type`, 'simple_op_store');
+    await this.fs.promises.writeFile(`${jjRepo}/op_heads/type`, 'simple_op_heads_store');
+    await this.fs.promises.writeFile(`${jjRepo}/index/type`, 'default');
+    await this.fs.promises.writeFile(`${jjRepo}/submodule_store/type`, 'default');
+    await this.fs.promises.writeFile(`${jjDir}/working_copy/type`, 'local');
+
+    // Create .jj/.gitignore to prevent git from tracking jj metadata
+    await this.fs.promises.writeFile(`${jjDir}/.gitignore`, '/*\n');
+
+    // Add .jj to root .gitignore if it doesn't exist
+    await this._ensureGitignore();
+  }
+
+  /**
+   * Ensure .gitignore has .jj/ entry
+   * @private
+   */
+  async _ensureGitignore() {
+    const gitignorePath = `${this.dir}/.gitignore`;
+    let content = '';
+
+    try {
+      content = await this.fs.promises.readFile(gitignorePath, 'utf8');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+
+    // Check if .jj is already in .gitignore
+    const lines = content.split('\n');
+    const hasJJ = lines.some(line => line.trim() === '.jj' || line.trim() === '.jj/');
+
+    if (!hasJJ) {
+      // Add .jj to .gitignore
+      const newContent = content + (content && !content.endsWith('\n') ? '\n' : '') + '.jj/\n';
+      await this.fs.promises.writeFile(gitignorePath, newContent);
     }
   }
 }

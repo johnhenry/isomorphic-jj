@@ -2,7 +2,7 @@
 import * as git from 'isomorphic-git';
 import fs from 'fs';
 import http from 'isomorphic-git/http/node';
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from './src/index.js';
 
 const jj = await createJJ({
   backend: 'isomorphic-git',
