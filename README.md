@@ -89,7 +89,17 @@ git status  # Shows only your working files
 - ⚠️ Multiple working copies (planned)
 - ⚠️ Browser OPFS support (planned)
 
-**Note on jj CLI compatibility**: Repositories created by isomorphic-jj work perfectly with Git (you can use `git log`, `git show`, etc.). Full jj CLI compatibility requires implementing jj's internal binary formats (protobuf-based), which is not currently a priority. Use the isomorphic-jj JavaScript API to interact with repositories.
+**Note on jj CLI compatibility**: Repositories created by isomorphic-jj work perfectly with Git (you can use `git log`, `git show`, etc.). To use jj CLI with repositories created by isomorphic-jj, follow this workflow:
+
+```bash
+# After creating a repo with isomorphic-jj
+rm -rf ./repo/.jj  # Remove incomplete jj metadata
+cd ./repo
+jj git init --colocate  # Let jj CLI create proper metadata
+jj status  # Now jj CLI works!
+```
+
+This hybrid approach gives you the best of both worlds: JavaScript-based repo creation and full jj CLI support.
 
 ---
 
