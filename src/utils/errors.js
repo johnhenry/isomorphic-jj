@@ -15,6 +15,7 @@ export class JJError extends Error {
     this.name = 'JJError';
     this.code = code;
     this.context = context;
+    this.details = context; // Alias for better ergonomics
     this.suggestion = context.suggestion;
   }
 }

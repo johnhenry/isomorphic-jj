@@ -12,6 +12,7 @@ export class MockFS {
       rename: this.rename.bind(this),
       unlink: this.unlink.bind(this),
       stat: this.stat.bind(this),
+      access: this.access.bind(this),
     };
   }
 
@@ -61,7 +62,19 @@ export class MockFS {
       isFile: () => file.type === 'file',
       mtime: file.mtime || file.created,
       size: file.content ? file.content.length : 0,
+      mode: 0o644,
     };
+  }
+
+  async access(path, mode) {
+    const file = this.files.get(path);
+    if (!file) {
+      const error = new Error(`ENOENT: no such file or directory, access '${path}'`);
+      error.code = 'ENOENT';
+      throw error;
+    }
+    // Mock access - always return success if file exists
+    return;
   }
 
   reset() {

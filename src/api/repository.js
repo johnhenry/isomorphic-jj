@@ -7,6 +7,7 @@ import { ChangeGraph } from '../core/change-graph.js';
 import { WorkingCopy } from '../core/working-copy.js';
 import { OperationLog } from '../core/operation-log.js';
 import { BookmarkStore } from '../core/bookmark-store.js';
+import { RevsetEngine } from '../core/revset-engine.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
@@ -48,6 +49,7 @@ export async function createJJ(options) {
   const workingCopy = new WorkingCopy(storage, fs, dir);
   const oplog = new OperationLog(storage);
   const bookmarks = new BookmarkStore(storage);
+  const revset = new RevsetEngine(graph, workingCopy);
   
   // Create Git backend if specified
   let backend = null;
@@ -68,6 +70,7 @@ export async function createJJ(options) {
     workingCopy,
     oplog,
     bookmarks,
+    revset,
     backend,
     
     /**
@@ -127,7 +130,357 @@ export async function createJJ(options) {
       
       return;
     },
-    
+
+    /**
+     * Write a file to the working copy
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.path - File path relative to repo root
+     * @param {string|Uint8Array} args.data - File contents
+     */
+    async write(args) {
+      if (!args || !args.path) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing path argument', {
+          suggestion: 'Provide a path for the file to write',
+        });
+      }
+
+      if (args.data === undefined) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing data argument', {
+          suggestion: 'Provide data to write to the file',
+        });
+      }
+
+      const fullPath = `${dir}/${args.path}`;
+
+      // Ensure directory exists
+      const pathParts = args.path.split('/');
+      if (pathParts.length > 1) {
+        const dirPath = pathParts.slice(0, -1).join('/');
+        const fullDirPath = `${dir}/${dirPath}`;
+        await fs.promises.mkdir(fullDirPath, { recursive: true });
+      }
+
+      // Write the file
+      const data = typeof args.data === 'string'
+        ? args.data
+        : args.data;
+      await fs.promises.writeFile(fullPath, data, 'utf8');
+
+      // Track the file in working copy
+      await workingCopy.load();
+      const stats = await fs.promises.stat(fullPath);
+      await workingCopy.trackFile(args.path, {
+        mtime: stats.mtime,
+        size: stats.size,
+        mode: stats.mode,
+      });
+
+      return;
+    },
+
+    /**
+     * Move/rename a file in the working copy OR move/rebase a change to a new parent
+     *
+     * This method is polymorphic and handles two distinct operations:
+     *
+     * 1. File operations (moving/renaming files):
+     *    - Signature: { from: string, to: string }
+     *    - Example: move({ from: 'old.js', to: 'new.js' })
+     *    - Moves a file in the working directory and updates tracking
+     *
+     * 2. History operations (rebasing changes):
+     *    - Signature: { changeId: ChangeID, newParent: ChangeID }
+     *    - OR: { from: ChangeID, to: ChangeID, paths: string[] }
+     *    - Example: move({ changeId: 'abc...', newParent: 'def...' })
+     *    - Rebases a change to have a different parent
+     *
+     * The method automatically detects which operation based on:
+     * - Presence of `changeId`, `newParent`, or `paths` → history operation
+     * - Presence of only `from` and `to` → file operation
+     * - Change IDs are 32-character hex strings; file paths are not
+     *
+     * @param {Object} args - Arguments
+     * @param {string} [args.from] - Source path or change ID
+     * @param {string} [args.to] - Destination path or change ID
+     * @param {string} [args.changeId] - Change ID to move (for history operations)
+     * @param {string} [args.newParent] - New parent change ID (for history operations)
+     * @param {string[]} [args.paths] - Paths to move between changes (for history operations)
+     * @returns {Promise<Object|void>} Returns change object for history operations, void for file operations
+     */
+    async move(args) {
+      if (!args || typeof args !== 'object') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid arguments', {
+          suggestion: 'Provide { from, to } for file operations or { changeId, newParent } for history operations',
+        });
+      }
+
+      // Detect operation type based on arguments
+      const isHistoryOp = this._detectHistoryOperation(args);
+
+      if (isHistoryOp) {
+        return await this._moveChange(args);
+      } else {
+        return await this._moveFile(args);
+      }
+    },
+
+    /**
+     * Detect if move operation is for history (rebase) or files
+     *
+     * @private
+     * @param {Object} args - Move arguments
+     * @returns {boolean} True if history operation, false if file operation
+     */
+    _detectHistoryOperation(args) {
+      // Explicit history operation indicators
+      if (args.paths || args.changeId || args.newParent) {
+        return true;
+      }
+
+      // If only from/to are present, check if they look like change IDs
+      if (args.from && args.to && !args.changeId && !args.newParent && !args.paths) {
+        // Change IDs are 32-character hex strings
+        const changeIdPattern = /^[0-9a-f]{32}$/;
+        const fromLooksLikeChangeId = changeIdPattern.test(args.from);
+        const toLooksLikeChangeId = changeIdPattern.test(args.to);
+
+        // If both look like change IDs, it's likely a history operation
+        // However, we err on the side of file operations to be safe
+        // Users should use explicit { changeId, newParent } for clarity
+        if (fromLooksLikeChangeId && toLooksLikeChangeId) {
+          // This is ambiguous - throw a helpful error
+          throw new JJError('AMBIGUOUS_OPERATION',
+            'Ambiguous move operation: arguments look like change IDs', {
+            suggestion: 'Use { changeId, newParent } for history operations or ensure file paths don\'t match change ID pattern',
+            args,
+          });
+        }
+
+        return false; // Treat as file operation
+      }
+
+      return false;
+    },
+
+    /**
+     * Move/rebase a change to a new parent (history operation)
+     *
+     * @private
+     * @param {Object} args - Move arguments
+     * @returns {Promise<Object>} Updated change object
+     */
+    async _moveChange(args) {
+      await graph.load();
+
+      const changeId = args.changeId || args.from;
+      const newParent = args.newParent || args.to;
+
+      if (!changeId || typeof changeId !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid changeId', {
+          suggestion: 'Provide a valid changeId (32-character hex string) for history operations',
+          provided: { changeId, type: typeof changeId },
+        });
+      }
+
+      if (!newParent || typeof newParent !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid newParent', {
+          suggestion: 'Provide a valid newParent change ID for history operations',
+          provided: { newParent, type: typeof newParent },
+        });
+      }
+
+      // Validate change ID format
+      const changeIdPattern = /^[0-9a-f]{32}$/;
+      if (!changeIdPattern.test(changeId)) {
+        throw new JJError('INVALID_CHANGE_ID', `Invalid change ID format: ${changeId}`, {
+          suggestion: 'Change IDs must be 32-character hex strings',
+          provided: changeId,
+        });
+      }
+
+      if (!changeIdPattern.test(newParent)) {
+        throw new JJError('INVALID_CHANGE_ID', `Invalid new parent change ID format: ${newParent}`, {
+          suggestion: 'Change IDs must be 32-character hex strings',
+          provided: newParent,
+        });
+      }
+
+      const change = await graph.getChange(changeId);
+
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`, {
+          changeId,
+          suggestion: 'Use log() to view available changes',
+        });
+      }
+
+      // Validate new parent exists
+      const newParentChange = await graph.getChange(newParent);
+      if (!newParentChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `New parent change ${newParent} not found`, {
+          newParent,
+          suggestion: 'Use log() to view available changes',
+        });
+      }
+
+      // Prevent moving a change to itself
+      if (changeId === newParent) {
+        throw new JJError('INVALID_OPERATION', 'Cannot move a change to itself as parent', {
+          changeId,
+          suggestion: 'Specify a different change as the new parent',
+        });
+      }
+
+      // TODO: Prevent creating cycles in the change graph
+      // For now, we'll allow it but it should be validated
+
+      // Update parent
+      change.parents = [newParent];
+      await graph.updateChange(change);
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `move change ${changeId.slice(0, 8)} to ${newParent.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return change;
+    },
+
+    /**
+     * Move/rename a file in the working copy (file operation)
+     *
+     * @private
+     * @param {Object} args - Move arguments
+     * @returns {Promise<void>}
+     */
+    async _moveFile(args) {
+      if (!args.from || typeof args.from !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid from path', {
+          suggestion: 'Provide a valid source file path',
+          provided: { from: args.from, type: typeof args.from },
+        });
+      }
+
+      if (!args.to || typeof args.to !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid to path', {
+          suggestion: 'Provide a valid destination file path',
+          provided: { to: args.to, type: typeof args.to },
+        });
+      }
+
+      // Prevent moving to the same location
+      if (args.from === args.to) {
+        throw new JJError('INVALID_OPERATION', 'Source and destination paths are the same', {
+          path: args.from,
+          suggestion: 'Specify a different destination path',
+        });
+      }
+
+      // Prevent absolute paths
+      if (args.from.startsWith('/') || args.to.startsWith('/')) {
+        throw new JJError('INVALID_PATH', 'Absolute paths are not allowed', {
+          suggestion: 'Use paths relative to the repository root',
+          provided: { from: args.from, to: args.to },
+        });
+      }
+
+      // Prevent parent directory traversal
+      if (args.from.includes('..') || args.to.includes('..')) {
+        throw new JJError('INVALID_PATH', 'Parent directory traversal (..) is not allowed', {
+          suggestion: 'Use paths within the repository',
+          provided: { from: args.from, to: args.to },
+        });
+      }
+
+      const fromPath = `${dir}/${args.from}`;
+      const toPath = `${dir}/${args.to}`;
+
+      // Check if source file exists
+      try {
+        await fs.promises.access(fromPath);
+      } catch (error) {
+        throw new JJError('FILE_NOT_FOUND', `Source file not found: ${args.from}`, {
+          path: args.from,
+          fullPath: fromPath,
+          suggestion: 'Check that the file exists',
+        });
+      }
+
+      // Ensure destination directory exists
+      const pathParts = args.to.split('/');
+      if (pathParts.length > 1) {
+        const dirPath = pathParts.slice(0, -1).join('/');
+        const fullDirPath = `${dir}/${dirPath}`;
+        try {
+          await fs.promises.mkdir(fullDirPath, { recursive: true });
+        } catch (error) {
+          throw new JJError('DIRECTORY_CREATE_FAILED',
+            `Failed to create destination directory: ${dirPath}`, {
+            directory: dirPath,
+            originalError: error.message,
+          });
+        }
+      }
+
+      // Move the file
+      try {
+        await fs.promises.rename(fromPath, toPath);
+      } catch (error) {
+        throw new JJError('FILE_MOVE_FAILED', `Failed to move file: ${error.message}`, {
+          from: args.from,
+          to: args.to,
+          originalError: error.message,
+        });
+      }
+
+      // Update working copy tracking
+      await workingCopy.load();
+      await workingCopy.untrackFile(args.from);
+      const stats = await fs.promises.stat(toPath);
+      await workingCopy.trackFile(args.to, {
+        mtime: stats.mtime,
+        size: stats.size,
+        mode: stats.mode,
+      });
+
+      return;
+    },
+
+    /**
+     * Remove a file from the working copy
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.path - File path to remove
+     */
+    async remove(args) {
+      if (!args || !args.path) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing path argument', {
+          suggestion: 'Provide a path for the file to remove',
+        });
+      }
+
+      const fullPath = `${dir}/${args.path}`;
+
+      // Remove the file
+      await fs.promises.unlink(fullPath);
+
+      // Untrack from working copy
+      await workingCopy.load();
+      await workingCopy.untrackFile(args.path);
+
+      return;
+    },
+
     /**
      * Describe the working copy change
      */
@@ -231,11 +584,11 @@ export async function createJJ(options) {
     async status() {
       await graph.load();
       await workingCopy.load();
-      
+
       const currentChangeId = workingCopy.getCurrentChangeId();
       const change = await graph.getChange(currentChangeId);
       const modified = await workingCopy.getModifiedFiles();
-      
+
       return {
         workingCopy: change,
         modified,
@@ -243,6 +596,103 @@ export async function createJJ(options) {
         removed: [],
         conflicts: [],
       };
+    },
+
+    /**
+     * View change history
+     *
+     * @param {Object} args - Arguments
+     * @param {string} [args.revset='all()'] - Revset expression to filter changes
+     * @param {number} [args.limit] - Maximum number of changes to return
+     * @returns {Promise<Array>} Array of changes
+     */
+    async log(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+
+      const revsetExpr = args.revset || 'all()';
+      const changeIds = await revset.evaluate(revsetExpr);
+
+      let changes = [];
+      for (const changeId of changeIds) {
+        const change = await graph.getChange(changeId);
+        if (change) {
+          changes.push(change);
+        }
+      }
+
+      // Sort by timestamp descending (newest first)
+      changes.sort((a, b) => {
+        const aTime = new Date(a.timestamp).getTime();
+        const bTime = new Date(b.timestamp).getTime();
+        return bTime - aTime;
+      });
+
+      // Apply limit if specified
+      if (args.limit) {
+        changes = changes.slice(0, args.limit);
+      }
+
+      return changes;
+    },
+
+    /**
+     * Amend the working copy change
+     *
+     * @param {Object} args - Arguments
+     * @param {string} [args.message] - New description message
+     * @returns {Promise<Object>} Updated change
+     */
+    async amend(args = {}) {
+      // Amend is essentially the same as describe in JJ
+      return await this.describe(args);
+    },
+
+    /**
+     * Edit a specific change (make it the working copy)
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.change - Change ID to edit
+     */
+    async edit(args) {
+      if (!args || !args.change) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing change argument', {
+          suggestion: 'Provide a change ID to edit',
+        });
+      }
+
+      await graph.load();
+      await workingCopy.load();
+
+      const change = await graph.getChange(args.change);
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.change} not found`, {
+          changeId: args.change,
+        });
+      }
+
+      // Set this change as the working copy
+      await workingCopy.setCurrentChange(args.change);
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: {
+          name: 'User',
+          email: 'user@example.com',
+          hostname: 'localhost',
+        },
+        description: `edit change ${args.change.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [args.change],
+          workingCopy: args.change,
+        },
+      });
+
+      return;
     },
     
     /**
@@ -378,43 +828,6 @@ export async function createJJ(options) {
         timestamp: new Date().toISOString(),
         user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
         description: `restore change ${args.changeId.slice(0, 8)}`,
-        parents: [],
-        view: {
-          bookmarks: {},
-          remoteBookmarks: {},
-          heads: [],
-          workingCopy: workingCopy.getCurrentChangeId(),
-        },
-      });
-      
-      return change;
-    },
-    
-    /**
-     * Move (rebase) a change to a new parent
-     * 
-     * @param {Object} args - Arguments
-     * @param {string} args.changeId - Change ID to move
-     * @param {string} args.newParent - New parent change ID
-     */
-    async move(args) {
-      await graph.load();
-      
-      const change = await graph.getChange(args.changeId);
-      
-      if (!change) {
-        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
-      }
-      
-      // Update parent
-      change.parents = [args.newParent];
-      await graph.updateChange(change);
-      
-      // Record operation
-      await oplog.recordOperation({
-        timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
-        description: `move change ${args.changeId.slice(0, 8)} to ${args.newParent.slice(0, 8)}`,
         parents: [],
         view: {
           bookmarks: {},
