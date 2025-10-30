@@ -3,7 +3,11 @@
  */
 
 import { Storage } from '../core/storage-manager.js';
+import { ChangeGraph } from '../core/change-graph.js';
+import { WorkingCopy } from '../core/working-copy.js';
+import { OperationLog } from '../core/operation-log.js';
 import { JJError } from '../utils/errors.js';
+import { generateChangeId } from '../utils/id-generation.js';
 
 /**
  * Create and initialize a JJ repository instance
@@ -36,12 +40,18 @@ export async function createJJ(options) {
     });
   }
 
-  // Create storage manager
+  // Create core components
   const storage = new Storage(fs, dir);
+  const graph = new ChangeGraph(storage);
+  const workingCopy = new WorkingCopy(storage, fs, dir);
+  const oplog = new OperationLog(storage);
 
   // Create JJ instance
   const jj = {
     storage,
+    graph,
+    workingCopy,
+    oplog,
     
     /**
      * Initialize a new JJ repository
@@ -49,13 +59,35 @@ export async function createJJ(options) {
     async init(opts = {}) {
       await storage.init();
       
-      // Create initial empty graph
-      await storage.write('graph.json', {
-        version: 1,
-        changes: {},
-      });
+      // Initialize components
+      await graph.init();
+      await oplog.init();
       
-      // Create initial empty bookmarks
+      // Create root change
+      const rootChangeId = generateChangeId();
+      const rootChange = {
+        changeId: rootChangeId,
+        commitId: '0000000000000000000000000000000000000000', // Placeholder
+        parents: [],
+        tree: '0000000000000000000000000000000000000000', // Empty tree
+        author: {
+          name: opts.userName || 'User',
+          email: opts.userEmail || 'user@example.com',
+          timestamp: new Date().toISOString(),
+        },
+        committer: {
+          name: opts.userName || 'User',
+          email: opts.userEmail || 'user@example.com',
+          timestamp: new Date().toISOString(),
+        },
+        description: '(root)',
+        timestamp: new Date().toISOString(),
+      };
+      
+      await graph.addChange(rootChange);
+      await workingCopy.init(rootChangeId);
+      
+      // Create initial bookmarks
       await storage.write('bookmarks.json', {
         version: 1,
         local: {},
@@ -63,10 +95,167 @@ export async function createJJ(options) {
         tracked: {},
       });
       
-      // Create empty oplog
-      await storage.write('oplog.jsonl', '');
+      // Record init operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: {
+          name: opts.userName || 'User',
+          email: opts.userEmail || 'user@example.com',
+          hostname: 'localhost',
+        },
+        description: 'initialize repository',
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [rootChangeId],
+          workingCopy: rootChangeId,
+        },
+      });
       
       return;
+    },
+    
+    /**
+     * Describe the working copy change
+     */
+    async describe(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+      
+      const currentChangeId = workingCopy.getCurrentChangeId();
+      const change = await graph.getChange(currentChangeId);
+      
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Working copy change ${currentChangeId} not found`, {
+          changeId: currentChangeId,
+        });
+      }
+      
+      // Update description
+      if (args.message !== undefined) {
+        change.description = args.message;
+        change.timestamp = new Date().toISOString();
+        await graph.updateChange(change);
+      }
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: {
+          name: 'User',
+          email: 'user@example.com',
+          hostname: 'localhost',
+        },
+        description: `describe change ${currentChangeId.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [currentChangeId],
+          workingCopy: currentChangeId,
+        },
+      });
+      
+      return change;
+    },
+    
+    /**
+     * Create a new change on top of working copy
+     */
+    async new(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+      
+      const parentChangeId = workingCopy.getCurrentChangeId();
+      const newChangeId = generateChangeId();
+      
+      const newChange = {
+        changeId: newChangeId,
+        commitId: '0000000000000000000000000000000000000000', // Placeholder
+        parents: [parentChangeId],
+        tree: '0000000000000000000000000000000000000000', // Empty tree
+        author: {
+          name: 'User',
+          email: 'user@example.com',
+          timestamp: new Date().toISOString(),
+        },
+        committer: {
+          name: 'User',
+          email: 'user@example.com',
+          timestamp: new Date().toISOString(),
+        },
+        description: args.message || '(no description)',
+        timestamp: new Date().toISOString(),
+      };
+      
+      await graph.addChange(newChange);
+      await workingCopy.setCurrentChange(newChangeId);
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: {
+          name: 'User',
+          email: 'user@example.com',
+          hostname: 'localhost',
+        },
+        description: `new change ${newChangeId.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [newChangeId],
+          workingCopy: newChangeId,
+        },
+      });
+      
+      return newChange;
+    },
+    
+    /**
+     * Get working copy status
+     */
+    async status() {
+      await graph.load();
+      await workingCopy.load();
+      
+      const currentChangeId = workingCopy.getCurrentChangeId();
+      const change = await graph.getChange(currentChangeId);
+      const modified = await workingCopy.getModifiedFiles();
+      
+      return {
+        workingCopy: change,
+        modified,
+        added: [],
+        removed: [],
+        conflicts: [],
+      };
+    },
+    
+    /**
+     * Undo last operation
+     */
+    async undo() {
+      const previousView = await oplog.undo();
+      
+      // Restore state from previous view
+      await workingCopy.setCurrentChange(previousView.workingCopy);
+      
+      // Record undo operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: {
+          name: 'User',
+          email: 'user@example.com',
+          hostname: 'localhost',
+        },
+        description: 'undo operation',
+        parents: [],
+        view: previousView,
+      });
+      
+      return previousView;
     },
   };
 
