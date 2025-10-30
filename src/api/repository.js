@@ -412,6 +412,59 @@ export async function createJJ(options) {
       
       return change;
     },
+    
+    /**
+     * Split a change into multiple changes (simplified v0.2 implementation)
+     * 
+     * @param {Object} args - Arguments
+     * @param {string} args.changeId - Change ID to split
+     * @param {string} args.description1 - Description for first part
+     * @param {string} args.description2 - Description for second part
+     */
+    async split(args) {
+      await graph.load();
+      
+      const originalChange = await graph.getChange(args.changeId);
+      
+      if (!originalChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
+      }
+      
+      // Create first split change (keep original ID)
+      originalChange.description = args.description1 || originalChange.description + ' (part 1)';
+      await graph.updateChange(originalChange);
+      
+      // Create second split change as new change on top
+      const newChangeId = generateChangeId();
+      const newChange = {
+        changeId: newChangeId,
+        commitId: '0000000000000000000000000000000000000000',
+        parents: [args.changeId],
+        tree: originalChange.tree,
+        author: originalChange.author,
+        committer: originalChange.committer,
+        description: args.description2 || originalChange.description + ' (part 2)',
+        timestamp: new Date().toISOString(),
+      };
+      
+      await graph.addChange(newChange);
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `split change ${args.changeId.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [newChangeId],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+      
+      return { original: originalChange, new: newChange };
+    },
   };
 
   return jj;

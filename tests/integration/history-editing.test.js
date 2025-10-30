@@ -102,4 +102,21 @@ describe('History Editing Operations (v0.2)', () => {
       expect(moved.parents).not.toContain(branch2.changeId);
     });
   });
+
+  describe('split', () => {
+    it('should split change into two parts', async () => {
+      await jj.describe({ message: 'Base' });
+      const combined = await jj.new({ message: 'Combined work' });
+
+      const result = await jj.split({
+        changeId: combined.changeId,
+        description1: 'First part',
+        description2: 'Second part',
+      });
+
+      expect(result.original.description).toBe('First part');
+      expect(result.new.description).toBe('Second part');
+      expect(result.new.parents).toContain(combined.changeId);
+    });
+  });
 });
