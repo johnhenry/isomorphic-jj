@@ -60,6 +60,7 @@ export class MockFS {
       isDirectory: () => file.type === 'dir',
       isFile: () => file.type === 'file',
       mtime: file.mtime || file.created,
+      size: file.content ? file.content.length : 0,
     };
   }
 
