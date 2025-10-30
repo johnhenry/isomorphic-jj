@@ -43,6 +43,25 @@ export class RevsetEngine {
       return await this.getAncestors(changeId);
     }
 
+    // v0.2: author(name) - changes by author
+    const authorMatch = trimmed.match(/^author\((.+?)\)$/);
+    if (authorMatch) {
+      const authorName = authorMatch[1].replace(/['"]/g, '');
+      return await this.filterByAuthor(authorName);
+    }
+
+    // v0.2: description(text) - changes with description containing text
+    const descMatch = trimmed.match(/^description\((.+?)\)$/);
+    if (descMatch) {
+      const text = descMatch[1].replace(/['"]/g, '');
+      return await this.filterByDescription(text);
+    }
+
+    // v0.2: empty() - changes with no content
+    if (trimmed === 'empty()') {
+      return await this.filterEmpty();
+    }
+
     // Direct changeId
     if (/^[0-9a-f]{32}$/.test(trimmed)) {
       await this.graph.load();
@@ -52,7 +71,7 @@ export class RevsetEngine {
 
     throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
       expression,
-      suggestion: 'Use @, all(), ancestors(changeId), or a direct change ID',
+      suggestion: 'Use @, all(), ancestors(changeId), author(name), description(text), empty(), or a direct change ID',
     });
   }
 
@@ -86,5 +105,50 @@ export class RevsetEngine {
     }
 
     return ancestors;
+  }
+
+  /**
+   * Filter changes by author name (v0.2)
+   * 
+   * @param {string} authorName - Author name to match
+   * @returns {Promise<Array<string>>} Array of matching change IDs
+   */
+  async filterByAuthor(authorName) {
+    await this.graph.load();
+    const all = this.graph.getAll();
+    
+    return all
+      .filter((c) => c.author && c.author.name.includes(authorName))
+      .map((c) => c.changeId);
+  }
+
+  /**
+   * Filter changes by description text (v0.2)
+   * 
+   * @param {string} text - Text to search for in description
+   * @returns {Promise<Array<string>>} Array of matching change IDs
+   */
+  async filterByDescription(text) {
+    await this.graph.load();
+    const all = this.graph.getAll();
+    
+    return all
+      .filter((c) => c.description && c.description.includes(text))
+      .map((c) => c.changeId);
+  }
+
+  /**
+   * Filter empty changes (v0.2)
+   * 
+   * @returns {Promise<Array<string>>} Array of empty change IDs
+   */
+  async filterEmpty() {
+    await this.graph.load();
+    const all = this.graph.getAll();
+    
+    // A change is empty if it has an empty tree (placeholder for now)
+    return all
+      .filter((c) => c.tree === '0000000000000000000000000000000000000000')
+      .map((c) => c.changeId);
   }
 }

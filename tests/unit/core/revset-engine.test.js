@@ -175,4 +175,73 @@ describe('RevsetEngine', () => {
       expect(result).toContain(tid(1));
     });
   });
+
+  describe('v0.2 enhanced revsets', () => {
+    beforeEach(async () => {
+      // Add test changes with different authors and descriptions
+      const change1 = {
+        changeId: tid(1),
+        commitId: '0000000000000000000000000000000000000001',
+        parents: [],
+        tree: '0000000000000000000000000000000000000000',
+        author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        description: 'Add feature X',
+        timestamp: '2025-10-30T12:00:00.000Z',
+      };
+
+      const change2 = {
+        changeId: tid(2),
+        commitId: '0000000000000000000000000000000000000002',
+        parents: [tid(1)],
+        tree: '1111111111111111111111111111111111111111',
+        author: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+        committer: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+        description: 'Fix bug in feature X',
+        timestamp: '2025-10-30T12:01:00.000Z',
+      };
+
+      const change3 = {
+        changeId: tid(3),
+        commitId: '0000000000000000000000000000000000000003',
+        parents: [tid(2)],
+        tree: '0000000000000000000000000000000000000000',
+        author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+        committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+        description: 'Add feature Y',
+        timestamp: '2025-10-30T12:02:00.000Z',
+      };
+
+      await graph.addChange(change1);
+      await graph.addChange(change2);
+      await graph.addChange(change3);
+    });
+
+    it('should filter by author', async () => {
+      const result = await revset.evaluate('author(Alice)');
+      
+      expect(result).toHaveLength(2);
+      expect(result).toContain(tid(1));
+      expect(result).toContain(tid(3));
+      expect(result).not.toContain(tid(2));
+    });
+
+    it('should filter by description', async () => {
+      const result = await revset.evaluate('description(feature)');
+      
+      expect(result).toHaveLength(3); // All 3 contain "feature"
+      expect(result).toContain(tid(1));
+      expect(result).toContain(tid(2));
+      expect(result).toContain(tid(3));
+    });
+
+    it('should filter empty changes', async () => {
+      const result = await revset.evaluate('empty()');
+      
+      expect(result).toHaveLength(2);
+      expect(result).toContain(tid(1));
+      expect(result).toContain(tid(3));
+      expect(result).not.toContain(tid(2));
+    });
+  });
 });
