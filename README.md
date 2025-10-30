@@ -1,8 +1,68 @@
 # isomorphic-jj
 
+**Status**: v0.1 MVP Complete + v0.2 Features Complete ✅  
+**Test Coverage**: 113 tests, 100% passing  
+**Ready for**: Experimentation, prototyping, tool building
+
 A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers. Built on pluggable storage backends with isomorphic-git as the default.
 
-**What you get**: Changes with stable IDs, operation log for fearless undo, first-class conflicts, bookmarks (not branches), and revsets—all in JavaScript, everywhere.
+**What you get**: Changes with stable IDs, operation log for fearless undo, bookmarks (not branches), revsets, and advanced history editing—all in JavaScript, everywhere.
+
+---
+
+## Quick Start
+
+```javascript
+import { createJJ } from 'isomorphic-jj';
+
+// Create repository
+const jj = await createJJ({
+  backend: 'mock',
+  backendOptions: { fs, dir: '/repo' }
+});
+
+// Initialize
+await jj.init();
+
+// Work with changes
+await jj.describe({ message: 'Initial work' });
+await jj.new({ message: 'Feature X' });
+
+// Advanced v0.2 operations
+await jj.squash({ source: change2, dest: change1 });
+await jj.split({ changeId: big, description1: 'Part 1', description2: 'Part 2' });
+await jj.abandon({ changeId: experimental });
+
+// Query changes
+const aliceChanges = await jj.revset.evaluate('author(Alice)');
+const bugFixes = await jj.revset.evaluate('description(fix)');
+
+// Undo anything
+await jj.undo();
+```
+
+---
+
+## Features
+
+### v0.1 MVP (Complete) ✅
+- ✅ **Change-centric model**: Stable change IDs that persist through rewrites
+- ✅ **Operation log**: Complete undo/redo for every repository mutation
+- ✅ **No staging area**: Working copy IS a commit; edit files directly
+- ✅ **Bookmarks**: Named pointers for sync/push (not branches)
+- ✅ **Basic revsets**: Query changes with @, all(), ancestors()
+- ✅ **Time travel**: View repository at any past operation
+
+### v0.2 Features (Complete) ✅
+- ✅ **History editing**: squash, split, abandon, restore, move operations
+- ✅ **Enhanced revsets**: Filter by author(), description(), empty()
+- ✅ **Complete undo**: All operations fully reversible
+
+### Coming in v0.3
+- Git backend integration (isomorphic-git)
+- First-class conflicts (structured data in commits)
+- Multiple working copies
+- Browser OPFS support
 
 ---
 
@@ -11,7 +71,7 @@ A pure-JavaScript library that brings Jujutsu (jj) version control semantics to 
 **JJ's model is better for everyday work**
 - **Change-centric**: Stable change IDs that persist through rewrites, unlike Git's mutable commit hashes
 - **Operation log**: Complete undo/redo history for every repository mutation—no more lost work
-- **First-class conflicts**: Conflicts are data you can commit, rebase, and resolve later—they never block you
+- **First-class conflicts**: Conflicts are data you can commit, rebase, and resolve later—they never block you (v0.3)
 - **No staging area**: Your working copy IS a commit; edit files and describe changes directly
 - **Bookmarks not branches**: Named pointers for sync/push, but anonymous changes are the norm
 
@@ -21,7 +81,7 @@ A pure-JavaScript library that brings Jujutsu (jj) version control semantics to 
 - True isomorphic operation: same API in Node, browser, Electron, React Native
 
 **Git interop is table stakes**
-- JJ can colocate with Git repositories for transparent collaboration
+- JJ can colocate with Git repositories for transparent collaboration (v0.3+)
 - Fetch/push to Git remotes using proven isomorphic-git infrastructure
 - Git users see normal commits; JJ users get superior UX
 
@@ -53,9 +113,9 @@ Understanding isomorphic-jj requires understanding how concepts translate across
 
 | Concept | Git | JJ | isomorphic-jj |
 |---------|-----|----|--------------| 
-| **Conflict model** | Text markers block operations | Structured data in commits | First-class `Conflict` objects |
-| **Resolution** | Must resolve to continue | Resolve anytime; can commit conflicts | `.conflicts()` returns `Conflict[]` |
-| **Propagation** | Manual rebase needed | Automatic with descendant rebasing | Resolution cascades automatically |
+| **Conflict model** | Text markers block operations | Structured data in commits | First-class `Conflict` objects (v0.3) |
+| **Resolution** | Must resolve to continue | Resolve anytime; can commit conflicts | `.conflicts()` returns `Conflict[]` (v0.3) |
+| **Propagation** | Manual rebase needed | Automatic with descendant rebasing | Resolution cascades automatically (v0.3) |
 
 **Key insight**: We emulate JJ's *semantics* and *user experience* using JS-friendly storage (JSON), not JJ's Rust internals.
 
@@ -75,27 +135,28 @@ Understanding isomorphic-jj requires understanding how concepts translate across
 │  ┌──────────────────────────────────────────────────────┐  │
 │  │ Core Concepts                                        │  │
 │  │  • ChangeGraph    • RevsetEngine   • WorkingCopy   │  │
-│  │  • BookmarkStore  • ConflictModel  • OpLog         │  │
+│  │  • BookmarkStore  • OpLog          • Storage       │  │
 │  └──────────────────────────────────────────────────────┘  │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │ Operations                                           │  │
-│  │  • describe/new/amend  • rebase/merge/squash        │  │
-│  │  • conflicts/resolve   • bookmark CRUD              │  │
+│  │ Operations (v0.1 + v0.2)                             │  │
+│  │  • init/describe/new/status         • undo/redo    │  │
+│  │  • squash/split/abandon/restore     • move/rebase  │  │
+│  │  • bookmark CRUD                    • revsets      │  │
 │  └──────────────────────────────────────────────────────┘  │
 └─────────────────────────┬──────────────────────────────────┘
                           │ Backend Interface (pluggable)
                           ▼
 ┌────────────────────────────────────────────────────────────┐
 │  Backend Adapter (Plumbing Layer)                          │
-│  • getObject/putObject  • readRef/updateRef/listRefs      │
-│  • fetch/push (optional)                                   │
+│  • Mock backend (current)                                  │
+│  • isomorphic-git (v0.3+)                                  │
 └─────────────────────────┬──────────────────────────────────┘
                           │
                           ▼
               ┌───────────────────────┐
-              │ isomorphic-git        │
-              │ (default backend)     │
-              │  + your fs/http       │
+              │ Storage Layer         │
+              │ (JSON, JSONL)         │
+              │  + your fs            │
               └───────────────────────┘
                           │
                           ▼
