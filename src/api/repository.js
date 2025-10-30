@@ -6,6 +6,7 @@ import { Storage } from '../core/storage-manager.js';
 import { ChangeGraph } from '../core/change-graph.js';
 import { WorkingCopy } from '../core/working-copy.js';
 import { OperationLog } from '../core/operation-log.js';
+import { BookmarkStore } from '../core/bookmark-store.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
 
@@ -45,6 +46,7 @@ export async function createJJ(options) {
   const graph = new ChangeGraph(storage);
   const workingCopy = new WorkingCopy(storage, fs, dir);
   const oplog = new OperationLog(storage);
+  const bookmarks = new BookmarkStore(storage);
 
   // Create JJ instance
   const jj = {
@@ -52,6 +54,7 @@ export async function createJJ(options) {
     graph,
     workingCopy,
     oplog,
+    bookmarks,
     
     /**
      * Initialize a new JJ repository
@@ -62,6 +65,7 @@ export async function createJJ(options) {
       // Initialize components
       await graph.init();
       await oplog.init();
+      await bookmarks.init();
       
       // Create root change
       const rootChangeId = generateChangeId();
@@ -87,13 +91,7 @@ export async function createJJ(options) {
       await graph.addChange(rootChange);
       await workingCopy.init(rootChangeId);
       
-      // Create initial bookmarks
-      await storage.write('bookmarks.json', {
-        version: 1,
-        local: {},
-        remote: {},
-        tracked: {},
-      });
+      // Create initial bookmarks (already done by bookmarks.init())
       
       // Record init operation
       await oplog.recordOperation({
