@@ -10,6 +10,7 @@ dist/
 # Testing
 coverage/
 .nyc_output/
+tests/tmp/
 
 # IDE
 .vscode/
@@ -24,6 +25,10 @@ Thumbs.db
 
 # JJ metadata (test repositories)
 .jj/
+
+# Git test repositories
+.git/
+!/.git/
 
 # Temporary files
 *.tmp

@@ -7,6 +7,7 @@ import { ChangeGraph } from '../core/change-graph.js';
 import { WorkingCopy } from '../core/working-copy.js';
 import { OperationLog } from '../core/operation-log.js';
 import { BookmarkStore } from '../core/bookmark-store.js';
+import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
 
@@ -47,6 +48,18 @@ export async function createJJ(options) {
   const workingCopy = new WorkingCopy(storage, fs, dir);
   const oplog = new OperationLog(storage);
   const bookmarks = new BookmarkStore(storage);
+  
+  // Create Git backend if specified
+  let backend = null;
+  if (options.backend === 'isomorphic-git' || options.backend === 'git') {
+    backend = new IsomorphicGitBackend({
+      fs,
+      dir,
+      http: options.backendOptions.http,
+    });
+  } else if (options.backend && typeof options.backend === 'object') {
+    backend = options.backend;
+  }
 
   // Create JJ instance
   const jj = {
@@ -55,6 +68,7 @@ export async function createJJ(options) {
     workingCopy,
     oplog,
     bookmarks,
+    backend,
     
     /**
      * Initialize a new JJ repository
@@ -464,6 +478,96 @@ export async function createJJ(options) {
       });
       
       return { original: originalChange, new: newChange };
+    },
+    
+    // ========================================
+    // v0.3 FEATURES: Git Remote Operations
+    // ========================================
+    
+    /**
+     * Fetch changes from remote Git repository
+     * 
+     * @param {Object} args - Fetch arguments
+     * @param {string} args.remote - Remote name or URL
+     * @param {string[]} [args.refs] - Refs to fetch (default: all)
+     * @param {Function} [args.onProgress] - Progress callback
+     * @param {Function} [args.onAuth] - Authentication callback
+     */
+    async fetch(args) {
+      if (!backend) {
+        throw new JJError(
+          'BACKEND_NOT_AVAILABLE',
+          'Git backend not configured',
+          { suggestion: 'Create repository with backend: "isomorphic-git"' }
+        );
+      }
+      
+      const result = await backend.fetch({
+        remote: args.remote,
+        refs: args.refs,
+        onProgress: args.onProgress,
+        onAuth: args.onAuth,
+      });
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `fetch from ${args.remote}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+      
+      return result;
+    },
+    
+    /**
+     * Push changes to remote Git repository
+     * 
+     * @param {Object} args - Push arguments
+     * @param {string} args.remote - Remote name or URL
+     * @param {string[]} [args.refs] - Refs to push (default: current bookmarks)
+     * @param {boolean} [args.force] - Allow non-fast-forward
+     * @param {Function} [args.onProgress] - Progress callback
+     * @param {Function} [args.onAuth] - Authentication callback
+     */
+    async push(args) {
+      if (!backend) {
+        throw new JJError(
+          'BACKEND_NOT_AVAILABLE',
+          'Git backend not configured',
+          { suggestion: 'Create repository with backend: "isomorphic-git"' }
+        );
+      }
+      
+      const result = await backend.push({
+        remote: args.remote,
+        refs: args.refs,
+        force: args.force,
+        onProgress: args.onProgress,
+        onAuth: args.onAuth,
+      });
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `push to ${args.remote}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+      
+      return result;
     },
   };
 
