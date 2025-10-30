@@ -7,6 +7,11 @@
 
 import git from 'isomorphic-git';
 import { JJError } from '../utils/errors.js';
+import { JJCheckout } from '../core/jj-checkout.js';
+import { JJTreeState } from '../core/jj-tree-state.js';
+import { JJOperationStore } from '../core/jj-operation-store.js';
+import { JJViewStore } from '../core/jj-view-store.js';
+import crypto from 'crypto';
 
 /**
  * Backend adapter for isomorphic-git
@@ -555,7 +560,9 @@ export class IsomorphicGitBackend {
 
     // Create directory structure
     await this.fs.promises.mkdir(`${jjRepo}/store`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjRepo}/op_store`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjRepo}/store/extra/heads`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjRepo}/op_store/operations`, { recursive: true });
+    await this.fs.promises.mkdir(`${jjRepo}/op_store/views`, { recursive: true });
     await this.fs.promises.mkdir(`${jjRepo}/op_heads/heads`, { recursive: true });
     await this.fs.promises.mkdir(`${jjRepo}/index`, { recursive: true });
     await this.fs.promises.mkdir(`${jjRepo}/submodule_store`, { recursive: true });
@@ -575,6 +582,70 @@ export class IsomorphicGitBackend {
 
     // Add .jj to root .gitignore if it doesn't exist
     await this._ensureGitignore();
+
+    // Create initial protobuf files for jj CLI compatibility
+    await this._createInitialJJState();
+  }
+
+  /**
+   * Create initial JJ state (protobuf files)
+   * @private
+   */
+  async _createInitialJJState() {
+    // Generate unique IDs for initial state
+    const operationId = crypto.randomBytes(64).toString('hex'); // 512-bit = 128 hex chars
+    const viewId = crypto.randomBytes(64).toString('hex');
+    const emptyTreeId = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'; // Git's empty tree hash
+
+    // Get the initial commit from Git
+    let initialCommitId = '0000000000000000000000000000000000000000';
+    try {
+      const headOid = await git.resolveRef({
+        fs: this.fs,
+        dir: this.dir,
+        ref: 'HEAD',
+      });
+      if (headOid) {
+        initialCommitId = crypto.randomBytes(64).toString('hex');
+      }
+    } catch (error) {
+      // No initial commit yet
+    }
+
+    // Create checkout file
+    const checkout = new JJCheckout(this.fs, this.dir);
+    await checkout.writeCheckout(operationId, 'default');
+
+    // Create tree_state file
+    const treeState = new JJTreeState(this.fs, this.dir);
+    await treeState.writeTreeState(emptyTreeId, []);
+
+    // Create initial operation
+    const opStore = new JJOperationStore(this.fs, this.dir);
+    const metadata = {
+      start_time: {
+        millis_since_epoch: Date.now(),
+        tz_offset: new Date().getTimezoneOffset()
+      },
+      end_time: {
+        millis_since_epoch: Date.now(),
+        tz_offset: new Date().getTimezoneOffset()
+      },
+      description: 'initialize repo',
+      hostname: 'localhost',
+      username: 'user',
+      is_snapshot: false,
+      tags: {}
+    };
+    await opStore.writeOperation(operationId, viewId, [], metadata);
+
+    // Create initial view
+    const viewStore = new JJViewStore(this.fs, this.dir);
+    await viewStore.writeView(viewId, [initialCommitId], { default: initialCommitId });
+
+    // Write operation head - the filename IS the operation ID
+    const opHeadPath = `${this.dir}/.jj/repo/op_heads/heads/${operationId}`;
+    await this.fs.promises.writeFile(opHeadPath, '');
   }
 
   /**
