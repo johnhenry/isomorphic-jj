@@ -1,8 +1,8 @@
 # isomorphic-jj
 
-**Status**: v0.1 MVP Complete + v0.2 Features Complete ✅  
-**Test Coverage**: 113 tests, 100% passing  
-**Ready for**: Experimentation, prototyping, tool building
+**Status**: v0.3 In Progress (Git backend ✅, v0.1 & v0.2 Complete ✅)
+**Test Coverage**: 215 tests, 100% passing
+**Ready for**: Experimentation, prototyping, tool building with Git interop
 
 A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers. Built on pluggable storage backends with isomorphic-git as the default.
 
@@ -14,15 +14,18 @@ A pure-JavaScript library that brings Jujutsu (jj) version control semantics to 
 
 ```javascript
 import { createJJ } from 'isomorphic-jj';
+import * as git from 'isomorphic-git';
+import fs from 'fs';
+import http from 'isomorphic-git/http/node';
 
-// Create repository
+// Create repository with Git backend
 const jj = await createJJ({
-  backend: 'mock',
-  backendOptions: { fs, dir: '/repo' }
+  backend: 'isomorphic-git',
+  backendOptions: { git, fs, http, dir: './repo' }
 });
 
-// Initialize
-await jj.init();
+// Initialize (creates both .git and .jj)
+await jj.init({ userName: 'Your Name', userEmail: 'you@example.com' });
 
 // Work with changes
 await jj.describe({ message: 'Initial work' });
@@ -58,11 +61,13 @@ await jj.undo();
 - ✅ **Enhanced revsets**: Filter by author(), description(), empty()
 - ✅ **Complete undo**: All operations fully reversible
 
-### Coming in v0.3
-- Git backend integration (isomorphic-git)
-- First-class conflicts (structured data in commits)
-- Multiple working copies
-- Browser OPFS support
+### v0.3 Features (In Progress) 🚧
+- ✅ **Git backend integration**: Real Git commits from JJ changes (isomorphic-git)
+- ✅ **Colocated repositories**: Both .git and .jj directories work together
+- ✅ **Automatic commit creation**: describe() creates Git commits automatically
+- ⚠️ First-class conflicts (planned)
+- ⚠️ Multiple working copies (planned)
+- ⚠️ Browser OPFS support (planned)
 
 ---
 

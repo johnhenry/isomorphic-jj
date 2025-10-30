@@ -10,15 +10,15 @@ const jj = await createJJ({
 });
 
 // Initialize creates both .git and .jj
-await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
+const init  = await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
 
 // Make changes - no staging needed!
-await jj.write({ path: 'README.md', data: '# Hello JJ\n' });
-await jj.describe({ message: 'Initial commit' });
+const write = await jj.write({ path: 'README.md', data: '# Hello JJ\n' });
+const describe = await jj.describe({ message: 'Initial commit' });
 
-await jj.new({ message: 'Second change' });
-await jj.write({ path: 'file2.txt', data: 'Another file\n' });
-await jj.describe({ message: 'Add second file' });
+const nnew = await jj.new({ message: 'Second change' });
+const wwrite = await jj.write({ path: 'file2.txt', data: 'Another file\n' });
+const ddescribe  = await jj.describe({ message: 'Add second file' });
 
 // View history
 const log = await jj.log({ limit: 10 });
@@ -26,3 +26,13 @@ log.forEach((c, i) => {
   console.log(`${i + 1}. ${c.description} (${c.changeId.slice(0, 8)})`);
   console.log(`   Git: ${c.commitId.slice(0, 8)} | ${c.author.name}`);
 });
+
+console.log({
+  init,
+  write,
+  describe,
+  nnew,
+  wwrite,
+  ddescribe,
+  log
+})

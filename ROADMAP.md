@@ -68,17 +68,19 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 
 ---
 
-## v0.3 - Collaboration & Advanced Features (Target: Q3 2026)
+## v0.3 - Collaboration & Advanced Features (Target: Q3 2026) - 🚧 IN PROGRESS
 
 **Goal**: Multi-user workflows and advanced Git interop
 
-### Planned Features
+### Features
 
-#### Git Backend Integration
-- Real Git object storage (not mock)
-- isomorphic-git adapter completion
-- Git fetch/push operations
-- Git interoperability (colocated repositories)
+#### Git Backend Integration ✅ COMPLETE
+- ✅ Real Git object storage (not mock)
+- ✅ isomorphic-git adapter completion
+- ✅ Git interoperability (colocated repositories)
+- ✅ Automatic Git commit creation on describe()
+- ✅ Stable JJ changeIds with mutable Git commitIds
+- ⚠️ Git fetch/push operations (pending)
 
 #### First-Class Conflicts
 - ConflictModel component
@@ -238,9 +240,10 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 ```
 2025 Q4: ████████ v0.1 MVP ✅ COMPLETE
 2025 Q4: ████████ v0.2 Features ✅ COMPLETE
-2026 Q3: ████████ v0.3 Development (Planned)
-2026 Q4: ████████ v0.4 Development (Planned)
-2027 Q1: ████████ v1.0 Release (Planned)
+2025 Q4: ████░░░░ v0.3 Development 🚧 IN PROGRESS (Git backend ✅)
+2026 Q3: ░░░░░░░░ v0.3 Completion (Planned)
+2026 Q4: ░░░░░░░░ v0.4 Development (Planned)
+2027 Q1: ░░░░░░░░ v1.0 Release (Planned)
 ```
 
 ---
@@ -257,11 +260,13 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 - Enhanced revset queries
 - All operations fully tested
 
-**🚧 Next: v0.3**
-- Git backend integration
-- First-class conflicts
-- Multiple working copies
-- Browser enhancements
+**🚧 v0.3: IN PROGRESS**
+- ✅ Git backend integration (complete)
+- ⚠️ First-class conflicts (pending)
+- ⚠️ Multiple working copies (pending)
+- ⚠️ Background operations (pending)
+- ⚠️ Browser enhancements (pending)
+- ⚠️ Collaboration features (pending)
 
 ---
 
