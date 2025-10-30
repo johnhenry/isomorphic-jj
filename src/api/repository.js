@@ -77,20 +77,27 @@ export async function createJJ(options) {
      * Initialize a new JJ repository
      */
     async init(opts = {}) {
+      // Initialize Git backend if available
+      if (backend && backend.init) {
+        await backend.init({
+          defaultBranch: opts.defaultBranch || 'main',
+        });
+      }
+
       await storage.init();
-      
+
       // Initialize components
       await graph.init();
       await oplog.init();
       await bookmarks.init();
-      
+
       // Create root change
       const rootChangeId = generateChangeId();
       const rootChange = {
         changeId: rootChangeId,
-        commitId: '0000000000000000000000000000000000000000', // Placeholder
+        commitId: '0000000000000000000000000000000000000000', // Will be updated when Git commit is created
         parents: [],
-        tree: '0000000000000000000000000000000000000000', // Empty tree
+        tree: '0000000000000000000000000000000000000000', // Will be updated
         author: {
           name: opts.userName || 'User',
           email: opts.userEmail || 'user@example.com',
@@ -104,12 +111,12 @@ export async function createJJ(options) {
         description: '(root)',
         timestamp: new Date().toISOString(),
       };
-      
+
       await graph.addChange(rootChange);
       await workingCopy.init(rootChangeId);
-      
+
       // Create initial bookmarks (already done by bookmarks.init())
-      
+
       // Record init operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
@@ -127,7 +134,7 @@ export async function createJJ(options) {
           workingCopy: rootChangeId,
         },
       });
-      
+
       return;
     },
 
@@ -487,23 +494,66 @@ export async function createJJ(options) {
     async describe(args = {}) {
       await graph.load();
       await workingCopy.load();
-      
+
       const currentChangeId = workingCopy.getCurrentChangeId();
       const change = await graph.getChange(currentChangeId);
-      
+
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Working copy change ${currentChangeId} not found`, {
           changeId: currentChangeId,
         });
       }
-      
+
       // Update description
       if (args.message !== undefined) {
         change.description = args.message;
         change.timestamp = new Date().toISOString();
-        await graph.updateChange(change);
       }
-      
+
+      // Create Git commit if backend is available
+      if (backend && backend.createCommit) {
+        try {
+          // Stage all files first
+          if (backend.stageAll) {
+            await backend.stageAll();
+          }
+
+          // Get parent commit IDs
+          const parentCommitIds = [];
+          for (const parentChangeId of change.parents) {
+            const parentChange = await graph.getChange(parentChangeId);
+            if (parentChange && parentChange.commitId && parentChange.commitId !== '0000000000000000000000000000000000000000') {
+              parentCommitIds.push(parentChange.commitId);
+            }
+          }
+
+          // Create the Git commit
+          const commitSha = await backend.createCommit({
+            message: change.description,
+            author: {
+              name: change.author.name,
+              email: change.author.email,
+              timestamp: new Date(change.author.timestamp).getTime(),
+            },
+            committer: {
+              name: change.committer?.name || change.author.name,
+              email: change.committer?.email || change.author.email,
+              timestamp: new Date(change.timestamp).getTime(),
+            },
+            parents: parentCommitIds,
+          });
+
+          // Update the change with the Git commit ID
+          change.commitId = commitSha;
+        } catch (error) {
+          console.warn('Failed to create Git commit:', error.message);
+          // Continue even if Git commit fails - JJ metadata is primary
+        }
+      }
+
+      // Save the updated change
+      await graph.updateChange(change);
+
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
@@ -521,7 +571,7 @@ export async function createJJ(options) {
           workingCopy: currentChangeId,
         },
       });
-      
+
       return change;
     },
     

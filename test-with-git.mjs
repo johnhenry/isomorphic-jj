@@ -1,5 +1,6 @@
 // Example: Using isomorphic-jj with real git backend
-// Note: Currently only creates .jj/ directory. Full Git colocated support coming in v0.3
+// Demonstrates full Git colocated support - creates both .git/ and .jj/ directories
+// JJ changes automatically create Git commits!
 
 import * as git from 'isomorphic-git';
 import fs from 'fs';
@@ -7,16 +8,6 @@ import http from 'isomorphic-git/http/node';
 import { createJJ } from 'isomorphic-jj';
 
 const repoPath = './test-repo';
-
-// Optional: Initialize git repository first for colocated setup
-// (This will be integrated into jj.init() in v0.3)
-try {
-  await git.init({ fs, dir: repoPath, defaultBranch: 'main' });
-  console.log('Git repository initialized');
-} catch (error) {
-  // May already exist
-  console.log('Git repository already exists or initialization failed:', error.message);
-}
 
 // Create repository with git backend
 const jj = await createJJ({
@@ -29,7 +20,7 @@ const jj = await createJJ({
   }
 });
 
-console.log('\nInitializing JJ metadata...');
+console.log('Initializing repository with colocated .git and .jj directories...');
 await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
 
 console.log('Writing a file...');

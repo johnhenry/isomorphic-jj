@@ -44,6 +44,29 @@ export class IsomorphicGitBackend {
   }
 
   /**
+   * Initialize Git repository
+   *
+   * @param {Object} opts - Init options
+   * @param {string} [opts.defaultBranch='main'] - Default branch name
+   * @returns {Promise<void>}
+   */
+  async init(opts = {}) {
+    try {
+      await git.init({
+        fs: this.fs,
+        dir: this.dir,
+        defaultBranch: opts.defaultBranch || 'main',
+      });
+    } catch (error) {
+      throw new JJError(
+        'INIT_FAILED',
+        `Failed to initialize Git repository: ${error.message}`,
+        { dir: this.dir, originalError: error }
+      );
+    }
+  }
+
+  /**
    * Read Git object from storage
    * 
    * @param {string} oid - Git object SHA-1 hash (40-char hex)
@@ -215,8 +238,162 @@ export class IsomorphicGitBackend {
   }
 
   /**
+   * Create a Git commit from working directory state
+   *
+   * @param {Object} opts - Commit options
+   * @param {string} opts.message - Commit message
+   * @param {Object} opts.author - Author info
+   * @param {string} opts.author.name - Author name
+   * @param {string} opts.author.email - Author email
+   * @param {number} [opts.author.timestamp] - Author timestamp (milliseconds since epoch)
+   * @param {Object} [opts.committer] - Committer info (defaults to author)
+   * @param {string[]} [opts.parents=[]] - Parent commit SHAs
+   * @returns {Promise<string>} Commit SHA
+   */
+  async createCommit(opts) {
+    try {
+      const author = {
+        name: opts.author.name,
+        email: opts.author.email,
+        timestamp: opts.author.timestamp ? Math.floor(opts.author.timestamp / 1000) : Math.floor(Date.now() / 1000),
+        timezoneOffset: 0,
+      };
+
+      const committer = opts.committer ? {
+        name: opts.committer.name,
+        email: opts.committer.email,
+        timestamp: opts.committer.timestamp ? Math.floor(opts.committer.timestamp / 1000) : author.timestamp,
+        timezoneOffset: 0,
+      } : author;
+
+      const commitSha = await git.commit({
+        fs: this.fs,
+        dir: this.dir,
+        message: opts.message,
+        author,
+        committer,
+        parent: opts.parents || [],
+      });
+
+      return commitSha;
+    } catch (error) {
+      throw new JJError(
+        'COMMIT_FAILED',
+        `Failed to create Git commit: ${error.message}`,
+        { message: opts.message, originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Get the current tree SHA for the working directory
+   *
+   * @returns {Promise<string>} Tree SHA
+   */
+  async getCurrentTree() {
+    try {
+      // Get the current staging area tree
+      // This will create tree objects from the current working directory
+      const tree = await git.writeTree({
+        fs: this.fs,
+        dir: this.dir,
+      });
+      return tree;
+    } catch (error) {
+      throw new JJError(
+        'TREE_READ_FAILED',
+        `Failed to get current tree: ${error.message}`,
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Stage all files in the working directory
+   *
+   * @returns {Promise<void>}
+   */
+  async stageAll() {
+    try {
+      // Get all files in the directory
+      const files = await this._getAllFiles(this.dir);
+
+      // Add each file to the index
+      for (const filepath of files) {
+        try {
+          await git.add({
+            fs: this.fs,
+            dir: this.dir,
+            filepath,
+          });
+        } catch (error) {
+          // Skip files that can't be staged (like .git directory)
+          if (error.code !== 'ENOENT') {
+            console.warn(`Warning: Could not stage ${filepath}:`, error.message);
+          }
+        }
+      }
+    } catch (error) {
+      throw new JJError(
+        'STAGE_FAILED',
+        `Failed to stage files: ${error.message}`,
+        { originalError: error }
+      );
+    }
+  }
+
+  /**
+   * Get all files in a directory recursively (helper method)
+   *
+   * @private
+   * @param {string} dir - Directory path
+   * @param {string} [baseDir=''] - Base directory for relative paths
+   * @returns {Promise<string[]>} Array of relative file paths
+   */
+  async _getAllFiles(dir, baseDir = '') {
+    const files = [];
+    const entries = await this.fs.promises.readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const name = entry.name || entry;
+      const fullPath = `${dir}/${name}`;
+      const relativePath = baseDir ? `${baseDir}/${name}` : name;
+
+      // Skip .git and .jj directories
+      if (name === '.git' || name === '.jj') {
+        continue;
+      }
+
+      try {
+        const stats = await this.fs.promises.stat(fullPath);
+        if (stats.isDirectory && stats.isDirectory()) {
+          // Recurse into subdirectories
+          const subFiles = await this._getAllFiles(fullPath, relativePath);
+          files.push(...subFiles);
+        } else if (stats.isFile && stats.isFile()) {
+          files.push(relativePath);
+        } else {
+          // For simple objects without methods
+          const isDir = (await this.fs.promises.readdir(fullPath).catch(() => null)) !== null;
+          if (isDir) {
+            const subFiles = await this._getAllFiles(fullPath, relativePath);
+            files.push(...subFiles);
+          } else {
+            files.push(relativePath);
+          }
+        }
+      } catch (error) {
+        // Skip files we can't read
+        continue;
+      }
+    }
+
+    return files;
+  }
+
+  /**
    * Fetch objects and refs from remote repository
-   * 
+   *
    * @param {Object} opts - Fetch options
    * @param {string} opts.remote - Remote name or URL
    * @param {string[]} [opts.refs] - Ref specs to fetch
