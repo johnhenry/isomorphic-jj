@@ -8,6 +8,7 @@ import { WorkingCopy } from '../core/working-copy.js';
 import { OperationLog } from '../core/operation-log.js';
 import { BookmarkStore } from '../core/bookmark-store.js';
 import { RevsetEngine } from '../core/revset-engine.js';
+import { ConflictModel } from '../core/conflict-model.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
@@ -50,6 +51,7 @@ export async function createJJ(options) {
   const oplog = new OperationLog(storage);
   const bookmarks = new BookmarkStore(storage);
   const revset = new RevsetEngine(graph, workingCopy);
+  const conflicts = new ConflictModel(storage, fs);
   
   // Create Git backend if specified
   let backend = null;
@@ -71,6 +73,7 @@ export async function createJJ(options) {
     oplog,
     bookmarks,
     revset,
+    conflicts,
     backend,
     
     /**
@@ -90,6 +93,7 @@ export async function createJJ(options) {
       await graph.init();
       await oplog.init();
       await bookmarks.init();
+      await conflicts.init();
 
       // Create root change
       const rootChangeId = generateChangeId();

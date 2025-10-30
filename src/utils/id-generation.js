@@ -19,9 +19,9 @@ export function generateChangeId() {
 
 /**
  * Generate an operation ID from operation content
- * 
+ *
  * Uses SHA-256 hash of operation content for integrity verification.
- * 
+ *
  * @param {Object} operation - Operation data
  * @returns {Promise<string>} 64-character lowercase hex string (SHA-256)
  */
@@ -39,4 +39,16 @@ export async function generateOperationId(operation) {
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Generate a generic ID with optional prefix
+ *
+ * @param {string} prefix - Optional prefix (e.g., 'conflict', 'bookmark')
+ * @returns {string} ID string
+ */
+export function generateId(prefix = '') {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  const id = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return prefix ? `${prefix}-${id}` : id;
 }
