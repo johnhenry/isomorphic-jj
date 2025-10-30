@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Testing
+coverage/
+.nyc_output/
+tests/tmp/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# JJ metadata (test repositories)
+.jj/
+
+# Git test repositories
+.git/
+!/.git/
+
+# Temporary files
+*.tmp
+*.log
+.tmp/
+
+# Environment
+.env
+.env.local
