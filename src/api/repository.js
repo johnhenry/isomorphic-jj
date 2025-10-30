@@ -255,6 +255,163 @@ export async function createJJ(options) {
       
       return previousView;
     },
+    
+    // ========================================
+    // v0.2 FEATURES: History Editing
+    // ========================================
+    
+    /**
+     * Squash source change into destination change
+     * 
+     * @param {Object} args - Arguments
+     * @param {string} args.source - Source change ID to squash
+     * @param {string} args.dest - Destination change ID
+     */
+    async squash(args) {
+      await graph.load();
+      
+      const sourceChange = await graph.getChange(args.source);
+      const destChange = await graph.getChange(args.dest);
+      
+      if (!sourceChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `Source change ${args.source} not found`);
+      }
+      
+      if (!destChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `Destination change ${args.dest} not found`);
+      }
+      
+      // Mark source as abandoned
+      sourceChange.abandoned = true;
+      await graph.updateChange(sourceChange);
+      
+      // Update description of dest to indicate squash
+      destChange.description += `\n\n(squashed from ${args.source.slice(0, 8)})`;
+      await graph.updateChange(destChange);
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `squash ${args.source.slice(0, 8)} into ${args.dest.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [args.dest],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+      
+      return destChange;
+    },
+    
+    /**
+     * Abandon a change
+     * 
+     * @param {Object} args - Arguments
+     * @param {string} args.changeId - Change ID to abandon
+     */
+    async abandon(args) {
+      await graph.load();
+      
+      const change = await graph.getChange(args.changeId);
+      
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
+      }
+      
+      change.abandoned = true;
+      await graph.updateChange(change);
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `abandon change ${args.changeId.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+      
+      return change;
+    },
+    
+    /**
+     * Restore an abandoned change
+     * 
+     * @param {Object} args - Arguments
+     * @param {string} args.changeId - Change ID to restore
+     */
+    async restore(args) {
+      await graph.load();
+      
+      const change = await graph.getChange(args.changeId);
+      
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
+      }
+      
+      change.abandoned = false;
+      await graph.updateChange(change);
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `restore change ${args.changeId.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+      
+      return change;
+    },
+    
+    /**
+     * Move (rebase) a change to a new parent
+     * 
+     * @param {Object} args - Arguments
+     * @param {string} args.changeId - Change ID to move
+     * @param {string} args.newParent - New parent change ID
+     */
+    async move(args) {
+      await graph.load();
+      
+      const change = await graph.getChange(args.changeId);
+      
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
+      }
+      
+      // Update parent
+      change.parents = [args.newParent];
+      await graph.updateChange(change);
+      
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `move change ${args.changeId.slice(0, 8)} to ${args.newParent.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+      
+      return change;
+    },
   };
 
   return jj;
