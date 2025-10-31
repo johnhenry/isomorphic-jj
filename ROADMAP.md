@@ -373,6 +373,279 @@ Popular requested features (to be scheduled):
 
 ---
 
+---
+
+## Shallow Clone Support - Feasibility Analysis (Nov 2025)
+
+### Executive Summary
+
+**Overall Feasibility**: 🟡 **PARTIALLY FEASIBLE** with current stack
+
+Two of four planned features are readily implementable, one requires significant custom work, and one is blocked by upstream limitations. The features that work (shallow fetch and lazy loading) would provide substantial value for large repositories.
+
+### Feature-by-Feature Analysis
+
+#### 1. Shallow Fetch/Import (Depth Limit) ✅ READY
+
+**Feasibility**: 🟢 **HIGH** - Native support in isomorphic-git
+
+**Implementation Effort**: Low (1-2 days)
+
+**Details**:
+- isomorphic-git `clone()` and `fetch()` support `depth` parameter natively
+- Additional `relative` option for incremental depth adjustments
+- `singleBranch: true` can reduce data transfer further
+- `noTags: true` option available to skip tag fetching
+
+**API Design**:
+```javascript
+await jj.git.clone({
+  url: 'https://github.com/user/repo',
+  depth: 1,              // Only fetch latest commit
+  singleBranch: true,    // Only fetch current branch
+  noTags: true           // Skip tags
+});
+
+await jj.git.fetch({
+  remote: 'origin',
+  depth: 10,             // Fetch 10 commits deep
+  relative: true         // Measure from current shallow depth
+});
+```
+
+**Benefits**:
+- Dramatically faster clones for large repos (5-50x speedup)
+- Reduced disk usage (90%+ savings for deep histories)
+- Improved browser experience (less IndexedDB storage)
+
+**Limitations**:
+- Operations requiring full history may fail or error
+- Push from shallow clones has known edge cases
+- Log operations stop at shallow boundary
+
+**Recommendation**: ✅ **IMPLEMENT** - High value, low effort
+
+---
+
+#### 2. Sparse Checkout Patterns ⚠️ LIMITED
+
+**Feasibility**: 🟡 **MEDIUM** - Requires custom implementation
+
+**Implementation Effort**: Medium-High (1-2 weeks)
+
+**Details**:
+- isomorphic-git has NO native sparse checkout support
+- Git's sparse-checkout is a client-side index feature (git 2.25+)
+- Would require custom implementation at checkout layer
+- Could leverage `noCheckout` option and selective file restoration
+
+**Possible Approach**:
+```javascript
+// Pseudo-implementation
+await jj.git.clone({
+  url: 'https://github.com/user/repo',
+  noCheckout: true,       // Skip automatic checkout
+  depth: 1
+});
+
+// Custom sparse checkout implementation
+await jj.checkout({
+  patterns: [
+    'src/**/*.js',        // Only JS files in src/
+    'package.json',       // Root package.json
+    'README.md'           // Docs
+  ]
+});
+```
+
+**Implementation Strategy**:
+1. Clone with `noCheckout: true`
+2. Read tree from HEAD commit
+3. Filter tree entries by glob patterns
+4. Restore only matching files to working copy
+5. Store patterns in `.jj/sparse-checkout` config
+6. Apply patterns on all subsequent operations
+
+**Challenges**:
+- Need to integrate with JJ's working copy model
+- Must handle pattern matching for all file operations
+- Conflicts with JJ's "working copy is the change" philosophy
+- Complex interaction with `file()` revset queries
+- Browser filesystem limitations (no symlinks)
+
+**Benefits**:
+- Massive speedup for monorepos (only checkout relevant paths)
+- Reduced disk usage for working copy
+- Faster status/diff operations
+
+**Recommendation**: ⚠️ **DEFER to v0.4.1** - Medium effort, complex interactions with core model
+
+---
+
+#### 3. Lazy Object Loading ✅ FEASIBLE
+
+**Feasibility**: 🟢 **MEDIUM-HIGH** - isomorphic-git ODB API available
+
+**Implementation Effort**: Medium (3-5 days)
+
+**Details**:
+- isomorphic-git provides low-level object database (ODB) APIs
+- Can implement on-demand blob fetching
+- Store references to missing objects, fetch when accessed
+- Particularly valuable for browser environments (limited storage)
+
+**Implementation Strategy**:
+```javascript
+// In IsomorphicGitBackend
+class LazyGitBackend extends IsomorphicGitBackend {
+  constructor({ fs, http, dir, lazyLoad = false }) {
+    super({ fs, http, dir });
+    this.lazyLoad = lazyLoad;
+    this.missingObjects = new Set();
+  }
+
+  async readBlob(oid) {
+    try {
+      // Try local read first
+      return await git.readBlob({ fs: this.fs, dir: this.dir, oid });
+    } catch (err) {
+      if (err.code === 'NotFoundError' && this.lazyLoad) {
+        // Fetch missing object on demand
+        await this._fetchObject(oid);
+        return await git.readBlob({ fs: this.fs, dir: this.dir, oid });
+      }
+      throw err;
+    }
+  }
+
+  async _fetchObject(oid) {
+    // Use git protocol to fetch single object
+    // This may require custom pack negotiation
+  }
+}
+```
+
+**Challenges**:
+- isomorphic-git doesn't support git's partial clone protocol (`--filter=blob:none`)
+- Would need to fetch entire packfiles, not individual objects
+- Complex for trees (recursive fetching)
+- Network round-trips could be slow
+
+**Benefits**:
+- Clone without full blob download
+- Fetch blobs only when accessed (lazy)
+- Particularly valuable for large binary assets
+- Reduces initial clone time and storage
+
+**Limitations**:
+- Only works with depth-limited clones (shallow base)
+- Requires network connectivity for first access
+- No native protocol support means inefficient fetches
+
+**Recommendation**: ✅ **IMPLEMENT** as v0.4 milestone - Good browser use case
+
+---
+
+#### 4. Partial Clone (--filter) ❌ NOT SUPPORTED
+
+**Feasibility**: 🔴 **LOW** - Blocked by isomorphic-git limitations
+
+**Implementation Effort**: Very High (4-6 weeks) - Requires upstream contribution
+
+**Details**:
+- Git's `--filter=blob:none`, `--filter=tree:0`, etc. are protocol-level features
+- isomorphic-git does NOT implement partial clone protocol extensions
+- Would require implementing Git's pack negotiation extensions
+- Essentially requires upstreaming to isomorphic-git project
+
+**What Partial Clone Provides** (in native Git):
+```bash
+# Clone without any blobs (metadata only)
+git clone --filter=blob:none https://github.com/user/repo
+
+# Clone without trees (commit graph only)
+git clone --filter=tree:0 https://github.com/user/repo
+
+# Clone with size limit
+git clone --filter=blob:limit=1m https://github.com/user/repo
+```
+
+**Why It's Hard**:
+- Requires modifying isomorphic-git's pack protocol implementation
+- Git's partial clone uses extensions to smart HTTP protocol
+- Need to track promisor objects (promised but not fetched)
+- Complex interaction with pack negotiation
+
+**Workaround**:
+- Use shallow clones (depth limit) as alternative
+- Combine with lazy object loading (see feature 3)
+- For extreme cases, use native git with jj CLI interop
+
+**Recommendation**: ❌ **DO NOT IMPLEMENT** - Too complex, upstream blocked
+
+---
+
+### Implementation Priority
+
+**Phase 1 (v0.4)**: Quick Wins
+1. ✅ **Shallow fetch/import** - 1-2 days, high value
+2. ✅ **Lazy object loading** - 3-5 days, good for browsers
+
+**Phase 2 (v0.4.1)**: Advanced
+3. ⚠️ **Sparse checkout patterns** - 1-2 weeks, complex but valuable for monorepos
+
+**Phase 3 (Future)**: Blocked
+4. ❌ **Partial clone** - Upstream contribution required, defer indefinitely
+
+---
+
+### Architecture Considerations
+
+**Middleware Pattern Benefits**:
+The existing middleware pattern in repository.js makes shallow clone support clean:
+
+```javascript
+// In repository.js
+const graph = createGraphWithMiddleware(baseGraph, {
+  onAddChange: async (change) => {
+    await syncChangeToGit(change);
+  },
+  onUpdateChange: async (change) => {
+    await syncChangeToGit(change);
+  },
+
+  // NEW: Handle missing objects gracefully
+  onMissingObject: async (oid) => {
+    if (backend.lazyLoad) {
+      await backend.fetchObject(oid);
+    }
+  }
+});
+```
+
+**JJ Philosophy Alignment**:
+- Shallow clones align with JJ's focus on "changes" not "history"
+- Most JJ operations work on current change and immediate ancestors
+- Deep history is rarely needed for day-to-day work
+- Lazy loading fits JJ's "snapshot everything" model
+
+---
+
+### Recommended Roadmap Update
+
+**v0.4.0** (Q3 2026):
+- ✅ Shallow fetch/import (depth limit)
+- ✅ Lazy object loading
+- Documentation and examples for large repos
+
+**v0.4.1** (Q4 2026):
+- ⚠️ Sparse checkout patterns (if user demand justifies complexity)
+
+**Future** (v0.5+):
+- ❌ Partial clone (only if isomorphic-git adds support upstream)
+
+---
+
 **Status**: Living document
 **Review Frequency**: Monthly
 **Owner**: isomorphic-jj maintainers

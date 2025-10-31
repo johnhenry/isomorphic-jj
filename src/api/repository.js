@@ -26,6 +26,11 @@ import path from 'path';
  * @param {Object} [options.git] - isomorphic-git instance (enables Git backend)
  * @param {Object} [options.http] - HTTP client for network operations
  * @param {string|Object} [options.backend] - Backend name ('isomorphic-git', 'memory') or backend instance
+ * @param {Object} [options.hooks] - Event hooks for operations (v0.4)
+ * @param {Function} [options.hooks.preCommit] - Called before describe/commit operations
+ * @param {Function} [options.hooks.postCommit] - Called after describe/commit operations
+ * @param {Function} [options.hooks.preChange] - Called before any change operation
+ * @param {Function} [options.hooks.postChange] - Called after any change operation
  *
  * @deprecated options.backendOptions - Use flat options instead (fs, dir, git, http)
  *
@@ -39,7 +44,7 @@ export async function createJJ(options) {
   }
 
   // Handle legacy backendOptions format (deprecated)
-  let fs, dir, git, http, backend;
+  let fs, dir, git, http, backend, hooks;
 
   if (options.backendOptions) {
     console.warn('[isomorphic-jj] DEPRECATED: backendOptions is deprecated. Use flat options: { fs, dir, git, http }');
@@ -48,6 +53,7 @@ export async function createJJ(options) {
     git = options.backendOptions.git;
     http = options.backendOptions.http;
     backend = options.backend;
+    hooks = options.hooks || {};
   } else {
     // New flat format
     fs = options.fs;
@@ -55,6 +61,7 @@ export async function createJJ(options) {
     git = options.git;
     http = options.http;
     backend = options.backend;
+    hooks = options.hooks || {};
   }
 
   if (!fs) {
@@ -126,6 +133,24 @@ export async function createJJ(options) {
     }
 
     return fileSnapshot;
+  };
+
+  // Helper to run hooks (v0.4)
+  const runHook = async (hookName, context) => {
+    const hook = hooks[hookName];
+    if (!hook || typeof hook !== 'function') {
+      return; // No hook registered
+    }
+
+    try {
+      await hook(context);
+    } catch (error) {
+      throw new JJError(
+        'HOOK_FAILED',
+        `Hook '${hookName}' failed: ${error.message}`,
+        { hookName, originalError: error }
+      );
+    }
   };
 
   // Helper to sync a JJ change to a Git commit
@@ -238,8 +263,8 @@ export async function createJJ(options) {
     },
   });
 
-  // Create revset engine with the middleware-wrapped graph
-  const revset = new RevsetEngine(graph, workingCopy, userConfig);
+  // Create revset engine with the middleware-wrapped graph (v0.4: added bookmarkStore)
+  const revset = new RevsetEngine(graph, workingCopy, userConfig, bookmarks);
 
   // Create JJ instance (backgroundOps will be initialized after jj object is created)
   const jj = {
@@ -847,6 +872,14 @@ export async function createJJ(options) {
         });
       }
 
+      // v0.4: Run pre-commit hook
+      await runHook('preCommit', {
+        changeId: currentChangeId,
+        change,
+        message: args.message,
+        operation: 'describe',
+      });
+
       // Update description
       if (args.message !== undefined) {
         change.description = args.message;
@@ -910,6 +943,13 @@ export async function createJJ(options) {
           workingCopy: currentChangeId,
           fileSnapshot: fileSnapshotBefore, // Store filesystem state from before operation
         },
+      });
+
+      // v0.4: Run post-commit hook
+      await runHook('postCommit', {
+        changeId: currentChangeId,
+        change,
+        operation: 'describe',
       });
 
       return change;
@@ -1592,6 +1632,10 @@ export async function createJJ(options) {
        * @param {Object} args - Fetch arguments
        * @param {string} args.remote - Remote name or URL
        * @param {string[]} [args.refs] - Refs to fetch (default: all)
+       * @param {number} [args.depth] - Create shallow clone with history truncated to depth (v0.4)
+       * @param {boolean} [args.relative] - Depth measured from current shallow depth (v0.4)
+       * @param {boolean} [args.singleBranch] - Only fetch single branch (v0.4)
+       * @param {boolean} [args.noTags] - Don't fetch tags (v0.4)
        * @param {Function} [args.onProgress] - Progress callback
        * @param {Function} [args.onAuth] - Authentication callback
        */
@@ -1607,6 +1651,10 @@ export async function createJJ(options) {
         const result = await gitBackend.fetch({
           remote: args.remote,
           refs: args.refs,
+          depth: args.depth,           // v0.4: Shallow clone support
+          relative: args.relative,     // v0.4: Relative depth
+          singleBranch: args.singleBranch, // v0.4: Single branch only
+          noTags: args.noTags,        // v0.4: Skip tags
           onProgress: args.onProgress,
           onAuth: args.onAuth,
         });

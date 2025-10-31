@@ -1,6 +1,6 @@
 # isomorphic-jj
 
-**Status**: v0.3 Complete ✅ (Pure JS protobuf, Git backend, Conflicts, Worktrees, Background ops, Browser support)
+**Status**: v0.4 Quick Wins Implemented ✅ (Shallow clones, Advanced revsets, Event hooks)
 **Test Coverage**: 279 tests, 100% passing
 **Ready for**: Production experimentation, prototyping, tool building with full Git interop
 
@@ -186,6 +186,11 @@ await jj.undo(); // Conflicts come back
 - ✅ **Background operations**: File watchers, auto-snapshots, and async operation queue
 - ✅ **Browser enhancements**: ServiceWorker utilities, storage quota management, capability detection
 - ✅ **Collaboration foundation**: Worktrees, background ops, and conflicts enable team workflows
+
+### v0.4 Quick Wins (Just Implemented!) 🎉
+- ✅ **Shallow clone support**: Fetch with depth limit for faster clones and reduced disk usage
+- ✅ **Advanced revset functions**: roots(), heads(), latest(), tags(), bookmarks()
+- ✅ **Event hooks system**: Pre-commit and post-commit hooks for extensibility
 
 **Pure JavaScript Achievement**: isomorphic-jj now implements complete JJ repository creation using JavaScript protobuf encoding (via protobufjs). This means:
 - No jj CLI required for repository creation
@@ -523,6 +528,13 @@ await jj.log({ revset: 'merge()' });           // merge commits
 await jj.log({ revset: 'file(*.js)' });        // commits touching JS files
 await jj.log({ revset: 'file(src/*)' });       // commits touching src/
 
+// New in v0.4 - Graph analysis
+await jj.log({ revset: 'roots(all())' });      // root commits (no parents in set)
+await jj.log({ revset: 'heads(all())' });      // head commits (no children in set)
+await jj.log({ revset: 'latest(mine(), 5)' }); // my 5 latest commits
+await jj.log({ revset: 'bookmarks()' });       // all bookmark targets
+await jj.log({ revset: 'bookmarks(feat*)' }); // bookmarks matching pattern
+
 // Repository analytics (v0.3.1)
 const stats = await jj.stats();
 console.log(`Total changes: ${stats.changes.total}`);
@@ -552,6 +564,61 @@ await jj.describe({ message: 'Anonymous change' });
 ---
 
 ## Advanced Usage Examples
+
+### Shallow Clones (v0.4)
+
+```javascript
+// Clone with depth limit for faster downloads
+await jj.git.fetch({
+  remote: 'origin',
+  depth: 1,           // Only fetch latest commit
+  singleBranch: true, // Only current branch
+  noTags: true        // Skip tags
+});
+
+// Shallow clone saves disk space and time
+// Perfect for CI/CD or large repositories
+
+// Fetch more history later
+await jj.git.fetch({
+  remote: 'origin',
+  depth: 10,          // Fetch 10 commits
+  relative: true      // Measured from current shallow depth
+});
+```
+
+### Event Hooks (v0.4)
+
+```javascript
+// Add hooks during repository creation
+const jj = await createJJ({
+  fs,
+  dir: './repo',
+  git,
+  http,
+  hooks: {
+    // Run linters before commits
+    preCommit: async (context) => {
+      console.log(`Pre-commit: ${context.operation}`);
+      // Run linter, formatter, tests, etc.
+      const result = await runLinter(context.changeId);
+      if (!result.success) {
+        throw new Error('Linting failed!');
+      }
+    },
+
+    // Log or notify after commits
+    postCommit: async (context) => {
+      console.log(`Committed: ${context.change.description}`);
+      // Send notifications, update dashboards, etc.
+      await notifyTeam(context.changeId);
+    }
+  }
+});
+
+// Hooks integrate seamlessly with describe(), amend(), etc.
+await jj.describe({ message: 'Fix bug' });  // Hooks run automatically
+```
 
 ### Stacked Changes (Like Stacked PRs)
 

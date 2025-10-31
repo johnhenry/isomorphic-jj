@@ -406,6 +406,10 @@ export class IsomorphicGitBackend {
    * @param {Object} opts - Fetch options
    * @param {string} opts.remote - Remote name or URL
    * @param {string[]} [opts.refs] - Ref specs to fetch
+   * @param {number} [opts.depth] - Create a shallow clone with history truncated to depth (v0.4)
+   * @param {boolean} [opts.relative] - Depth measured from current shallow depth (v0.4)
+   * @param {boolean} [opts.singleBranch] - Only fetch single branch (v0.4)
+   * @param {boolean} [opts.noTags] - Don't fetch tags (v0.4)
    * @param {Function} [opts.onProgress] - Progress callback
    * @param {Function} [opts.onAuth] - Authentication callback
    * @returns {Promise<{fetchedRefs: Array, updatedRefs: Array}>} Fetch result
@@ -432,6 +436,10 @@ export class IsomorphicGitBackend {
           dir: this.dir,
           remote: opts.remote,
           ref,
+          depth: opts.depth,           // v0.4: Shallow clone support
+          relative: opts.relative,     // v0.4: Relative depth
+          singleBranch: opts.singleBranch, // v0.4: Single branch only
+          tags: opts.noTags === true ? false : undefined, // v0.4: Skip tags
           onProgress: opts.onProgress,
           onAuth: opts.onAuth,
         });
