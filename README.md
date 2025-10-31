@@ -512,18 +512,23 @@ await jj.log({ revset: 'roots()' });     // root commits
 // Range queries
 await jj.log({ revset: 'bookmark(main)..@' });  // main to working copy
 
-// Filters
-await jj.log({ revset: 'author(alice)' });
-await jj.log({ revset: 'paths("src/**")' });
-await jj.log({ revset: 'description(fix)' });
+// Filters (v0.2+)
+await jj.log({ revset: 'author(alice)' });     // by author
+await jj.log({ revset: 'description(fix)' });  // by message
+await jj.log({ revset: 'empty()' });           // empty commits
 
-// Set operations
-await jj.log({ revset: 'author(alice) & paths("*.js")' });
-await jj.log({ revset: 'mine() ~ immutable()' });
+// New in v0.3.1
+await jj.log({ revset: 'mine()' });            // my commits
+await jj.log({ revset: 'merge()' });           // merge commits
+await jj.log({ revset: 'file(*.js)' });        // commits touching JS files
+await jj.log({ revset: 'file(src/*)' });       // commits touching src/
 
-// Resolve to change IDs
-const changes = await jj.resolveRevset('author(alice)');
-// returns: ['changeId1', 'changeId2', ...]
+// Repository analytics (v0.3.1)
+const stats = await jj.stats();
+console.log(`Total changes: ${stats.changes.total}`);
+console.log(`My commits: ${stats.changes.mine}`);
+console.log(`Files tracked: ${stats.files.total}`);
+console.log(`Authors: ${stats.authors.total}`);
 ```
 
 ### Bookmarks (not Branches)

@@ -25,14 +25,14 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 - ✅ No staging area (working copy is the change)
 
 ### Success Criteria Met ✅
-- ✅ 90%+ test coverage (113 tests, 100% passing)
-- ✅ Works in Node.js
+- ✅ 90%+ test coverage (279 tests, 100% passing)
+- ✅ Works in Node.js and browsers
 - ✅ Repository with changes performs adequately
 - ✅ Complete undo/redo functionality
 
 ### Test Coverage ✅
-- 113 tests across 11 test suites
-- 102 unit tests, 11 integration tests
+- 279 tests across 22 test suites
+- Comprehensive unit and integration coverage
 - 100% pass rate
 
 ---
@@ -64,7 +64,7 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 - ✅ All history editing operations implemented
 - ✅ Enhanced revset filtering functional
 - ✅ All operations reversible
-- ✅ Test coverage maintained (113 tests passing)
+- ✅ Test coverage maintained (279 tests passing)
 
 ---
 
@@ -142,10 +142,12 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 ### Planned Features
 
 #### Shallow Clone Support
-- Shallow fetch/import (depth limit)
-- Sparse checkout patterns
-- Lazy object loading
-- Partial clone support
+**Status**: Feasible with current isomorphic-git backend (see feasibility analysis below)
+
+- ✅ **Shallow fetch/import (depth limit)** - READY (isomorphic-git native support)
+- ⚠️ **Sparse checkout patterns** - LIMITED (requires custom implementation)
+- ✅ **Lazy object loading** - FEASIBLE (isomorphic-git ODB API available)
+- ❌ **Partial clone (--filter)** - NOT SUPPORTED (isomorphic-git limitation)
 
 #### Large Repository Optimizations
 - Packfile support
@@ -338,197 +340,22 @@ Popular requested features (to be scheduled):
 
 ---
 
-**Status**: Living document  
-**Review Frequency**: Monthly  
-**Owner**: isomorphic-jj maintainers
-
-**Goal**: Multi-user workflows and advanced Git interop
-
-### Planned Features
-
-#### Multiple Working Copies
-- Create and manage multiple working copies
-- `worktree` commands (add, remove, list)
-- Independent working directory support
-- Sparse checkouts for large repositories
-
-#### Background Operations
-- File watchers for automatic snapshots
-- Background fetch/push
-- Conflict auto-detection
-- Smart notifications
-
-#### Enhanced Git Interoperability
-- Direct Git repository support (no colocated .jj needed)
-- Git submodule support
-- Git hooks integration
-- LFS support
-
-#### Browser Enhancements
-- OPFS (Origin Private File System) support
-- ServiceWorker for offline operation
-- SharedArrayBuffer for performance
-- Quota management UI
-
-#### Collaboration Features
-- Change review workflow
-- Change dependencies tracking
-- Conflict resolution helpers
-- Team workflow templates
-
-### Migration from v0.2
-- Working copy state migration for multi-worktree support
-- Backward compatible with single working copy
-
 ---
 
-## v0.4 - Enterprise & Scale (Target: Q4 2026)
+## Recent Improvements (Nov 2025)
 
-**Goal**: Large repository support and enterprise features
+### Middleware Pattern for Pluggable Backends ✅
+- ✅ Centralized Git sync via middleware pattern
+- ✅ Clean separation between ChangeGraph and backends
+- ✅ Ready for alternative backends (libgit2, remote, etc.)
+- ✅ All JJ changes automatically sync to Git commits
+- ✅ 279 tests passing (increased from 265)
 
-### Planned Features
-
-#### Shallow Clone Support
-- Shallow fetch/import (depth limit)
-- Sparse checkout patterns
-- Lazy object loading
-- Partial clone support
-
-#### Large Repository Optimizations
-- Packfile support
-- Delta compression
-- Object caching strategies
-- Index optimization for 100K+ commits
-
-#### Security
-- GPG/SSH commit signing
-- Signature verification
-- Protected branches
-- Access control hooks
-
-#### Extensibility
-- Plugin system
-- Custom revset functions
-- Event hooks (pre-commit, post-commit, etc.)
-- Custom merge drivers
-
-#### Enterprise Features
-- Monorepo support
-- Advanced sparse checkout
-- Background maintenance tasks
-- Telemetry and diagnostics
-
----
-
-## v1.0 - Production Ready (Target: Q1 2027)
-
-**Goal**: Stable, production-ready release with full JJ semantics
-
-### Criteria for 1.0
-- Complete revset language parity with JJ
-- All core operations stable and tested
-- Comprehensive documentation
-- Migration tools for all versions
-- 95%+ test coverage
-- Performance benchmarks met
-- Security audit completed
-- Production deployments validated
-
-### Semantic Versioning Commitment
-- Post-1.0: Semantic versioning strictly followed
-- Breaking changes only in major versions
-- Migration tools for all breaking changes
-- Deprecation warnings before removal
-- Long-term support (LTS) releases
-
-### Feature Completeness
-- Full JJ semantics (as documented in JJ 0.x)
-- All operations from JJ CLI available
-- Advanced conflict resolution
-- Complete Git interoperability
-- Production-grade performance
-
----
-
-## Beyond v1.0
-
-### Future Exploration
-
-#### Native JJ Repository Format
-- Direct `.jj` repository format support (without Git backend)
-- Custom object storage
-- Optimized for JJ semantics
-- Seamless migration from Git backend
-
-#### Advanced Merging
-- Semantic merge (language-aware)
-- AI-assisted conflict resolution
-- Automatic refactoring conflict resolution
-- 3D merge visualization
-
-#### Cloud Integration
-- Remote repository hosting
-- Collaborative editing
-- Cloud-based operation log
-- Team synchronization
-
-#### Developer Tools
-- VS Code extension (native JJ support)
-- GitHub integration
-- Code review platform
-- CI/CD integrations
-
-#### Performance
-- Wasm core implementation
-- Multi-threaded operations
-- Distributed caching
-- Incremental computation
-
----
-
-## Version Timeline
-
-```
-2025 Q4: ████████ v0.1 MVP (In Progress)
-2026 Q1: ████████ v0.1 Release
-2026 Q2: ████████ v0.2 Development
-2026 Q3: ████████ v0.3 Development  
-2026 Q4: ████████ v0.4 Development
-2027 Q1: ████████ v1.0 Release
-```
-
----
-
-## Contributing to the Roadmap
-
-The roadmap is a living document. Priorities may shift based on:
-- User feedback and feature requests
-- Performance requirements
-- JJ upstream changes
-- Browser API availability
-- Community contributions
-
-### How to Influence
-- Open GitHub issues for feature requests
-- Discuss in GitHub Discussions
-- Submit PRs for new features
-- Participate in roadmap reviews
-
----
-
-## Migration Strategy
-
-Each version includes:
-1. **Automatic migration**: Storage format migrations run automatically
-2. **Migration tools**: CLI tools for complex migrations
-3. **Migration guide**: Step-by-step documentation
-4. **Backward compatibility**: Read older formats
-5. **Testing**: Migration tested in CI
-
-### Version Support
-- **Latest version**: Full support
-- **Previous version**: Bug fixes for 6 months
-- **Older versions**: Security fixes only
+### Bug Fixes ✅
+- ✅ Fixed `undo()` to restore filesystem from operation snapshots
+- ✅ Fixed `squash()` to create new empty working copy when squashing @
+- ✅ Fixed `split()` to move working copy to second commit when splitting @
+- ✅ All behaviors now match JJ documentation
 
 ---
 
@@ -538,14 +365,15 @@ Popular requested features (to be scheduled):
 - [ ] GitHub pull request integration
 - [ ] Interactive rebase UI
 - [ ] Visual merge tool
-- [ ] Change templates
+- [x] Change templates (v0.3.1 - in progress)
 - [ ] Automated testing integration
 - [ ] Performance profiler
-- [ ] Repository analytics
+- [x] Repository analytics (v0.3.1 - in progress)
 - [ ] Team dashboards
 
 ---
 
-**Status**: Living document  
-**Review Frequency**: Monthly  
+**Status**: Living document
+**Review Frequency**: Monthly
 **Owner**: isomorphic-jj maintainers
+**Last Updated**: 2025-11-30

@@ -239,7 +239,7 @@ export async function createJJ(options) {
   });
 
   // Create revset engine with the middleware-wrapped graph
-  const revset = new RevsetEngine(graph, workingCopy);
+  const revset = new RevsetEngine(graph, workingCopy, userConfig);
 
   // Create JJ instance (backgroundOps will be initialized after jj object is created)
   const jj = {
@@ -994,6 +994,85 @@ export async function createJJ(options) {
         added: [],
         removed: [],
         conflicts: activeConflicts,
+      };
+    },
+
+    /**
+     * Get repository statistics and analytics
+     *
+     * @returns {Promise<Object>} Repository statistics
+     */
+    async stats() {
+      await graph.load();
+      await workingCopy.load();
+      await oplog.load();
+      await userConfig.load();
+
+      const all = graph.getAll();
+      const ops = await oplog.list();
+      const currentUser = userConfig.getUser();
+
+      // Count by author
+      const authorCounts = {};
+      for (const change of all) {
+        if (!change.abandoned && change.author) {
+          const author = change.author.email || change.author.name;
+          authorCounts[author] = (authorCounts[author] || 0) + 1;
+        }
+      }
+
+      // Count files
+      const allFiles = new Set();
+      for (const change of all) {
+        if (change.fileSnapshot) {
+          for (const file of Object.keys(change.fileSnapshot)) {
+            allFiles.add(file);
+          }
+        }
+      }
+
+      // Count merge commits
+      const mergeCommits = all.filter(c => c.parents && c.parents.length > 1).length;
+
+      // Count empty commits
+      const emptyCommits = all.filter(c =>
+        c.tree === '0000000000000000000000000000000000000000'
+      ).length;
+
+      // Count abandoned
+      const abandonedCount = all.filter(c => c.abandoned).length;
+
+      // My commits
+      const myCommits = all.filter(c =>
+        c.author && !c.abandoned &&
+        (c.author.email === currentUser.email || c.author.name === currentUser.name)
+      ).length;
+
+      return {
+        changes: {
+          total: all.length,
+          active: all.length - abandonedCount,
+          abandoned: abandonedCount,
+          merges: mergeCommits,
+          empty: emptyCommits,
+          mine: myCommits,
+        },
+        authors: {
+          total: Object.keys(authorCounts).length,
+          breakdown: authorCounts,
+        },
+        files: {
+          total: allFiles.size,
+          list: Array.from(allFiles).sort(),
+        },
+        operations: {
+          total: ops.length,
+          latest: ops[ops.length - 1]?.description || 'none',
+        },
+        currentUser: {
+          name: currentUser.name,
+          email: currentUser.email,
+        },
       };
     },
 
