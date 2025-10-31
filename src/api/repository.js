@@ -540,11 +540,32 @@ export async function createJJ(options) {
       // This allows us to load file contents during merge/rebase
       const fileSnapshot = {};
       const trackedFiles = await workingCopy.listFiles();
+
+      // Safeguards to prevent excessive memory usage
+      const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB per file
+      const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB total snapshot size
+      let totalSnapshotSize = 0;
+
       for (const filePath of trackedFiles) {
         try {
           const fullPath = path.join(dir, filePath);
+          const stats = await fs.promises.stat(fullPath);
+
+          // Skip files that are too large
+          if (stats.size > MAX_FILE_SIZE) {
+            console.warn(`Skipping large file ${filePath} (${stats.size} bytes) from snapshot`);
+            continue;
+          }
+
+          // Stop if total snapshot size would exceed limit
+          if (totalSnapshotSize + stats.size > MAX_TOTAL_SIZE) {
+            console.warn(`Snapshot size limit reached (${MAX_TOTAL_SIZE} bytes), skipping remaining files`);
+            break;
+          }
+
           const content = await fs.promises.readFile(fullPath, 'utf-8');
           fileSnapshot[filePath] = content;
+          totalSnapshotSize += stats.size;
         } catch (error) {
           // Skip files that can't be read (binary, deleted, etc.)
           console.warn(`Could not snapshot file ${filePath}: ${error.message}`);
@@ -766,6 +787,36 @@ export async function createJJ(options) {
         });
       }
 
+      // Restore files from the change's snapshot to working directory
+      if (change.fileSnapshot) {
+        for (const [filePath, content] of Object.entries(change.fileSnapshot)) {
+          try {
+            const fullPath = path.join(dir, filePath);
+
+            // Ensure directory exists
+            const pathParts = filePath.split('/');
+            if (pathParts.length > 1) {
+              const dirPath = pathParts.slice(0, -1).join('/');
+              const fullDirPath = path.join(dir, dirPath);
+              await fs.promises.mkdir(fullDirPath, { recursive: true });
+            }
+
+            // Write file content
+            await fs.promises.writeFile(fullPath, content, 'utf8');
+
+            // Update working copy tracking
+            const stats = await fs.promises.stat(fullPath);
+            await workingCopy.trackFile(filePath, {
+              mtime: stats.mtime,
+              size: stats.size,
+              mode: stats.mode,
+            });
+          } catch (error) {
+            console.warn(`Failed to restore file ${filePath}: ${error.message}`);
+          }
+        }
+      }
+
       // Set this change as the working copy
       await workingCopy.setCurrentChange(args.change);
 
@@ -801,8 +852,8 @@ export async function createJJ(options) {
         throw new JJError('NOTHING_TO_UNDO', 'No operations to undo');
       }
 
-      // Get the operation before the current one (the state we want to restore to)
-      const previousOp = ops.length >= 2 ? ops[ops.length - 2] : null;
+      // Get the current operation (the one being undone) to restore its pre-state
+      const currentOp = ops[ops.length - 1];
 
       const previousView = await oplog.undo();
 
@@ -810,14 +861,15 @@ export async function createJJ(options) {
       await workingCopy.setCurrentChange(previousView.workingCopy);
 
       // Restore conflicts state from before the undone operation
+      // The conflictsSnapshot in an operation represents the state BEFORE that operation ran
       await conflicts.load();
-      if (previousOp && previousOp.conflictsSnapshot) {
-        // Restore conflicts from snapshot
-        conflicts.conflicts = new Map(Object.entries(previousOp.conflictsSnapshot.conflicts || {}));
-        conflicts.fileConflicts = new Map(Object.entries(previousOp.conflictsSnapshot.fileConflicts || {}));
+      if (currentOp && currentOp.conflictsSnapshot) {
+        // Restore conflicts from the operation we're undoing (its pre-state)
+        conflicts.conflicts = new Map(Object.entries(currentOp.conflictsSnapshot.conflicts || {}));
+        conflicts.fileConflicts = new Map(Object.entries(currentOp.conflictsSnapshot.fileConflicts || {}));
         await conflicts.save();
       } else {
-        // No previous operation or no conflicts snapshot - clear conflicts
+        // No conflicts snapshot - clear conflicts
         await conflicts.clear();
       }
 
