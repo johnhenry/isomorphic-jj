@@ -184,7 +184,7 @@ describe('History Operations Integration', () => {
       const changeBId = changeB.workingCopy.changeId;
 
       // Edit change A
-      await jj.edit({ change: changeAId });
+      await jj.edit({ changeId: changeAId });
 
       const status = await jj.status();
       expect(status.workingCopy.changeId).toBe(changeAId);
@@ -200,21 +200,21 @@ describe('History Operations Integration', () => {
       await jj.new({ message: 'Third' });
 
       // Edit the first change
-      await jj.edit({ change: firstId });
+      await jj.edit({ changeId: firstId });
 
       const status = await jj.status();
       expect(status.workingCopy.changeId).toBe(firstId);
       expect(status.workingCopy.description).toBe('First');
     });
 
-    it('should throw error when change is missing', async () => {
-      await expect(jj.edit({})).rejects.toThrow('Missing change argument');
+    it('should throw error when changeId is missing', async () => {
+      await expect(jj.edit({})).rejects.toThrow('Missing changeId argument');
     });
 
     it('should throw error when change does not exist', async () => {
       const fakeChangeId = '00000000000000000000000000000000';
 
-      await expect(jj.edit({ change: fakeChangeId })).rejects.toThrow('not found');
+      await expect(jj.edit({ changeId: fakeChangeId })).rejects.toThrow('not found');
     });
 
     it('should record operation when editing', async () => {
@@ -227,7 +227,7 @@ describe('History Operations Integration', () => {
       const opsBefore = await jj.oplog.list();
       const countBefore = opsBefore.length;
 
-      await jj.edit({ change: changeAId });
+      await jj.edit({ changeId: changeAId });
 
       const opsAfter = await jj.oplog.list();
       expect(opsAfter.length).toBe(countBefore + 1);
@@ -245,7 +245,7 @@ describe('History Operations Integration', () => {
       await jj.new({ message: 'Feature B' });
 
       // Go back and edit Feature A
-      await jj.edit({ change: featureAId });
+      await jj.edit({ changeId: featureAId });
 
       // Amend Feature A
       await jj.amend({ message: 'Feature A (updated)' });
@@ -278,7 +278,7 @@ describe('History Operations Integration', () => {
       const log = await jj.log();
       const middleChange = log.find(c => c.description === 'B');
 
-      await jj.edit({ change: middleChange.changeId });
+      await jj.edit({ changeId: middleChange.changeId });
 
       const status = await jj.status();
       expect(status.workingCopy.description).toBe('B');

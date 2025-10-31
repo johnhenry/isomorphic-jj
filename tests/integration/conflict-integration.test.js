@@ -51,7 +51,7 @@ describe('First-Class Conflicts Integration', () => {
       const branchAId = jj.workingCopy.getCurrentChangeId();
 
       // Go back to base and create another branch
-      await jj.edit({ change: baseChangeId });
+      await jj.edit({ changeId: baseChangeId });
       await jj.new({ message: 'Branch B' });
       await jj.write({ path: 'file.txt', data: 'content from branch B\n' });
       await jj.describe({ message: 'Change on branch B' });
@@ -76,7 +76,7 @@ describe('First-Class Conflicts Integration', () => {
       await jj.describe({ message: 'Left change' });
       const left = jj.workingCopy.getCurrentChangeId();
 
-      await jj.edit({ change: base });
+      await jj.edit({ changeId: base });
       await jj.new({ message: 'Right' });
       await jj.write({ path: 'file.txt', data: 'right\n' });
       await jj.describe({ message: 'Right change' });
@@ -104,7 +104,7 @@ describe('First-Class Conflicts Integration', () => {
       await jj.describe({ message: 'Left' });
       const left = jj.workingCopy.getCurrentChangeId();
 
-      await jj.edit({ change: base });
+      await jj.edit({ changeId: base });
       await jj.new({ message: 'Right' });
       await jj.write({ path: 'file.txt', data: 'right\n' });
       await jj.describe({ message: 'Right' });
@@ -137,7 +137,7 @@ describe('First-Class Conflicts Integration', () => {
       await jj.describe({ message: 'A' });
       const a = jj.workingCopy.getCurrentChangeId();
 
-      await jj.edit({ change: base });
+      await jj.edit({ changeId: base });
       await jj.new({ message: 'B' });
       await jj.write({ path: 'file.txt', data: 'b\n' });
       await jj.describe({ message: 'B' });
@@ -167,7 +167,7 @@ describe('First-Class Conflicts Integration', () => {
       await jj.describe({ message: 'Left' });
       const left = jj.workingCopy.getCurrentChangeId();
 
-      await jj.edit({ change: base });
+      await jj.edit({ changeId: base });
       await jj.new({ message: 'Right' });
       await jj.write({ path: 'file.txt', data: 'right\n' });
       await jj.describe({ message: 'Right' });
@@ -200,7 +200,7 @@ describe('First-Class Conflicts Integration', () => {
       await jj.describe({ message: 'A' });
       const a = jj.workingCopy.getCurrentChangeId();
 
-      await jj.edit({ change: base });
+      await jj.edit({ changeId: base });
       await jj.new({ message: 'B' });
       await jj.write({ path: 'file.txt', data: 'b\n' });
       await jj.describe({ message: 'B' });
@@ -228,7 +228,7 @@ describe('First-Class Conflicts Integration', () => {
       await jj.describe({ message: 'A' });
       const a = jj.workingCopy.getCurrentChangeId();
 
-      await jj.edit({ change: base });
+      await jj.edit({ changeId: base });
       await jj.new({ message: 'B' });
       await jj.write({ path: 'file.txt', data: 'b\n' });
       await jj.describe({ message: 'B' });

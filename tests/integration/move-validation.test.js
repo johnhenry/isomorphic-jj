@@ -41,7 +41,7 @@ describe('Move Validation and Detection', () => {
       await jj.new({ message: 'Branch 1' });
       const branch1 = await jj.status();
 
-      await jj.edit({ change: base.workingCopy.changeId });
+      await jj.edit({ changeId: base.workingCopy.changeId });
       await jj.new({ message: 'Branch 2' });
       const branch2 = await jj.status();
 

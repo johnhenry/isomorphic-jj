@@ -219,6 +219,155 @@ export async function createJJ(options) {
     },
 
     /**
+     * Read a file from the working copy or from a specific change
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.path - File path relative to repo root
+     * @param {string} [args.changeId] - Change ID to read from (defaults to working copy)
+     * @param {string} [args.encoding='utf-8'] - File encoding ('utf-8' or 'binary')
+     * @returns {Promise<string|Uint8Array>} File contents
+     */
+    async read(args) {
+      if (!args || !args.path) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing path argument', {
+          suggestion: 'Provide a path for the file to read',
+        });
+      }
+
+      const encoding = args.encoding || 'utf-8';
+
+      // Read from working copy if no changeId specified
+      if (!args.changeId) {
+        const fullPath = path.join(dir, args.path);
+        try {
+          if (encoding === 'utf-8' || encoding === 'utf8') {
+            return await fs.promises.readFile(fullPath, 'utf-8');
+          } else {
+            return await fs.promises.readFile(fullPath);
+          }
+        } catch (error) {
+          if (error.code === 'ENOENT') {
+            throw new JJError('FILE_NOT_FOUND', `File ${args.path} not found in working copy`, {
+              path: args.path,
+            });
+          }
+          throw error;
+        }
+      }
+
+      // Read from a specific change
+      await graph.load();
+      const change = await graph.getChange(args.changeId);
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`, {
+          changeId: args.changeId,
+        });
+      }
+
+      // Try to read from fileSnapshot cache first
+      if (change.fileSnapshot && change.fileSnapshot[args.path]) {
+        const content = change.fileSnapshot[args.path];
+        if (encoding === 'binary') {
+          return new TextEncoder().encode(content);
+        }
+        return content;
+      }
+
+      // Fallback: read from Git if we have a commitId
+      if (gitBackend && change.commitId && change.commitId !== '0000000000000000000000000000000000000000') {
+        try {
+          const git = (await import('isomorphic-git')).default;
+          const { blob } = await git.readBlob({
+            fs,
+            dir,
+            oid: change.commitId,
+            filepath: args.path,
+          });
+
+          if (encoding === 'utf-8' || encoding === 'utf8') {
+            return new TextDecoder().decode(blob);
+          }
+          return blob;
+        } catch (error) {
+          throw new JJError('FILE_NOT_FOUND', `File ${args.path} not found in change ${args.changeId}`, {
+            path: args.path,
+            changeId: args.changeId,
+            originalError: error,
+          });
+        }
+      }
+
+      throw new JJError('FILE_NOT_FOUND', `File ${args.path} not found in change ${args.changeId}`, {
+        path: args.path,
+        changeId: args.changeId,
+        suggestion: 'File not in snapshot cache and no Git commit available',
+      });
+    },
+
+    /**
+     * Alias for read() - matches jj CLI 'cat' command
+     *
+     * @param {Object} args - Arguments (same as read())
+     * @returns {Promise<string|Uint8Array>} File contents
+     */
+    async cat(args) {
+      return await this.read(args);
+    },
+
+    /**
+     * List files in the working copy or in a specific change
+     *
+     * @param {Object} [args={}] - Arguments
+     * @param {string} [args.changeId] - Change ID to list files from (defaults to working copy)
+     * @param {boolean} [args.recursive=false] - Include files in subdirectories (for future use)
+     * @returns {Promise<Array<string>>} Array of file paths
+     */
+    async listFiles(args = {}) {
+      // List working copy files if no changeId specified
+      if (!args.changeId) {
+        await workingCopy.load();
+        return await workingCopy.listFiles();
+      }
+
+      // List files in a specific change
+      await graph.load();
+      const change = await graph.getChange(args.changeId);
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`, {
+          changeId: args.changeId,
+        });
+      }
+
+      // Try fileSnapshot first
+      if (change.fileSnapshot) {
+        return Object.keys(change.fileSnapshot);
+      }
+
+      // Fallback: read from Git tree
+      if (gitBackend && change.commitId && change.commitId !== '0000000000000000000000000000000000000000') {
+        try {
+          const git = (await import('isomorphic-git')).default;
+          const { tree } = await git.readTree({
+            fs,
+            dir,
+            oid: change.commitId,
+          });
+
+          return tree
+            .filter(entry => entry.type === 'blob')
+            .map(entry => entry.path);
+        } catch (error) {
+          throw new JJError('TREE_READ_FAILED', `Failed to read tree for change ${args.changeId}`, {
+            changeId: args.changeId,
+            originalError: error,
+          });
+        }
+      }
+
+      return [];
+    },
+
+    /**
      * Move/rename a file in the working copy OR move/rebase a change to a new parent
      *
      * This method is polymorphic and handles two distinct operations:
@@ -774,11 +923,11 @@ export async function createJJ(options) {
      * Edit a specific change (make it the working copy)
      *
      * @param {Object} args - Arguments
-     * @param {string} args.change - Change ID to edit
+     * @param {string} args.changeId - Change ID to edit
      */
     async edit(args) {
-      if (!args || !args.change) {
-        throw new JJError('INVALID_ARGUMENT', 'Missing change argument', {
+      if (!args || !args.changeId) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing changeId argument', {
           suggestion: 'Provide a change ID to edit',
         });
       }
@@ -786,10 +935,10 @@ export async function createJJ(options) {
       await graph.load();
       await workingCopy.load();
 
-      const change = await graph.getChange(args.change);
+      const change = await graph.getChange(args.changeId);
       if (!change) {
-        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.change} not found`, {
-          changeId: args.change,
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`, {
+          changeId: args.changeId,
         });
       }
 
@@ -824,7 +973,7 @@ export async function createJJ(options) {
       }
 
       // Set this change as the working copy
-      await workingCopy.setCurrentChange(args.change);
+      await workingCopy.setCurrentChange(args.changeId);
 
       // Record operation
       await oplog.recordOperation({
@@ -834,13 +983,13 @@ export async function createJJ(options) {
           email: 'user@example.com',
           hostname: 'localhost',
         },
-        description: `edit change ${args.change.slice(0, 8)}`,
+        description: `edit change ${args.changeId.slice(0, 8)}`,
         parents: [],
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: [args.change],
-          workingCopy: args.change,
+          heads: [args.changeId],
+          workingCopy: args.changeId,
         },
       });
 
