@@ -982,6 +982,10 @@ export async function createJJ(options) {
     
     /**
      * Create a new change on top of working copy
+     *
+     * @param {Object} [args={}] - Arguments
+     * @param {string} [args.message] - Initial description for the new change
+     * @returns {Promise<Object>} The new change object including changeId, description, parents, author, and timestamp
      */
     async new(args = {}) {
       await graph.load();
@@ -1289,6 +1293,8 @@ export async function createJJ(options) {
     
     /**
      * Undo last operation
+     *
+     * @returns {Promise<Object>} Information about the undo including the undone operation and restored state
      */
     async undo() {
       // Get the operation we're about to undo to access its pre-state
@@ -1351,7 +1357,19 @@ export async function createJJ(options) {
         view: previousView,
       });
 
-      return previousView;
+      // Return information about what was undone
+      return {
+        undoneOperation: {
+          description: currentOp.description,
+          timestamp: currentOp.timestamp,
+          user: currentOp.user,
+        },
+        restoredState: {
+          workingCopy: previousView.workingCopy,
+          heads: previousView.heads,
+          fileCount: previousView.fileSnapshot ? Object.keys(previousView.fileSnapshot).length : 0,
+        },
+      };
     },
     
     // ========================================
@@ -1480,9 +1498,10 @@ export async function createJJ(options) {
     
     /**
      * Restore an abandoned change
-     * 
+     *
      * @param {Object} args - Arguments
      * @param {string} args.changeId - Change ID to restore
+     * @returns {Promise<Object>} The restored change object including changeId, description, and abandoned flag (now false)
      */
     async restore(args) {
       await graph.load();

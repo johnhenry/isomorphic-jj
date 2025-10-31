@@ -703,26 +703,39 @@ console.log(`Written: ${writeResult.path} (${writeResult.size} bytes, ${writeRes
 await jj.describe({ message: 'Reorganize files' });
 ```
 
-#### File Operation Return Values (v0.4)
+#### Operation Return Values (v0.4)
 
-All file operations now return useful information:
+All operations now return useful information:
 
 ```javascript
-// write() returns file metadata
-const result = await jj.write({ path: 'src/app.js', data: 'console.log("Hello");' });
+// File operations
+const writeResult = await jj.write({ path: 'src/app.js', data: 'console.log("Hello");' });
 // { path, size, mode, mtime, type: 'text'|'binary' }
 
-// move() returns operation details
-const result = await jj.move({ from: 'old.js', to: 'new.js' });
+const moveResult = await jj.move({ from: 'old.js', to: 'new.js' });
 // { from, to, size, mode, mtime }
 
-// remove() returns removed file info
-const result = await jj.remove({ path: 'temp.js' });
+const removeResult = await jj.remove({ path: 'temp.js' });
 // { path, size, mode, mtime }
 
-// edit() returns change information
-const result = await jj.edit({ changeId: 'abc...' });
+// Change operations
+const editResult = await jj.edit({ changeId: 'abc...' });
 // { changeId, description, parents, fileCount, timestamp }
+
+const newChange = await jj.new({ message: 'Feature X' });
+// { changeId, description, parents, author, timestamp, ... }
+
+const abandonResult = await jj.abandon({ changeId: 'abc...' });
+// { changeId, description, abandoned: true, ... }
+
+const restoreResult = await jj.restore({ changeId: 'abc...' });
+// { changeId, description, abandoned: false, ... }
+
+const undoResult = await jj.undo();
+// {
+//   undoneOperation: { description, timestamp, user },
+//   restoredState: { workingCopy, heads, fileCount }
+// }
 ```
 
 ### Git Interop
