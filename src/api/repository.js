@@ -71,11 +71,10 @@ export async function createJJ(options) {
 
   // Create core components
   const storage = new Storage(fs, dir);
-  const graph = new ChangeGraph(storage);
+  const baseGraph = new ChangeGraph(storage);
   const workingCopy = new WorkingCopy(storage, fs, dir);
   const oplog = new OperationLog(storage);
   const bookmarks = new BookmarkStore(storage);
-  const revset = new RevsetEngine(graph, workingCopy);
   const conflicts = new ConflictModel(storage, fs);
   const worktrees = new WorktreeManager(storage, fs, dir);
   const userConfig = new UserConfig(storage);
@@ -129,6 +128,89 @@ export async function createJJ(options) {
     return fileSnapshot;
   };
 
+  // Helper to sync a JJ change to a Git commit
+  // In JJ, every change has a corresponding Git commit
+  const syncChangeToGit = async (change) => {
+    if (!gitBackend || !gitBackend.createCommit) {
+      return; // No Git backend, skip
+    }
+
+    try {
+      // Stage all files first
+      if (gitBackend.stageAll) {
+        await gitBackend.stageAll();
+      }
+
+      // Get parent commit IDs
+      const parentCommitIds = [];
+      await baseGraph.load();
+      for (const parentChangeId of change.parents) {
+        const parentChange = await baseGraph.getChange(parentChangeId);
+        if (parentChange && parentChange.commitId && parentChange.commitId !== '0000000000000000000000000000000000000000') {
+          parentCommitIds.push(parentChange.commitId);
+        }
+      }
+
+      // Create the Git commit
+      const commitSha = await gitBackend.createCommit({
+        message: change.description,
+        author: {
+          name: change.author.name,
+          email: change.author.email,
+          timestamp: new Date(change.author.timestamp).getTime(),
+        },
+        committer: {
+          name: change.committer.name,
+          email: change.committer.email,
+          timestamp: new Date(change.committer.timestamp).getTime(),
+        },
+        parents: parentCommitIds,
+      });
+
+      // Update the change with the Git commit ID (bypass middleware to avoid infinite loop)
+      change.commitId = commitSha;
+      await baseGraph.updateChange(change);
+    } catch (error) {
+      console.warn(`Failed to sync change ${change.changeId.slice(0, 8)} to Git:`, error.message);
+      // Continue even if Git commit fails - JJ metadata is primary
+    }
+  };
+
+  /**
+   * Create a middleware-wrapped graph that intercepts add/update operations
+   * This allows pluggable backends without modifying core ChangeGraph logic
+   */
+  const createGraphWithMiddleware = (baseGraph, hooks) => {
+    return {
+      // Delegate all read operations directly to base graph
+      load: () => baseGraph.load(),
+      getChange: (changeId) => baseGraph.getChange(changeId),
+      getAllChanges: () => baseGraph.getAllChanges(),
+      getAll: () => baseGraph.getAll(),  // Used by revset engine
+      getAncestors: (changeId) => baseGraph.getAncestors(changeId),
+      getDescendants: (changeId) => baseGraph.getDescendants(changeId),
+      findChangeByCommitId: (commitId) => baseGraph.findChangeByCommitId(commitId),
+
+      // Wrap write operations with middleware hooks
+      async addChange(change) {
+        await baseGraph.addChange(change);
+        if (hooks.onAddChange) {
+          await hooks.onAddChange(change);
+        }
+      },
+
+      async updateChange(change) {
+        await baseGraph.updateChange(change);
+        if (hooks.onUpdateChange) {
+          await hooks.onUpdateChange(change);
+        }
+      },
+
+      // Delegate other operations
+      init: () => baseGraph.init(),
+    };
+  };
+
   // Create Git backend if specified
   // Auto-detect: if git instance provided, use isomorphic-git backend
   let gitBackend = null;
@@ -142,6 +224,22 @@ export async function createJJ(options) {
     // Custom backend instance provided
     gitBackend = backend;
   }
+
+  // Wrap the base graph with middleware that syncs to Git
+  // This allows us to support different backends in the future
+  const graph = createGraphWithMiddleware(baseGraph, {
+    onAddChange: async (change) => {
+      // Sync new change to Git backend
+      await syncChangeToGit(change);
+    },
+    onUpdateChange: async (change) => {
+      // Sync updated change to Git backend
+      await syncChangeToGit(change);
+    },
+  });
+
+  // Create revset engine with the middleware-wrapped graph
+  const revset = new RevsetEngine(graph, workingCopy);
 
   // Create JJ instance (backgroundOps will be initialized after jj object is created)
   const jj = {
@@ -792,48 +890,7 @@ export async function createJJ(options) {
       }
       change.fileSnapshot = fileSnapshot;
 
-      // Create Git commit if backend is available
-      if (gitBackend && gitBackend.createCommit) {
-        try {
-          // Stage all files first
-          if (gitBackend.stageAll) {
-            await gitBackend.stageAll();
-          }
-
-          // Get parent commit IDs
-          const parentCommitIds = [];
-          for (const parentChangeId of change.parents) {
-            const parentChange = await graph.getChange(parentChangeId);
-            if (parentChange && parentChange.commitId && parentChange.commitId !== '0000000000000000000000000000000000000000') {
-              parentCommitIds.push(parentChange.commitId);
-            }
-          }
-
-          // Create the Git commit
-          const commitSha = await gitBackend.createCommit({
-            message: change.description,
-            author: {
-              name: change.author.name,
-              email: change.author.email,
-              timestamp: new Date(change.author.timestamp).getTime(),
-            },
-            committer: {
-              name: change.committer?.name || change.author.name,
-              email: change.committer?.email || change.author.email,
-              timestamp: new Date(change.timestamp).getTime(),
-            },
-            parents: parentCommitIds,
-          });
-
-          // Update the change with the Git commit ID
-          change.commitId = commitSha;
-        } catch (error) {
-          console.warn('Failed to create Git commit:', error.message);
-          // Continue even if Git commit fails - JJ metadata is primary
-        }
-      }
-
-      // Save the updated change
+      // Save the updated change (middleware will sync to Git)
       await graph.updateChange(change);
 
       // Record operation with filesystem snapshot from BEFORE operation
@@ -892,7 +949,7 @@ export async function createJJ(options) {
         timestamp: new Date().toISOString(),
       };
 
-      await graph.addChange(newChange);
+      await graph.addChange(newChange);  // Middleware will sync to Git
       await workingCopy.setCurrentChange(newChangeId);
 
       // Record operation with filesystem snapshot
@@ -1170,7 +1227,7 @@ export async function createJJ(options) {
       sourceChange.abandoned = true;
       await graph.updateChange(sourceChange);
 
-      // Update description of dest to indicate squash
+      // Update description of dest to indicate squash (middleware will sync to Git)
       destChange.description += `\n\n(squashed from ${args.source.slice(0, 8)})`;
       await graph.updateChange(destChange);
 
@@ -1200,7 +1257,7 @@ export async function createJJ(options) {
           fileSnapshot: {},
         };
 
-        await graph.addChange(newChange);
+        await graph.addChange(newChange);  // Middleware will sync to Git
         await workingCopy.setCurrentChange(newChangeId);
         newWorkingCopyId = newChangeId;
       }
@@ -1317,11 +1374,11 @@ export async function createJJ(options) {
       const currentWorkingCopyId = workingCopy.getCurrentChangeId();
       const isSplittingWorkingCopy = args.changeId === currentWorkingCopyId;
 
-      // Create first split change (keep original ID)
+      // Create first split change (keep original ID) - middleware will sync to Git
       originalChange.description = args.description1 || originalChange.description + ' (part 1)';
       await graph.updateChange(originalChange);
 
-      // Create second split change as new change on top
+      // Create second split change as new change on top - middleware will sync to Git
       const newChangeId = generateChangeId();
       const newChange = {
         changeId: newChangeId,

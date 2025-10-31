@@ -213,6 +213,7 @@ await jj.describe({ message: 'Update to B' });
 const mergeResult = await jj.merge({ source: branchA.changeId });
 console.log(`   ✓ Merged with conflicts: ${mergeResult.conflicts.length} conflict(s)`);
 
+
 const conflicts = await jj.conflicts.list();
 console.log(`   ✓ Listed conflicts: ${conflicts.map(c => c.path).join(', ')}`);
 
@@ -322,3 +323,19 @@ console.log('   ✓ Worktrees');
 console.log('   ✓ Background operations');
 
 console.log('\n🎉 All v0.3 features working!\n');
+
+// Debug: Show final repository state
+console.log('═══════════════════════════════════════════════════════════');
+console.log('🔍 Final Repository State');
+console.log('═══════════════════════════════════════════════════════════\n');
+
+const finalLogFull = await jj.log({ limit: 50 });
+console.log('All changes in repository:');
+finalLogFull.forEach((change, i) => {
+  const abandoned = change.abandoned ? ' [ABANDONED]' : '';
+  console.log(`  ${i+1}. ${change.description}${abandoned} (${change.changeId.slice(0, 8)})`);
+});
+
+const finalStatus = await jj.status();
+console.log(`\nCurrent working copy: ${finalStatus.workingCopy.description} (${finalStatus.workingCopy.changeId.slice(0, 8)})`);
+console.log(`Files in working copy: ${(await jj.listFiles()).join(', ')}`);
