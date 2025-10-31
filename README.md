@@ -26,8 +26,8 @@ const jj = await createJJ({
   http
 });
 
-// Initialize (creates both .git and .jj)
-await jj.init({ userName: 'Your Name', userEmail: 'you@example.com' });
+// Initialize (creates both .git and .jj) - matches `jj git init` CLI
+await jj.git.init({ userName: 'Your Name', userEmail: 'you@example.com' });
 
 // Work with changes
 await jj.describe({ message: 'Initial work' });
@@ -241,7 +241,7 @@ const jj = await createJJ({
   http
 });
 
-await jj.init(); // Creates colocated .git and .jj
+await jj.git.init(); // Creates colocated .git and .jj
 
 // Edit files directly - no staging!
 await jj.write({ path: 'README.md', data: '# Hello JJ\n' });
@@ -493,10 +493,10 @@ await jj.describe({ message: 'Reorganize files' });
 
 ```javascript
 // Colocated repos work with both Git and JJ
-await jj.init({ colocate: true });  // Creates both .git and .jj
+await jj.git.init();  // Creates both .git and .jj
 
 // Fetch from Git remote
-await jj.remote.fetch({ remote: 'origin' });
+await jj.git.fetch({ remote: 'origin' });
 
 // Import Git refs to JJ bookmarks
 await jj.git.import();

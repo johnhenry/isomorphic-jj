@@ -536,12 +536,28 @@ export async function createJJ(options) {
         change.timestamp = new Date().toISOString();
       }
 
+      // Snapshot current file contents for conflict detection
+      // This allows us to load file contents during merge/rebase
+      const fileSnapshot = {};
+      const trackedFiles = await workingCopy.listFiles();
+      for (const filePath of trackedFiles) {
+        try {
+          const fullPath = path.join(dir, filePath);
+          const content = await fs.promises.readFile(fullPath, 'utf-8');
+          fileSnapshot[filePath] = content;
+        } catch (error) {
+          // Skip files that can't be read (binary, deleted, etc.)
+          console.warn(`Could not snapshot file ${filePath}: ${error.message}`);
+        }
+      }
+      change.fileSnapshot = fileSnapshot;
+
       // Create Git commit if backend is available
-      if (backend && backend.createCommit) {
+      if (gitBackend && gitBackend.createCommit) {
         try {
           // Stage all files first
-          if (backend.stageAll) {
-            await backend.stageAll();
+          if (gitBackend.stageAll) {
+            await gitBackend.stageAll();
           }
 
           // Get parent commit IDs
@@ -554,7 +570,7 @@ export async function createJJ(options) {
           }
 
           // Create the Git commit
-          const commitSha = await backend.createCommit({
+          const commitSha = await gitBackend.createCommit({
             message: change.description,
             author: {
               name: change.author.name,
@@ -665,7 +681,8 @@ export async function createJJ(options) {
       const currentChangeId = workingCopy.getCurrentChangeId();
       const change = await graph.getChange(currentChangeId);
       const modified = await workingCopy.getModifiedFiles();
-      const activeConflicts = conflicts.listConflicts();
+      // Only show unresolved conflicts in status
+      const activeConflicts = conflicts.listConflicts({ resolved: false });
 
       return {
         workingCopy: change,
@@ -777,11 +794,33 @@ export async function createJJ(options) {
      * Undo last operation
      */
     async undo() {
+      // Get the operation we're about to undo to access its pre-state
+      await oplog.load();
+      const ops = await oplog.list();
+      if (ops.length === 0) {
+        throw new JJError('NOTHING_TO_UNDO', 'No operations to undo');
+      }
+
+      // Get the operation before the current one (the state we want to restore to)
+      const previousOp = ops.length >= 2 ? ops[ops.length - 2] : null;
+
       const previousView = await oplog.undo();
-      
+
       // Restore state from previous view
       await workingCopy.setCurrentChange(previousView.workingCopy);
-      
+
+      // Restore conflicts state from before the undone operation
+      await conflicts.load();
+      if (previousOp && previousOp.conflictsSnapshot) {
+        // Restore conflicts from snapshot
+        conflicts.conflicts = new Map(Object.entries(previousOp.conflictsSnapshot.conflicts || {}));
+        conflicts.fileConflicts = new Map(Object.entries(previousOp.conflictsSnapshot.fileConflicts || {}));
+        await conflicts.save();
+      } else {
+        // No previous operation or no conflicts snapshot - clear conflicts
+        await conflicts.clear();
+      }
+
       // Record undo operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
@@ -794,7 +833,7 @@ export async function createJJ(options) {
         parents: [],
         view: previousView,
       });
-      
+
       return previousView;
     },
     
@@ -1158,6 +1197,13 @@ export async function createJJ(options) {
         });
       }
 
+      // Snapshot conflicts state before merge (for undo)
+      await conflicts.load();
+      const conflictsSnapshot = {
+        conflicts: Object.fromEntries(conflicts.conflicts),
+        fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+      };
+
       const currentChangeId = workingCopy.getCurrentChangeId();
       const currentChange = await graph.getChange(currentChangeId);
       const sourceChange = await graph.getChange(args.source);
@@ -1188,21 +1234,32 @@ export async function createJJ(options) {
       const leftFiles = new Map();
       const rightFiles = new Map();
 
-      // Load base files
+      // Load base files from snapshot
       const baseChange = await graph.getChange(baseChangeId);
-      if (baseChange && baseChange.tree) {
-        // TODO: Load files from tree
+      if (baseChange && baseChange.fileSnapshot) {
+        for (const [filePath, content] of Object.entries(baseChange.fileSnapshot)) {
+          baseFiles.set(filePath, content);
+        }
       }
 
       // Load current (left) files from working copy
       const wcFiles = await workingCopy.listFiles();
       for (const file of wcFiles) {
-        const content = await fs.promises.readFile(path.join(dir, file), 'utf-8');
-        leftFiles.set(file, content);
+        try {
+          const content = await fs.promises.readFile(path.join(dir, file), 'utf-8');
+          leftFiles.set(file, content);
+        } catch (error) {
+          // File might be deleted or binary
+          console.warn(`Could not read file ${file} for merge: ${error.message}`);
+        }
       }
 
-      // Load source (right) files
-      // TODO: Load from source change tree
+      // Load source (right) files from snapshot
+      if (sourceChange && sourceChange.fileSnapshot) {
+        for (const [filePath, content] of Object.entries(sourceChange.fileSnapshot)) {
+          rightFiles.set(filePath, content);
+        }
+      }
 
       // Detect conflicts
       const detectedConflicts = await conflicts.detectConflicts({
@@ -1211,7 +1268,12 @@ export async function createJJ(options) {
         rightFiles,
       });
 
-      // Record operation
+      // Store detected conflicts
+      for (const conflict of detectedConflicts) {
+        await conflicts.addConflict(conflict);
+      }
+
+      // Record operation with conflicts snapshot
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
@@ -1223,6 +1285,7 @@ export async function createJJ(options) {
           heads: [currentChangeId, args.source],
           workingCopy: currentChangeId,
         },
+        conflictsSnapshot, // Store conflicts state before merge for undo
       });
 
       return {
@@ -1239,11 +1302,16 @@ export async function createJJ(options) {
      */
     conflicts: {
       /**
-       * List active conflicts
+       * List active (unresolved) conflicts
+       *
+       * @param {Object} opts - List options
+       * @param {boolean} [opts.includeResolved=false] - Include resolved conflicts
        */
-      async list() {
+      async list(opts = {}) {
         await conflicts.load();
-        return conflicts.listConflicts();
+        // By default, only show unresolved conflicts
+        const resolved = opts.includeResolved ? undefined : false;
+        return conflicts.listConflicts({ resolved });
       },
 
       /**

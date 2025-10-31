@@ -41,10 +41,11 @@ describe('ConflictModel', () => {
         resolved: false,
       };
 
-      storage.data['conflicts.json'] = JSON.stringify({
+      // Mock storage returns objects directly (already parsed)
+      storage.data['conflicts.json'] = {
         conflicts: { conflict123: testConflict },
         fileConflicts: { 'file.txt': 'conflict123' },
-      });
+      };
 
       const newConflicts = new ConflictModel(storage, fs);
       await newConflicts.init();

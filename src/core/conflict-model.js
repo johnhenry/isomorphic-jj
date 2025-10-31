@@ -42,9 +42,9 @@ export class ConflictModel {
     try {
       const data = await this.storage.read('conflicts.json');
       if (data) {
-        const parsed = JSON.parse(data);
-        this.conflicts = new Map(Object.entries(parsed.conflicts || {}));
-        this.fileConflicts = new Map(Object.entries(parsed.fileConflicts || {}));
+        // storage.read() already parses JSON
+        this.conflicts = new Map(Object.entries(data.conflicts || {}));
+        this.fileConflicts = new Map(Object.entries(data.fileConflicts || {}));
       }
     } catch (error) {
       // No conflicts file yet, that's fine
@@ -68,7 +68,8 @@ export class ConflictModel {
       conflicts: Object.fromEntries(this.conflicts),
       fileConflicts: Object.fromEntries(this.fileConflicts),
     };
-    await this.storage.write('conflicts.json', JSON.stringify(data, null, 2));
+    // storage.write() will handle JSON stringification
+    await this.storage.write('conflicts.json', data);
   }
 
   /**

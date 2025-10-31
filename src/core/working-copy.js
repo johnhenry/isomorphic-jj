@@ -188,6 +188,19 @@ export class WorkingCopy {
   }
 
   /**
+   * List all tracked files in working copy
+   *
+   * @returns {Promise<Array<string>>} Array of tracked file paths
+   */
+  async listFiles() {
+    if (!this.state) {
+      await this.load();
+    }
+
+    return Object.keys(this.state.fileStates);
+  }
+
+  /**
    * Clear all file states
    */
   async clearFileStates() {
