@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 **Status**: v0.3 Complete ✅ (Pure JS protobuf, Git backend, Conflicts, Worktrees, Background ops, Browser support)
-**Test Coverage**: 265 tests, 100% passing
+**Test Coverage**: 279 tests, 100% passing
 **Ready for**: Production experimentation, prototyping, tool building with full Git interop
 
 A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers. Built on pluggable storage backends with isomorphic-git as the default.
@@ -176,6 +176,8 @@ await jj.undo(); // Conflicts come back
 - ✅ **Git backend integration**: Real Git commits from JJ changes (isomorphic-git)
 - ✅ **Colocated repositories**: Both .git and .jj directories work together
 - ✅ **Automatic commit creation**: describe() creates Git commits automatically
+- ✅ **File reading API**: read(), cat(), listFiles() for reading from working copy or any change
+- ✅ **User configuration**: Persistent user name/email configuration with generic config storage
 - ✅ **First-class conflicts**: ConflictModel with detection, storage, and resolution
 - ✅ **Git fetch/push operations**: Full remote repository synchronization
 - ✅ **jj CLI compatibility**: Repositories created by isomorphic-jj are readable by jj CLI
@@ -385,6 +387,48 @@ await jj.describe({ message: 'Update' });
 // Or create a new stacked change
 await jj.new({ message: 'Next feature' });
 // Old working copy becomes a regular change
+```
+
+### File Reading
+
+```javascript
+// Read from working copy
+const content = await jj.read({ path: 'file.js' });
+
+// Read from specific change
+const oldVersion = await jj.read({
+  path: 'file.js',
+  changeId: 'abc123'
+});
+
+// List all files in working copy
+const files = await jj.listFiles();
+
+// List files from specific change
+const oldFiles = await jj.listFiles({ changeId: 'abc123' });
+
+// cat() is an alias for read()
+const data = await jj.cat({ path: 'README.md' });
+```
+
+### User Configuration
+
+```javascript
+// Get current user
+const user = jj.userConfig.getUser();
+console.log(`${user.name} <${user.email}>`);
+
+// Update user info
+await jj.userConfig.setUser({
+  name: 'Alice Developer',
+  email: 'alice@example.com'
+});
+
+// Generic config with dot notation
+await jj.userConfig.set('ui.color', 'always');
+await jj.userConfig.set('editor.command', 'vim');
+
+const color = jj.userConfig.get('ui.color'); // 'always'
 ```
 
 ### Change-Centric Workflow
@@ -615,6 +659,9 @@ type JJ = {
   
   // Working copy operations (no staging!)
   write(args: { path: string; data: Uint8Array | string }): Promise<void>;
+  read(args: { path: string; changeId?: ChangeID; encoding?: string }): Promise<string | Uint8Array>;
+  cat(args: { path: string; changeId?: ChangeID; encoding?: string }): Promise<string | Uint8Array>;
+  listFiles(args?: { changeId?: ChangeID }): Promise<string[]>;
   move(args: { from: string; to: string }): Promise<void>;
   remove(args: { path: string }): Promise<void>;
   
@@ -674,8 +721,37 @@ type JJ = {
   
   // Git import/export
   git: {
-    import(): Promise<void>;  // Git refs → JJ bookmarks
-    export(args?: { bookmark?: string }): Promise<void>;  // JJ → Git refs
+    init(opts?: { userName?: string; userEmail?: string; defaultBranch?: string }): Promise<void>;
+    fetch(args: { remote: string; refs?: string[] }): Promise<void>;
+    push(args: { remote: string; refs?: string[]; force?: boolean }): Promise<void>;
+  };
+
+  // User configuration
+  userConfig: {
+    getUser(): { name: string; email: string };
+    setUser(user: { name: string; email: string }): Promise<void>;
+    get(key: string): any;
+    set(key: string, value: any): Promise<void>;
+    load(): Promise<void>;
+    save(): Promise<void>;
+  };
+
+  // v0.3: Worktrees
+  worktree: {
+    add(args: { path: string; name: string; changeId?: ChangeID }): Promise<Worktree>;
+    remove(args: { id: string; force?: boolean }): Promise<void>;
+    list(): Promise<Worktree[]>;
+    get(id: string): Promise<Worktree | null>;
+  };
+
+  // v0.3: Background operations
+  background: {
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    queue(operation: () => Promise<any>, opts?: any): Promise<{ promise: Promise<any> }>;
+    enableAutoSnapshot(opts?: { debounceMs?: number }): Promise<void>;
+    watch(path: string, callback: (event: string, filename: string) => void): Promise<string>;
+    unwatch(watcherId: string): Promise<void>;
   };
 };
 ```
