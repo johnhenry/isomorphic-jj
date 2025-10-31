@@ -87,6 +87,48 @@ export async function createJJ(options) {
     return { name: user.name, email: user.email, hostname: 'localhost' };
   };
 
+  // Helper to snapshot current filesystem state
+  // This is called BEFORE every operation to enable undo
+  const snapshotFilesystem = async () => {
+    const fileSnapshot = {};
+
+    try {
+      const trackedFiles = await workingCopy.listFiles();
+
+      // Safeguards to prevent excessive memory usage
+      const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB per file
+      const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB total snapshot size
+      let totalSnapshotSize = 0;
+
+      for (const filePath of trackedFiles) {
+        try {
+          const fullPath = path.join(dir, filePath);
+          const stats = await fs.promises.stat(fullPath);
+
+          // Skip files that are too large
+          if (stats.size > MAX_FILE_SIZE) {
+            continue;
+          }
+
+          // Stop if total snapshot size would exceed limit
+          if (totalSnapshotSize + stats.size > MAX_TOTAL_SIZE) {
+            break;
+          }
+
+          const content = await fs.promises.readFile(fullPath, 'utf-8');
+          fileSnapshot[filePath] = content;
+          totalSnapshotSize += stats.size;
+        } catch (error) {
+          // Skip files that can't be read (binary, deleted, etc.)
+        }
+      }
+    } catch (error) {
+      // If we can't list files, return empty snapshot
+    }
+
+    return fileSnapshot;
+  };
+
   // Create Git backend if specified
   // Auto-detect: if git instance provided, use isomorphic-git backend
   let gitBackend = null;
@@ -694,6 +736,9 @@ export async function createJJ(options) {
       await workingCopy.load();
       await userConfig.load();
 
+      // Snapshot filesystem BEFORE operation (for undo)
+      const fileSnapshotBefore = await snapshotFilesystem();
+
       const currentChangeId = workingCopy.getCurrentChangeId();
       const change = await graph.getChange(currentChangeId);
       const user = userConfig.getUser();
@@ -791,7 +836,7 @@ export async function createJJ(options) {
       // Save the updated change
       await graph.updateChange(change);
 
-      // Record operation
+      // Record operation with filesystem snapshot from BEFORE operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: {
@@ -806,6 +851,7 @@ export async function createJJ(options) {
           remoteBookmarks: {},
           heads: [currentChangeId],
           workingCopy: currentChangeId,
+          fileSnapshot: fileSnapshotBefore, // Store filesystem state from before operation
         },
       });
 
@@ -819,6 +865,9 @@ export async function createJJ(options) {
       await graph.load();
       await workingCopy.load();
       await userConfig.load();
+
+      // Snapshot filesystem BEFORE operation (for undo)
+      const fileSnapshot = await snapshotFilesystem();
 
       const parentChangeId = workingCopy.getCurrentChangeId();
       const newChangeId = generateChangeId();
@@ -846,7 +895,7 @@ export async function createJJ(options) {
       await graph.addChange(newChange);
       await workingCopy.setCurrentChange(newChangeId);
 
-      // Record operation
+      // Record operation with filesystem snapshot
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: {
@@ -861,6 +910,7 @@ export async function createJJ(options) {
           remoteBookmarks: {},
           heads: [newChangeId],
           workingCopy: newChangeId,
+          fileSnapshot, // Store filesystem state before operation
         },
       });
 
@@ -1038,6 +1088,29 @@ export async function createJJ(options) {
       // Restore state from previous view
       await workingCopy.setCurrentChange(previousView.workingCopy);
 
+      // Restore filesystem from previous operation's snapshot (taken BEFORE that operation)
+      // This is how JJ snapshots the working copy before every command
+      if (previousView.fileSnapshot) {
+        for (const [filePath, content] of Object.entries(previousView.fileSnapshot)) {
+          try {
+            const fullPath = path.join(dir, filePath);
+
+            // Ensure directory exists
+            const pathParts = filePath.split('/');
+            if (pathParts.length > 1) {
+              const dirPath = pathParts.slice(0, -1).join('/');
+              const fullDirPath = path.join(dir, dirPath);
+              await fs.promises.mkdir(fullDirPath, { recursive: true });
+            }
+
+            // Write file content
+            await fs.promises.writeFile(fullPath, content, 'utf8');
+          } catch (error) {
+            console.warn(`Failed to restore file ${filePath}: ${error.message}`);
+          }
+        }
+      }
+
       // Restore conflicts state from before the undone operation
       // The conflictsSnapshot in an operation represents the state BEFORE that operation ran
       await conflicts.load();
@@ -1076,26 +1149,62 @@ export async function createJJ(options) {
      */
     async squash(args) {
       await graph.load();
-      
+      await workingCopy.load();
+      await userConfig.load();
+
       const sourceChange = await graph.getChange(args.source);
       const destChange = await graph.getChange(args.dest);
-      
+
       if (!sourceChange) {
         throw new JJError('CHANGE_NOT_FOUND', `Source change ${args.source} not found`);
       }
-      
+
       if (!destChange) {
         throw new JJError('CHANGE_NOT_FOUND', `Destination change ${args.dest} not found`);
       }
-      
+
+      const currentWorkingCopyId = workingCopy.getCurrentChangeId();
+      const isSquashingWorkingCopy = args.source === currentWorkingCopyId;
+
       // Mark source as abandoned
       sourceChange.abandoned = true;
       await graph.updateChange(sourceChange);
-      
+
       // Update description of dest to indicate squash
       destChange.description += `\n\n(squashed from ${args.source.slice(0, 8)})`;
       await graph.updateChange(destChange);
-      
+
+      let newWorkingCopyId = currentWorkingCopyId;
+
+      // If squashing the working copy, create a new empty working copy on top of dest
+      if (isSquashingWorkingCopy) {
+        const user = userConfig.getUser();
+        const newChangeId = generateChangeId();
+        const newChange = {
+          changeId: newChangeId,
+          commitId: '0000000000000000000000000000000000000000',
+          parents: [args.dest],
+          tree: '0000000000000000000000000000000000000000',
+          author: {
+            name: user.name,
+            email: user.email,
+            timestamp: new Date().toISOString(),
+          },
+          committer: {
+            name: user.name,
+            email: user.email,
+            timestamp: new Date().toISOString(),
+          },
+          description: '(no description set)',
+          timestamp: new Date().toISOString(),
+          fileSnapshot: {},
+        };
+
+        await graph.addChange(newChange);
+        await workingCopy.setCurrentChange(newChangeId);
+        newWorkingCopyId = newChangeId;
+      }
+
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
@@ -1106,10 +1215,10 @@ export async function createJJ(options) {
           bookmarks: {},
           remoteBookmarks: {},
           heads: [args.dest],
-          workingCopy: workingCopy.getCurrentChangeId(),
+          workingCopy: newWorkingCopyId,
         },
       });
-      
+
       return destChange;
     },
     
@@ -1197,17 +1306,21 @@ export async function createJJ(options) {
      */
     async split(args) {
       await graph.load();
-      
+      await workingCopy.load();
+
       const originalChange = await graph.getChange(args.changeId);
-      
+
       if (!originalChange) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
       }
-      
+
+      const currentWorkingCopyId = workingCopy.getCurrentChangeId();
+      const isSplittingWorkingCopy = args.changeId === currentWorkingCopyId;
+
       // Create first split change (keep original ID)
       originalChange.description = args.description1 || originalChange.description + ' (part 1)';
       await graph.updateChange(originalChange);
-      
+
       // Create second split change as new change on top
       const newChangeId = generateChangeId();
       const newChange = {
@@ -1220,9 +1333,16 @@ export async function createJJ(options) {
         description: args.description2 || originalChange.description + ' (part 2)',
         timestamp: new Date().toISOString(),
       };
-      
+
       await graph.addChange(newChange);
-      
+
+      // If splitting the working copy, move to the second (child) commit
+      let newWorkingCopyId = currentWorkingCopyId;
+      if (isSplittingWorkingCopy) {
+        await workingCopy.setCurrentChange(newChangeId);
+        newWorkingCopyId = newChangeId;
+      }
+
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
@@ -1233,10 +1353,10 @@ export async function createJJ(options) {
           bookmarks: {},
           remoteBookmarks: {},
           heads: [newChangeId],
-          workingCopy: workingCopy.getCurrentChangeId(),
+          workingCopy: newWorkingCopyId,
         },
       });
-      
+
       return { original: originalChange, new: newChange };
     },
     

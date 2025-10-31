@@ -1,8 +1,21 @@
 // Comprehensive demo of isomorphic-jj v0.3 features
 import * as git from 'isomorphic-git';
-import fs from 'fs';
+import fs, { rmSync }  from 'fs';
 import http from 'isomorphic-git/http/node';
 import { createJJ } from './src/index.js';
+
+// remove existing test repos
+try {
+  rmSync('./test-repo', { recursive: true, force: true });
+} catch (e) {
+  // ignore
+}
+try {
+  rmSync('./test-repo-wt1', { recursive: true, force: true });
+} catch (e) {
+  // ignore
+}
+
 
 console.log('🚀 isomorphic-jj v0.3 Feature Showcase\n');
 console.log('═══════════════════════════════════════════════════════════\n');
