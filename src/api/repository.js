@@ -9,6 +9,8 @@ import { OperationLog } from '../core/operation-log.js';
 import { BookmarkStore } from '../core/bookmark-store.js';
 import { RevsetEngine } from '../core/revset-engine.js';
 import { ConflictModel } from '../core/conflict-model.js';
+import { WorktreeManager } from '../core/worktree-manager.js';
+import { BackgroundOps } from '../core/background-ops.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
@@ -74,7 +76,8 @@ export async function createJJ(options) {
   const bookmarks = new BookmarkStore(storage);
   const revset = new RevsetEngine(graph, workingCopy);
   const conflicts = new ConflictModel(storage, fs);
-  
+  const worktrees = new WorktreeManager(storage, fs, dir);
+
   // Create Git backend if specified
   // Auto-detect: if git instance provided, use isomorphic-git backend
   let gitBackend = null;
@@ -89,7 +92,7 @@ export async function createJJ(options) {
     gitBackend = backend;
   }
 
-  // Create JJ instance
+  // Create JJ instance (backgroundOps will be initialized after jj object is created)
   const jj = {
     storage,
     graph,
@@ -98,6 +101,8 @@ export async function createJJ(options) {
     bookmarks,
     revset,
     conflicts,
+    worktrees,
+    backgroundOps: null,  // Will be initialized below
     backend: gitBackend,  // Expose backend for advanced users
     
     /**
@@ -120,6 +125,7 @@ export async function createJJ(options) {
       await oplog.init();
       await bookmarks.init();
       await conflicts.init();
+      await worktrees.init();
 
       // Create root change
       const rootChangeId = generateChangeId();
@@ -1100,6 +1106,7 @@ export async function createJJ(options) {
         await oplog.init();
         await bookmarks.init();
         await conflicts.init();
+        await worktrees.init();
 
         // Create root change
         const rootChangeId = generateChangeId();
@@ -1394,6 +1401,216 @@ export async function createJJ(options) {
         await conflicts.save();
 
         return { resolved: true };
+      },
+    },
+
+    /**
+     * Worktree API - Multiple working copies
+     */
+    worktree: {
+      /**
+       * Add a new worktree
+       *
+       * @param {Object} args - Worktree arguments
+       * @param {string} args.path - Path for the new worktree
+       * @param {string} [args.name] - Optional name
+       * @param {string} [args.changeId] - Change to check out
+       */
+      async add(args) {
+        await worktrees.load();
+        const worktree = await worktrees.add(args);
+
+        // If a change was specified, check it out in the new worktree
+        if (args.changeId) {
+          await graph.load();
+          const change = await graph.getChange(args.changeId);
+          if (!change) {
+            throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
+          }
+
+          // Restore files from change snapshot to the new worktree
+          if (change.fileSnapshot) {
+            for (const [filePath, content] of Object.entries(change.fileSnapshot)) {
+              try {
+                const fullPath = path.join(args.path, filePath);
+
+                // Ensure directory exists
+                const pathParts = filePath.split('/');
+                if (pathParts.length > 1) {
+                  const dirPath = pathParts.slice(0, -1).join('/');
+                  const fullDirPath = path.join(args.path, dirPath);
+                  await fs.promises.mkdir(fullDirPath, { recursive: true });
+                }
+
+                // Write file content
+                await fs.promises.writeFile(fullPath, content, 'utf8');
+              } catch (error) {
+                console.warn(`Failed to restore file ${filePath} to worktree: ${error.message}`);
+              }
+            }
+          }
+        }
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          description: `add worktree at ${args.path}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return worktree;
+      },
+
+      /**
+       * Remove a worktree
+       *
+       * @param {Object} args - Remove arguments
+       * @param {string} args.id - Worktree ID
+       * @param {boolean} [args.force=false] - Force removal
+       */
+      async remove(args) {
+        if (!args || !args.id) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing worktree ID');
+        }
+
+        await worktrees.load();
+        await worktrees.remove(args.id, args.force);
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          description: `remove worktree ${args.id}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { removed: true };
+      },
+
+      /**
+       * List all worktrees
+       */
+      async list() {
+        await worktrees.load();
+        return worktrees.list();
+      },
+
+      /**
+       * Get a specific worktree
+       *
+       * @param {string} id - Worktree ID
+       */
+      async get(id) {
+        await worktrees.load();
+        const worktree = worktrees.get(id);
+        if (!worktree) {
+          throw new JJError('WORKTREE_NOT_FOUND', `Worktree ${id} not found`);
+        }
+        return worktree;
+      },
+    },
+
+    /**
+     * Background operations API
+     */
+    background: {
+      /**
+       * Start background operations
+       */
+      async start() {
+        if (!jj.backgroundOps) {
+          jj.backgroundOps = new BackgroundOps(jj, fs, dir);
+        }
+        await jj.backgroundOps.start();
+        return { started: true };
+      },
+
+      /**
+       * Stop background operations
+       */
+      async stop() {
+        if (!jj.backgroundOps) {
+          return { stopped: false };
+        }
+        await jj.backgroundOps.stop();
+        return { stopped: true };
+      },
+
+      /**
+       * Queue a background operation
+       *
+       * @param {Function} operation - Async operation
+       * @param {Object} [opts] - Options
+       */
+      async queue(operation, opts) {
+        if (!jj.backgroundOps) {
+          throw new JJError('BACKGROUND_OPS_NOT_STARTED', 'Background operations not started', {
+            suggestion: 'Call jj.background.start() first',
+          });
+        }
+        return await jj.backgroundOps.queue(operation, opts);
+      },
+
+      /**
+       * List background operations
+       *
+       * @param {Object} [opts] - Filter options
+       */
+      listOperations(opts) {
+        if (!jj.backgroundOps) {
+          return [];
+        }
+        return jj.backgroundOps.listOperations(opts);
+      },
+
+      /**
+       * Enable auto-snapshot on file changes
+       *
+       * @param {Object} [opts] - Options
+       */
+      async enableAutoSnapshot(opts) {
+        if (!jj.backgroundOps) {
+          await this.start();
+        }
+        return await jj.backgroundOps.enableAutoSnapshot(opts);
+      },
+
+      /**
+       * Watch a path for changes
+       *
+       * @param {string} path - Path to watch
+       * @param {Function} callback - Callback(event, filename)
+       */
+      async watch(path, callback) {
+        if (!jj.backgroundOps) {
+          await this.start();
+        }
+        return await jj.backgroundOps.watch(path, callback);
+      },
+
+      /**
+       * Unwatch a path
+       *
+       * @param {string} watcherId - Watcher ID
+       */
+      async unwatch(watcherId) {
+        if (!jj.backgroundOps) {
+          return;
+        }
+        await jj.backgroundOps.unwatch(watcherId);
       },
     },
   };

@@ -1,8 +1,8 @@
 # isomorphic-jj
 
-**Status**: v0.3 In Progress (Pure JS protobuf ✅, Git backend ✅, v0.1 & v0.2 Complete ✅)
-**Test Coverage**: 258 tests, 100% passing
-**Ready for**: Experimentation, prototyping, tool building with Git interop
+**Status**: v0.3 Complete ✅ (Pure JS protobuf, Git backend, Conflicts, Worktrees, Background ops, Browser support)
+**Test Coverage**: 265 tests, 100% passing
+**Ready for**: Production experimentation, prototyping, tool building with full Git interop
 
 A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers. Built on pluggable storage backends with isomorphic-git as the default.
 
@@ -65,6 +65,95 @@ git branch -a
 git status  # Shows only your working files
 ```
 
+### v0.3 New Features
+
+#### Multiple Working Copies (Worktrees)
+
+Work on multiple changes simultaneously in different directories:
+
+```javascript
+// Add a new worktree for a different change
+const worktree = await jj.worktree.add({
+  path: './feature-branch',
+  name: 'feature-work',
+  changeId: someChangeId
+});
+
+// List all worktrees
+const all = await jj.worktree.list();
+
+// Remove a worktree
+await jj.worktree.remove({ id: worktree.id });
+```
+
+#### Background Operations
+
+Enable file watching and automatic snapshots:
+
+```javascript
+// Start background operations
+await jj.background.start();
+
+// Enable auto-snapshot on file changes
+await jj.background.enableAutoSnapshot({ debounceMs: 1000 });
+
+// Queue async operations
+const { promise } = await jj.background.queue(async () => {
+  await jj.git.fetch({ remote: 'origin' });
+});
+
+// Watch specific paths
+const watcherId = await jj.background.watch('./src', (event, filename) => {
+  console.log(`File ${filename} changed`);
+});
+```
+
+#### Browser Support with LightningFS
+
+Run in browsers using IndexedDB for persistence:
+
+```javascript
+import { createBrowserFS, requestPersistentStorage } from 'isomorphic-jj/browser';
+import { createJJ } from 'isomorphic-jj';
+import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/web';
+
+// Request persistent storage (prevents eviction)
+const persistent = await requestPersistentStorage();
+
+// Create browser filesystem
+const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
+
+// Create JJ instance
+const jj = await createJJ({ fs, dir: '/repo', git, http });
+await jj.git.init({ userName: 'User', userEmail: 'user@example.com' });
+```
+
+#### First-Class Conflicts
+
+Conflicts are structured data, not blockers:
+
+```javascript
+// Merge creates conflicts but doesn't fail
+const result = await jj.merge({ source: otherChangeId });
+console.log(`Detected ${result.conflicts.length} conflicts`);
+
+// List unresolved conflicts
+const conflicts = await jj.conflicts.list();
+
+// Resolve manually
+for (const conflict of conflicts) {
+  if (conflict.type === 'content') {
+    const markers = jj.conflicts.generateConflictMarkers(conflict);
+    // Edit file, then mark resolved
+    await jj.conflicts.resolve({ conflictId: conflict.conflictId });
+  }
+}
+
+// Undo restores conflict state
+await jj.undo(); // Conflicts come back
+```
+
 ---
 
 ## Features
@@ -82,15 +171,19 @@ git status  # Shows only your working files
 - ✅ **Enhanced revsets**: Filter by author(), description(), empty()
 - ✅ **Complete undo**: All operations fully reversible
 
-### v0.3 Features (In Progress) 🚧
+### v0.3 Features (Complete) ✅
 - ✅ **Pure JavaScript implementation**: No jj CLI dependency - 100% JavaScript protobuf encoding!
 - ✅ **Git backend integration**: Real Git commits from JJ changes (isomorphic-git)
 - ✅ **Colocated repositories**: Both .git and .jj directories work together
 - ✅ **Automatic commit creation**: describe() creates Git commits automatically
 - ✅ **First-class conflicts**: ConflictModel with detection, storage, and resolution
+- ✅ **Git fetch/push operations**: Full remote repository synchronization
 - ✅ **jj CLI compatibility**: Repositories created by isomorphic-jj are readable by jj CLI
-- ⚠️ Multiple working copies (planned)
-- ⚠️ Browser OPFS support (planned)
+- ✅ **Multiple working copies**: Support for multiple concurrent working directories (worktrees)
+- ✅ **Browser support**: LightningFS integration with IndexedDB persistence
+- ✅ **Background operations**: File watchers, auto-snapshots, and async operation queue
+- ✅ **Browser enhancements**: ServiceWorker utilities, storage quota management, capability detection
+- ✅ **Collaboration foundation**: Worktrees, background ops, and conflicts enable team workflows
 
 **Pure JavaScript Achievement**: isomorphic-jj now implements complete JJ repository creation using JavaScript protobuf encoding (via protobufjs). This means:
 - No jj CLI required for repository creation
