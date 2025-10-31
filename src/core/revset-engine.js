@@ -334,10 +334,10 @@ export class RevsetEngine {
 
     for (const changeId of changeIds) {
       // A change is a head if it has no children in the set
-      const descendants = await this.graph.getDescendants(changeId);
-      const hasDescendantInSet = descendants.some(d => d !== changeId && changeSet.has(d));
+      const children = this.graph.getChildren(changeId);
+      const hasChildInSet = children.some(c => changeSet.has(c));
 
-      if (!hasDescendantInSet) {
+      if (!hasChildInSet) {
         heads.push(changeId);
       }
     }

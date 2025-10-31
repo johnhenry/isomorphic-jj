@@ -237,11 +237,175 @@ describe('RevsetEngine', () => {
 
     it('should filter empty changes', async () => {
       const result = await revset.evaluate('empty()');
-      
+
       expect(result).toHaveLength(2);
       expect(result).toContain(tid(1));
       expect(result).toContain(tid(3));
       expect(result).not.toContain(tid(2));
+    });
+  });
+
+  describe('v0.4 Revset Functions', () => {
+    beforeEach(async () => {
+      // Create a graph with multiple branches for testing
+      //       1 (root)
+      //      / \
+      //     2   3
+      //    / \   \
+      //   4   5   6
+      //       |
+      //       7
+
+      const changes = [
+        {
+          changeId: tid(1),
+          commitId: '0000000000000000000000000000000000000001',
+          parents: [],
+          tree: '0000000000000000000000000000000000000000',
+          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+          description: 'Root',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
+        {
+          changeId: tid(2),
+          commitId: '0000000000000000000000000000000000000002',
+          parents: [tid(1)],
+          tree: '0000000000000000000000000000000000000000',
+          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+          description: 'Branch A',
+          timestamp: '2025-10-30T12:01:00.000Z',
+        },
+        {
+          changeId: tid(3),
+          commitId: '0000000000000000000000000000000000000003',
+          parents: [tid(1)],
+          tree: '0000000000000000000000000000000000000000',
+          author: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+          committer: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+          description: 'Branch B',
+          timestamp: '2025-10-30T12:02:00.000Z',
+        },
+        {
+          changeId: tid(4),
+          commitId: '0000000000000000000000000000000000000004',
+          parents: [tid(2)],
+          tree: '0000000000000000000000000000000000000000',
+          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:03:00.000Z' },
+          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:03:00.000Z' },
+          description: 'Feature A1',
+          timestamp: '2025-10-30T12:03:00.000Z',
+        },
+        {
+          changeId: tid(5),
+          commitId: '0000000000000000000000000000000000000005',
+          parents: [tid(2)],
+          tree: '0000000000000000000000000000000000000000',
+          author: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:04:00.000Z' },
+          committer: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:04:00.000Z' },
+          description: 'Feature A2',
+          timestamp: '2025-10-30T12:04:00.000Z',
+        },
+        {
+          changeId: tid(6),
+          commitId: '0000000000000000000000000000000000000006',
+          parents: [tid(3)],
+          tree: '0000000000000000000000000000000000000000',
+          author: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:05:00.000Z' },
+          committer: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:05:00.000Z' },
+          description: 'Feature B1',
+          timestamp: '2025-10-30T12:05:00.000Z',
+        },
+        {
+          changeId: tid(7),
+          commitId: '0000000000000000000000000000000000000007',
+          parents: [tid(5)],
+          tree: '0000000000000000000000000000000000000000',
+          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:06:00.000Z' },
+          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:06:00.000Z' },
+          description: 'Feature A2.1',
+          timestamp: '2025-10-30T12:06:00.000Z',
+        },
+      ];
+
+      for (const change of changes) {
+        await graph.addChange(change);
+      }
+    });
+
+    describe('roots()', () => {
+      it('should find root commits in the entire graph', async () => {
+        const result = await revset.evaluate('roots(all())');
+
+        expect(result).toHaveLength(1);
+        expect(result).toContain(tid(1)); // Only commit with no parents
+      });
+
+      it('should find roots in a subset', async () => {
+        // Get all descendants of commit 2, then find roots (should be commit 2 itself)
+        const result = await revset.evaluate('roots(all())');
+
+        // In the full graph, only tid(1) has no parents
+        expect(result).toContain(tid(1));
+      });
+    });
+
+    describe('heads()', () => {
+      it('should find head commits (no children)', async () => {
+        const result = await revset.evaluate('heads(all())');
+
+        expect(result).toHaveLength(3);
+        expect(result).toContain(tid(4)); // Leaf of branch A
+        expect(result).toContain(tid(6)); // Leaf of branch B
+        expect(result).toContain(tid(7)); // Leaf of branch A2
+      });
+    });
+
+    describe('latest()', () => {
+      it('should return latest commit by default', async () => {
+        const result = await revset.evaluate('latest(all())');
+
+        expect(result).toHaveLength(1);
+        expect(result).toContain(tid(7)); // Most recent timestamp
+      });
+
+      it('should return N latest commits', async () => {
+        const result = await revset.evaluate('latest(all(), 3)');
+
+        expect(result).toHaveLength(3);
+        expect(result).toContain(tid(7)); // Newest
+        expect(result).toContain(tid(6));
+        expect(result).toContain(tid(5));
+      });
+    });
+
+    describe('bookmarks()', () => {
+      it('should return empty array when no bookmarks', async () => {
+        const result = await revset.evaluate('bookmarks()');
+
+        expect(result).toEqual([]);
+      });
+
+      it('should return empty array with pattern when no bookmarks', async () => {
+        const result = await revset.evaluate('bookmarks(feat*)');
+
+        expect(result).toEqual([]);
+      });
+    });
+
+    describe('tags()', () => {
+      it('should return empty array (stub implementation)', async () => {
+        const result = await revset.evaluate('tags()');
+
+        expect(result).toEqual([]);
+      });
+
+      it('should return empty array with pattern (stub implementation)', async () => {
+        const result = await revset.evaluate('tags(v*)');
+
+        expect(result).toEqual([]);
+      });
     });
   });
 });
