@@ -338,7 +338,11 @@ export class IsomorphicGitBackend {
         } catch (error) {
           // Skip files that can't be staged (like .git directory)
           if (error.code !== 'ENOENT') {
-            console.warn(`Warning: Could not stage ${filepath}:`, error.message);
+            throw new JJError(
+              'STAGE_FILE_FAILED',
+              `Could not stage ${filepath}: ${error.message}`,
+              { filepath, originalError: error.message }
+            );
           }
         }
       }

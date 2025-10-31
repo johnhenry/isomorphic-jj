@@ -237,7 +237,7 @@ describe('Git Backend Integration', () => {
       await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
     });
 
-    it('should continue working if Git commit fails', async () => {
+    it('should throw error if Git commit fails', async () => {
       // Temporarily break the backend
       const originalCreateCommit = jj.backend.createCommit;
       jj.backend.createCommit = async () => {
@@ -245,14 +245,9 @@ describe('Git Backend Integration', () => {
       };
 
       await jj.write({ path: 'file.txt', data: 'content' });
-      const change = await jj.describe({ message: 'Test' });
 
-      // JJ metadata should still be created
-      expect(change.changeId).toBeDefined();
-      expect(change.description).toBe('Test');
-
-      // Commit ID might be placeholder
-      // JJ should continue working even if Git fails
+      // Git sync failures should now throw errors instead of being silent
+      await expect(jj.describe({ message: 'Test' })).rejects.toThrow('Failed to sync change');
 
       // Restore backend
       jj.backend.createCommit = originalCreateCommit;

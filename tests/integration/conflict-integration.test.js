@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/node';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -177,8 +178,10 @@ describe('First-Class Conflicts Integration', () => {
 
       // Create new JJ instance (simulating restart)
       const jj2 = await createJJ({
-        backend: 'isomorphic-git',
-        backendOptions: { fs, dir: testDir },
+        fs,
+        dir: testDir,
+        git,
+        http,
       });
 
       const conflictsAfter = await jj2.conflicts.list();

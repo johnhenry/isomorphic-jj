@@ -113,8 +113,8 @@ describe('LazyGitBackend (v0.4)', () => {
       expect(result.blob.toString()).toBe('Fetched content');
     });
 
-    it.skip('should track missing objects and attempt fetch', async () => {
-      const missingOid = 'fedcbafedcbafedcbafedcbafedcbafedcbafed';
+    it('should track missing objects and attempt fetch', async () => {
+      const missingOid = 'fedcbafedcbafedcbafedcbafedcbafedcbafe01';
       let fetchAttempted = false;
 
       backend._gitReadBlob = async () => {
@@ -123,17 +123,14 @@ describe('LazyGitBackend (v0.4)', () => {
         throw error;
       };
 
-      backend._fetchObject = async () => {
+      backend._fetchObject = async (oid) => {
         fetchAttempted = true;
+        expect(oid).toBe(missingOid);
         // Mock fetch that doesn't actually find the object
         throw new Error('Object not on remote');
       };
 
-      try {
-        await backend.readBlob(missingOid);
-      } catch (e) {
-        // Expected to fail
-      }
+      await expect(backend.readBlob(missingOid)).rejects.toThrow('Object not on remote');
 
       // Verify that fetch was attempted
       expect(fetchAttempted).toBe(true);

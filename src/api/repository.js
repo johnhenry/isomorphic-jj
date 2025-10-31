@@ -32,8 +32,6 @@ import path from 'path';
  * @param {Function} [options.hooks.preChange] - Called before any change operation
  * @param {Function} [options.hooks.postChange] - Called after any change operation
  *
- * @deprecated options.backendOptions - Use flat options instead (fs, dir, git, http)
- *
  * @returns {Promise<Object>} Initialized JJ instance
  */
 export async function createJJ(options) {
@@ -43,26 +41,12 @@ export async function createJJ(options) {
     });
   }
 
-  // Handle legacy backendOptions format (deprecated)
-  let fs, dir, git, http, backend, hooks;
-
-  if (options.backendOptions) {
-    console.warn('[isomorphic-jj] DEPRECATED: backendOptions is deprecated. Use flat options: { fs, dir, git, http }');
-    fs = options.backendOptions.fs;
-    dir = options.backendOptions.dir;
-    git = options.backendOptions.git;
-    http = options.backendOptions.http;
-    backend = options.backend;
-    hooks = options.hooks || {};
-  } else {
-    // New flat format
-    fs = options.fs;
-    dir = options.dir;
-    git = options.git;
-    http = options.http;
-    backend = options.backend;
-    hooks = options.hooks || {};
-  }
+  const fs = options.fs;
+  const dir = options.dir;
+  const git = options.git;
+  const http = options.http;
+  const backend = options.backend;
+  const hooks = options.hooks || {};
 
   if (!fs) {
     throw new JJError('INVALID_CONFIG', 'Missing fs', {
@@ -196,8 +180,16 @@ export async function createJJ(options) {
       change.commitId = commitSha;
       await baseGraph.updateChange(change);
     } catch (error) {
-      console.warn(`Failed to sync change ${change.changeId.slice(0, 8)} to Git:`, error.message);
-      // Continue even if Git commit fails - JJ metadata is primary
+      // Throw error - Git sync failures should not be silent
+      throw new JJError(
+        'GIT_SYNC_FAILED',
+        `Failed to sync change ${change.changeId.slice(0, 8)} to Git: ${error.message}`,
+        {
+          changeId: change.changeId,
+          originalError: error.message,
+          suggestion: 'Check Git backend configuration and repository state',
+        }
+      );
     }
   };
 
@@ -926,15 +918,13 @@ export async function createJJ(options) {
           const fullPath = path.join(dir, filePath);
           const stats = await fs.promises.stat(fullPath);
 
-          // Skip files that are too large
+          // Skip files that are too large (silently - this is an optimization)
           if (stats.size > MAX_FILE_SIZE) {
-            console.warn(`Skipping large file ${filePath} (${stats.size} bytes) from snapshot`);
             continue;
           }
 
-          // Stop if total snapshot size would exceed limit
+          // Stop if total snapshot size would exceed limit (silently - optimization)
           if (totalSnapshotSize + stats.size > MAX_TOTAL_SIZE) {
-            console.warn(`Snapshot size limit reached (${MAX_TOTAL_SIZE} bytes), skipping remaining files`);
             break;
           }
 
@@ -942,8 +932,12 @@ export async function createJJ(options) {
           fileSnapshot[filePath] = content;
           totalSnapshotSize += stats.size;
         } catch (error) {
-          // Skip files that can't be read (binary, deleted, etc.)
-          console.warn(`Could not snapshot file ${filePath}: ${error.message}`);
+          // Throw on file read errors - don't silently skip
+          throw new JJError(
+            'SNAPSHOT_FILE_FAILED',
+            `Could not snapshot file ${filePath}: ${error.message}`,
+            { filePath, originalError: error.message, suggestion: 'File may be binary, deleted, or inaccessible' }
+          );
         }
       }
       change.fileSnapshot = fileSnapshot;
@@ -1255,7 +1249,11 @@ export async function createJJ(options) {
               mode: stats.mode,
             });
           } catch (error) {
-            console.warn(`Failed to restore file ${filePath}: ${error.message}`);
+            throw new JJError(
+              'FILE_RESTORE_FAILED',
+              `Failed to restore file ${filePath}: ${error.message}`,
+              { filePath, originalError: error.message }
+            );
           }
         }
       }
@@ -1330,7 +1328,11 @@ export async function createJJ(options) {
             // Write file content
             await fs.promises.writeFile(fullPath, content, 'utf8');
           } catch (error) {
-            console.warn(`Failed to restore file ${filePath}: ${error.message}`);
+            throw new JJError(
+              'UNDO_FILE_RESTORE_FAILED',
+              `Failed to restore file ${filePath} during undo: ${error.message}`,
+              { filePath, originalError: error.message }
+            );
           }
         }
       }
@@ -1853,8 +1855,12 @@ export async function createJJ(options) {
           const content = await fs.promises.readFile(path.join(dir, file), 'utf-8');
           leftFiles.set(file, content);
         } catch (error) {
-          // File might be deleted or binary
-          console.warn(`Could not read file ${file} for merge: ${error.message}`);
+          // File might be deleted or binary - throw error for explicit handling
+          throw new JJError(
+            'MERGE_FILE_READ_FAILED',
+            `Could not read file ${file} for merge: ${error.message}`,
+            { file, originalError: error.message, suggestion: 'File may be binary or deleted' }
+          );
         }
       }
 
@@ -1990,7 +1996,11 @@ export async function createJJ(options) {
                 // Write file content
                 await fs.promises.writeFile(fullPath, content, 'utf8');
               } catch (error) {
-                console.warn(`Failed to restore file ${filePath} to worktree: ${error.message}`);
+                throw new JJError(
+                  'WORKTREE_FILE_RESTORE_FAILED',
+                  `Failed to restore file ${filePath} to worktree: ${error.message}`,
+                  { filePath, worktreePath: args.path, originalError: error.message }
+                );
               }
             }
           }
