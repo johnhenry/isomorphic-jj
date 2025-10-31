@@ -80,6 +80,9 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 - ✅ Git interoperability (colocated repositories)
 - ✅ Automatic Git commit creation on describe()
 - ✅ Stable JJ changeIds with mutable Git commitIds
+- ✅ **Pure JavaScript protobuf implementation** (no jj CLI dependency!)
+- ✅ JJ CLI compatibility (jj can read isomorphic-jj repositories)
+- ✅ Complete .jj repository structure creation
 - ⚠️ Git fetch/push operations (pending)
 
 #### First-Class Conflicts
@@ -262,6 +265,9 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 
 **🚧 v0.3: IN PROGRESS**
 - ✅ Git backend integration (complete)
+- ✅ Pure JavaScript protobuf implementation (complete - 258 tests passing)
+- ✅ JJ CLI compatibility (complete - repositories created by isomorphic-jj are readable by jj CLI)
+- ⚠️ Git fetch/push operations (pending)
 - ⚠️ First-class conflicts (pending)
 - ⚠️ Multiple working copies (pending)
 - ⚠️ Background operations (pending)

@@ -1,7 +1,7 @@
 # isomorphic-jj
 
-**Status**: v0.3 In Progress (Git backend ✅, v0.1 & v0.2 Complete ✅)
-**Test Coverage**: 215 tests, 100% passing
+**Status**: v0.3 In Progress (Pure JS protobuf ✅, Git backend ✅, v0.1 & v0.2 Complete ✅)
+**Test Coverage**: 258 tests, 100% passing
 **Ready for**: Experimentation, prototyping, tool building with Git interop
 
 A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers. Built on pluggable storage backends with isomorphic-git as the default.
@@ -81,23 +81,20 @@ git status  # Shows only your working files
 - ✅ **Complete undo**: All operations fully reversible
 
 ### v0.3 Features (In Progress) 🚧
+- ✅ **Pure JavaScript implementation**: No jj CLI dependency - 100% JavaScript protobuf encoding!
 - ✅ **Git backend integration**: Real Git commits from JJ changes (isomorphic-git)
 - ✅ **Colocated repositories**: Both .git and .jj directories work together
 - ✅ **Automatic commit creation**: describe() creates Git commits automatically
 - ✅ **First-class conflicts**: ConflictModel with detection, storage, and resolution
-- ✅ **Partial jj CLI compatibility**: Minimal .jj structure for Git interop
+- ✅ **jj CLI compatibility**: Repositories created by isomorphic-jj are readable by jj CLI
 - ⚠️ Multiple working copies (planned)
 - ⚠️ Browser OPFS support (planned)
 
-**Note on jj CLI compatibility**: Repositories created by isomorphic-jj work perfectly with Git (you can use `git log`, `git show`, etc.). To use jj CLI with repositories created by isomorphic-jj, follow this workflow:
-
-```bash
-# After creating a repo with isomorphic-jj
-rm -rf ./repo/.jj  # Remove incomplete jj metadata
-cd ./repo
-jj git init --colocate  # Let jj CLI create proper metadata
-jj status  # Now jj CLI works!
-```
+**Pure JavaScript Achievement**: isomorphic-jj now implements complete JJ repository creation using JavaScript protobuf encoding (via protobufjs). This means:
+- No jj CLI required for repository creation
+- Repositories work with both Git and jj CLI
+- Following the same pure-JS model as isomorphic-git
+- Full protobuf implementation for .jj/working_copy and .jj/repo/op_store files
 
 This hybrid approach gives you the best of both worlds: JavaScript-based repo creation and full jj CLI support.
 

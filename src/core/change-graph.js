@@ -204,4 +204,35 @@ export class ChangeGraph {
     this.nodes.set(change.changeId, change);
     await this.save();
   }
+
+  /**
+   * Get all ancestors of a change (recursive parent traversal)
+   *
+   * @param {string} changeId - Starting change ID
+   * @returns {Array<string>} Array of ancestor change IDs (breadth-first order)
+   */
+  getAncestors(changeId) {
+    const ancestors = [];
+    const visited = new Set();
+    const queue = [changeId];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+
+      if (visited.has(current)) {
+        continue;
+      }
+      visited.add(current);
+
+      const parents = this.getParents(current);
+      for (const parent of parents) {
+        if (!visited.has(parent)) {
+          ancestors.push(parent);
+          queue.push(parent);
+        }
+      }
+    }
+
+    return ancestors;
+  }
 }

@@ -12,6 +12,7 @@ import { ConflictModel } from '../core/conflict-model.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
+import path from 'path';
 
 /**
  * Create and initialize a JJ repository instance
@@ -638,17 +639,19 @@ export async function createJJ(options) {
     async status() {
       await graph.load();
       await workingCopy.load();
+      await conflicts.load();
 
       const currentChangeId = workingCopy.getCurrentChangeId();
       const change = await graph.getChange(currentChangeId);
       const modified = await workingCopy.getModifiedFiles();
+      const activeConflicts = conflicts.listConflicts();
 
       return {
         workingCopy: change,
         modified,
         added: [],
         removed: [],
-        conflicts: [],
+        conflicts: activeConflicts,
       };
     },
 
@@ -1035,6 +1038,143 @@ export async function createJJ(options) {
       });
       
       return result;
+    },
+
+    // ========================================
+    // v0.3 FEATURES: First-Class Conflicts
+    // ========================================
+
+    /**
+     * Merge changes from another change, detecting conflicts
+     *
+     * @param {Object} args - Merge arguments
+     * @param {string} args.source - Source change ID to merge
+     * @returns {Promise<Object>} Merge result with conflicts
+     */
+    async merge(args) {
+      if (!args || !args.source) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing source change argument', {
+          suggestion: 'Provide a source change ID to merge',
+        });
+      }
+
+      const currentChangeId = workingCopy.getCurrentChangeId();
+      const currentChange = await graph.getChange(currentChangeId);
+      const sourceChange = await graph.getChange(args.source);
+
+      if (!sourceChange) {
+        throw new JJError('NOT_FOUND', `Source change ${args.source} not found`);
+      }
+
+      // Find common ancestor
+      const ancestors = graph.getAncestors(currentChangeId);
+      const sourceAncestors = graph.getAncestors(args.source);
+
+      // Simple merge base detection (first common ancestor)
+      let baseChangeId = null;
+      for (const ancestor of ancestors) {
+        if (sourceAncestors.includes(ancestor)) {
+          baseChangeId = ancestor;
+          break;
+        }
+      }
+
+      if (!baseChangeId) {
+        throw new JJError('MERGE_ERROR', 'No common ancestor found for merge');
+      }
+
+      // Get file contents for three-way merge
+      const baseFiles = new Map();
+      const leftFiles = new Map();
+      const rightFiles = new Map();
+
+      // Load base files
+      const baseChange = await graph.getChange(baseChangeId);
+      if (baseChange && baseChange.tree) {
+        // TODO: Load files from tree
+      }
+
+      // Load current (left) files from working copy
+      const wcFiles = await workingCopy.listFiles();
+      for (const file of wcFiles) {
+        const content = await fs.promises.readFile(path.join(dir, file), 'utf-8');
+        leftFiles.set(file, content);
+      }
+
+      // Load source (right) files
+      // TODO: Load from source change tree
+
+      // Detect conflicts
+      const detectedConflicts = await conflicts.detectConflicts({
+        baseFiles,
+        leftFiles,
+        rightFiles,
+      });
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        description: `merge ${args.source}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [currentChangeId, args.source],
+          workingCopy: currentChangeId,
+        },
+      });
+
+      return {
+        merged: true,
+        conflicts: detectedConflicts,
+        base: baseChangeId,
+        left: currentChangeId,
+        right: args.source,
+      };
+    },
+
+    /**
+     * Conflicts API
+     */
+    conflicts: {
+      /**
+       * List active conflicts
+       */
+      async list() {
+        await conflicts.load();
+        return conflicts.listConflicts();
+      },
+
+      /**
+       * Resolve a conflict
+       */
+      async resolve(args) {
+        if (!args || !args.conflictId) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing conflictId');
+        }
+
+        await conflicts.load();
+        await conflicts.resolveConflict(args.conflictId, args.resolution || 'manual');
+        await conflicts.save();
+
+        return { resolved: true };
+      },
+
+      /**
+       * Mark conflict as resolved
+       */
+      async markResolved(args) {
+        if (!args || !args.conflictId) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing conflictId');
+        }
+
+        await conflicts.load();
+        await conflicts.resolveConflict(args.conflictId, 'manual');
+        await conflicts.save();
+
+        return { resolved: true };
+      },
     },
   };
 

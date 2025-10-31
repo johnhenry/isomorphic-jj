@@ -15,6 +15,6 @@ export default {
       exports: 'named',
     },
   ],
-  external: ['isomorphic-git', 'crypto'],
+  external: ['isomorphic-git', 'crypto', 'protobufjs', 'path', 'url'],
   plugins: [nodeResolve()],
 };
