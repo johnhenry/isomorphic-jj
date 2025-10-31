@@ -12,11 +12,9 @@ describe('Move Validation and Detection', () => {
   beforeEach(async () => {
     fs = new MockFS();
     jj = await createJJ({
+      fs,
+      dir: '/test/repo',
       backend: 'mock',
-      backendOptions: {
-        fs,
-        dir: '/test/repo',
-      },
     });
     await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
   });

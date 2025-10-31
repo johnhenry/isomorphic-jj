@@ -57,6 +57,11 @@
   "peerDependencies": {
     "isomorphic-git": "^1.24.0"
   },
+  "peerDependenciesMeta": {
+    "isomorphic-git": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@isomorphic-git/lightning-fs": "^4.6.0",
     "@playwright/test": "^1.40.0",

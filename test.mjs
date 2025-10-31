@@ -5,12 +5,14 @@ import http from 'isomorphic-git/http/node';
 import { createJJ } from './src/index.js';
 
 const jj = await createJJ({
-  backend: 'isomorphic-git',
-  backendOptions: { git, fs, http, dir: './test-repo' }
+  fs,
+  dir: './test-repo',
+  git,
+  http
 });
 
 // Initialize creates both .git and .jj
-const init  = await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
+const init  = await jj.git.init({ userName: 'Test User', userEmail: 'test@example.com' });
 
 // Make changes - no staging needed!
 const write = await jj.write({ path: 'README.md', data: '# Hello JJ\n' });

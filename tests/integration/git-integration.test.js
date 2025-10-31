@@ -22,12 +22,10 @@ describe('Git Backend Integration', () => {
     await fs.promises.mkdir(testDir, { recursive: true });
 
     jj = await createJJ({
-      backend: 'isomorphic-git',
-      backendOptions: {
-        fs,
-        http: null, // No network operations in tests
-        dir: testDir,
-      },
+      fs,
+      dir: testDir,
+      git,
+      http: null, // No network operations in tests
     });
   });
 

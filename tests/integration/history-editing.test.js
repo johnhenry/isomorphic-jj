@@ -12,8 +12,9 @@ describe('History Editing Operations (v0.2)', () => {
   beforeEach(async () => {
     fs = new MockFS();
     jj = await createJJ({
+      fs,
+      dir: '/test/repo',
       backend: 'mock',
-      backendOptions: { fs, dir: '/test/repo' },
     });
     await jj.init();
   });

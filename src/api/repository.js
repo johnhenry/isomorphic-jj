@@ -16,31 +16,52 @@ import path from 'path';
 
 /**
  * Create and initialize a JJ repository instance
- * 
+ *
  * @param {Object} options - Configuration options
- * @param {string|Object} options.backend - Backend name ('isomorphic-git') or backend instance
- * @param {Object} options.backendOptions - Backend-specific options
- * @param {Object} options.backendOptions.fs - Filesystem implementation
- * @param {string} options.backendOptions.dir - Repository directory
+ * @param {Object} options.fs - Filesystem implementation (Node fs or LightningFS)
+ * @param {string} options.dir - Repository directory path
+ * @param {Object} [options.git] - isomorphic-git instance (enables Git backend)
+ * @param {Object} [options.http] - HTTP client for network operations
+ * @param {string|Object} [options.backend] - Backend name ('isomorphic-git', 'memory') or backend instance
+ *
+ * @deprecated options.backendOptions - Use flat options instead (fs, dir, git, http)
+ *
  * @returns {Promise<Object>} Initialized JJ instance
  */
 export async function createJJ(options) {
-  if (!options || !options.backendOptions) {
-    throw new JJError('INVALID_CONFIG', 'Missing backendOptions', {
-      suggestion: 'Provide backendOptions with fs and dir',
+  if (!options) {
+    throw new JJError('INVALID_CONFIG', 'Missing configuration options', {
+      suggestion: 'Provide { fs, dir, git?, http? }',
     });
   }
 
-  const { fs, dir } = options.backendOptions;
+  // Handle legacy backendOptions format (deprecated)
+  let fs, dir, git, http, backend;
+
+  if (options.backendOptions) {
+    console.warn('[isomorphic-jj] DEPRECATED: backendOptions is deprecated. Use flat options: { fs, dir, git, http }');
+    fs = options.backendOptions.fs;
+    dir = options.backendOptions.dir;
+    git = options.backendOptions.git;
+    http = options.backendOptions.http;
+    backend = options.backend;
+  } else {
+    // New flat format
+    fs = options.fs;
+    dir = options.dir;
+    git = options.git;
+    http = options.http;
+    backend = options.backend;
+  }
 
   if (!fs) {
-    throw new JJError('INVALID_CONFIG', 'Missing fs in backendOptions', {
+    throw new JJError('INVALID_CONFIG', 'Missing fs', {
       suggestion: 'Provide a filesystem implementation (Node fs, LightningFS, etc.)',
     });
   }
 
   if (!dir) {
-    throw new JJError('INVALID_CONFIG', 'Missing dir in backendOptions', {
+    throw new JJError('INVALID_CONFIG', 'Missing dir', {
       suggestion: 'Provide a repository directory path',
     });
   }
@@ -55,15 +76,17 @@ export async function createJJ(options) {
   const conflicts = new ConflictModel(storage, fs);
   
   // Create Git backend if specified
-  let backend = null;
-  if (options.backend === 'isomorphic-git' || options.backend === 'git') {
-    backend = new IsomorphicGitBackend({
+  // Auto-detect: if git instance provided, use isomorphic-git backend
+  let gitBackend = null;
+  if (git || backend === 'isomorphic-git' || backend === 'git') {
+    gitBackend = new IsomorphicGitBackend({
       fs,
       dir,
-      http: options.backendOptions.http,
+      http,
     });
-  } else if (options.backend && typeof options.backend === 'object') {
-    backend = options.backend;
+  } else if (backend && typeof backend === 'object') {
+    // Custom backend instance provided
+    gitBackend = backend;
   }
 
   // Create JJ instance
@@ -75,19 +98,21 @@ export async function createJJ(options) {
     bookmarks,
     revset,
     conflicts,
-    backend,
+    backend: gitBackend,  // Expose backend for advanced users
     
     /**
      * Initialize a new JJ repository
+     *
+     * NOTE: This is a convenience alias. For Git-backed repos, prefer jj.git.init()
+     * to match the JJ CLI semantics.
      */
     async init(opts = {}) {
-      // Initialize Git backend if available
-      if (backend && backend.init) {
-        await backend.init({
-          defaultBranch: opts.defaultBranch || 'main',
-        });
+      // If Git backend is available, delegate to jj.git.init()
+      if (gitBackend) {
+        return await jj.git.init(opts);
       }
 
+      // Otherwise, initialize without Git backend (mock backend, etc.)
       await storage.init();
 
       // Initialize components
@@ -100,9 +125,9 @@ export async function createJJ(options) {
       const rootChangeId = generateChangeId();
       const rootChange = {
         changeId: rootChangeId,
-        commitId: '0000000000000000000000000000000000000000', // Will be updated when Git commit is created
+        commitId: '0000000000000000000000000000000000000000',
         parents: [],
-        tree: '0000000000000000000000000000000000000000', // Will be updated
+        tree: '0000000000000000000000000000000000000000',
         author: {
           name: opts.userName || 'User',
           email: opts.userEmail || 'user@example.com',
@@ -119,8 +144,6 @@ export async function createJJ(options) {
 
       await graph.addChange(rootChange);
       await workingCopy.init(rootChangeId);
-
-      // Create initial bookmarks (already done by bookmarks.init())
 
       // Record init operation
       await oplog.recordOperation({
@@ -139,8 +162,6 @@ export async function createJJ(options) {
           workingCopy: rootChangeId,
         },
       });
-
-      return;
     },
 
     /**
@@ -951,93 +972,172 @@ export async function createJJ(options) {
     },
     
     // ========================================
-    // v0.3 FEATURES: Git Remote Operations
+    // v0.3 FEATURES: Git Integration
     // ========================================
-    
+
     /**
-     * Fetch changes from remote Git repository
-     * 
-     * @param {Object} args - Fetch arguments
-     * @param {string} args.remote - Remote name or URL
-     * @param {string[]} [args.refs] - Refs to fetch (default: all)
-     * @param {Function} [args.onProgress] - Progress callback
-     * @param {Function} [args.onAuth] - Authentication callback
+     * Git-specific operations (network, direct Git access)
      */
-    async fetch(args) {
-      if (!backend) {
-        throw new JJError(
-          'BACKEND_NOT_AVAILABLE',
-          'Git backend not configured',
-          { suggestion: 'Create repository with backend: "isomorphic-git"' }
-        );
-      }
-      
-      const result = await backend.fetch({
-        remote: args.remote,
-        refs: args.refs,
-        onProgress: args.onProgress,
-        onAuth: args.onAuth,
-      });
-      
-      // Record operation
-      await oplog.recordOperation({
-        timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
-        description: `fetch from ${args.remote}`,
-        parents: [],
-        view: {
-          bookmarks: {},
-          remoteBookmarks: {},
-          heads: [],
-          workingCopy: workingCopy.getCurrentChangeId(),
-        },
-      });
-      
-      return result;
-    },
-    
-    /**
-     * Push changes to remote Git repository
-     * 
-     * @param {Object} args - Push arguments
-     * @param {string} args.remote - Remote name or URL
-     * @param {string[]} [args.refs] - Refs to push (default: current bookmarks)
-     * @param {boolean} [args.force] - Allow non-fast-forward
-     * @param {Function} [args.onProgress] - Progress callback
-     * @param {Function} [args.onAuth] - Authentication callback
-     */
-    async push(args) {
-      if (!backend) {
-        throw new JJError(
-          'BACKEND_NOT_AVAILABLE',
-          'Git backend not configured',
-          { suggestion: 'Create repository with backend: "isomorphic-git"' }
-        );
-      }
-      
-      const result = await backend.push({
-        remote: args.remote,
-        refs: args.refs,
-        force: args.force,
-        onProgress: args.onProgress,
-        onAuth: args.onAuth,
-      });
-      
-      // Record operation
-      await oplog.recordOperation({
-        timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
-        description: `push to ${args.remote}`,
-        parents: [],
-        view: {
-          bookmarks: {},
-          remoteBookmarks: {},
-          heads: [],
-          workingCopy: workingCopy.getCurrentChangeId(),
-        },
-      });
-      
-      return result;
+    git: {
+      /**
+       * Initialize a new Git-backed JJ repository
+       * Matches `jj git init` CLI command
+       *
+       * @param {Object} opts - Initialization options
+       * @param {string} [opts.userName] - User name for commits
+       * @param {string} [opts.userEmail] - User email for commits
+       * @param {string} [opts.defaultBranch] - Default branch name (default: 'main')
+       */
+      async init(opts = {}) {
+        if (!gitBackend) {
+          throw new JJError(
+            'BACKEND_NOT_AVAILABLE',
+            'Git backend not configured',
+            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+          );
+        }
+
+        // Initialize Git backend
+        await gitBackend.init({
+          defaultBranch: opts.defaultBranch || 'main',
+        });
+
+        await storage.init();
+
+        // Initialize components
+        await graph.init();
+        await oplog.init();
+        await bookmarks.init();
+        await conflicts.init();
+
+        // Create root change
+        const rootChangeId = generateChangeId();
+        const rootChange = {
+          changeId: rootChangeId,
+          commitId: '0000000000000000000000000000000000000000',
+          parents: [],
+          tree: '0000000000000000000000000000000000000000',
+          author: {
+            name: opts.userName || 'User',
+            email: opts.userEmail || 'user@example.com',
+            timestamp: new Date().toISOString(),
+          },
+          committer: {
+            name: opts.userName || 'User',
+            email: opts.userEmail || 'user@example.com',
+            timestamp: new Date().toISOString(),
+          },
+          description: '(root)',
+          timestamp: new Date().toISOString(),
+        };
+
+        await graph.addChange(rootChange);
+        await workingCopy.init(rootChangeId);
+
+        // Record init operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: {
+            name: opts.userName || 'User',
+            email: opts.userEmail || 'user@example.com',
+            hostname: 'localhost',
+          },
+          description: 'initialize git-backed repository',
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [rootChangeId],
+            workingCopy: rootChangeId,
+          },
+        });
+      },
+
+      /**
+       * Fetch changes from remote Git repository
+       *
+       * @param {Object} args - Fetch arguments
+       * @param {string} args.remote - Remote name or URL
+       * @param {string[]} [args.refs] - Refs to fetch (default: all)
+       * @param {Function} [args.onProgress] - Progress callback
+       * @param {Function} [args.onAuth] - Authentication callback
+       */
+      async fetch(args) {
+        if (!gitBackend) {
+          throw new JJError(
+            'BACKEND_NOT_AVAILABLE',
+            'Git backend not configured',
+            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+          );
+        }
+
+        const result = await gitBackend.fetch({
+          remote: args.remote,
+          refs: args.refs,
+          onProgress: args.onProgress,
+          onAuth: args.onAuth,
+        });
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          description: `git fetch from ${args.remote}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return result;
+      },
+
+      /**
+       * Push changes to remote Git repository
+       *
+       * @param {Object} args - Push arguments
+       * @param {string} args.remote - Remote name or URL
+       * @param {string[]} [args.refs] - Refs to push (default: current bookmarks)
+       * @param {boolean} [args.force] - Allow non-fast-forward
+       * @param {Function} [args.onProgress] - Progress callback
+       * @param {Function} [args.onAuth] - Authentication callback
+       */
+      async push(args) {
+        if (!gitBackend) {
+          throw new JJError(
+            'BACKEND_NOT_AVAILABLE',
+            'Git backend not configured',
+            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+          );
+        }
+
+        const result = await gitBackend.push({
+          remote: args.remote,
+          refs: args.refs,
+          force: args.force,
+          onProgress: args.onProgress,
+          onAuth: args.onAuth,
+        });
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          description: `git push to ${args.remote}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return result;
+      },
     },
 
     // ========================================

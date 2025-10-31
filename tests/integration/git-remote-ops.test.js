@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createJJ } from '../../src/api/repository.js';
+import git from 'isomorphic-git';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,11 +23,9 @@ describe('Git Remote Operations', () => {
 
     // Create JJ instance with Git backend
     jj = await createJJ({
-      backend: 'isomorphic-git',
-      backendOptions: {
-        fs,
-        dir: testDir,
-      },
+      fs,
+      dir: testDir,
+      git,
     });
 
     await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
@@ -82,13 +81,13 @@ describe('Git Remote Operations', () => {
   describe('Remote Operations API', () => {
     test('fetch() should throw error without http client', async () => {
       await expect(
-        jj.fetch({ remote: 'origin' })
+        jj.git.fetch({ remote: 'origin' })
       ).rejects.toThrow('HTTP client not provided');
     });
 
     test('push() should throw error without http client', async () => {
       await expect(
-        jj.push({ remote: 'origin', refs: ['refs/heads/main'] })
+        jj.git.push({ remote: 'origin', refs: ['refs/heads/main'] })
       ).rejects.toThrow('HTTP client not provided');
     });
 
@@ -102,7 +101,7 @@ describe('Git Remote Operations', () => {
 
       const initialOps = (await jj.oplog.list()).length;
 
-      await jj.fetch({ remote: 'origin' });
+      await jj.git.fetch({ remote: 'origin' });
 
       const ops = await jj.oplog.list();
       expect(ops.length).toBe(initialOps + 1);
@@ -122,7 +121,7 @@ describe('Git Remote Operations', () => {
 
       const initialOps = (await jj.oplog.list()).length;
 
-      await jj.push({ remote: 'origin', refs: ['refs/heads/main'] });
+      await jj.git.push({ remote: 'origin', refs: ['refs/heads/main'] });
 
       const ops = await jj.oplog.list();
       expect(ops.length).toBe(initialOps + 1);
@@ -139,11 +138,9 @@ describe('Git Remote Operations', () => {
       await fs.promises.mkdir(localDir, { recursive: true });
 
       const localJJ = await createJJ({
+        fs,
+        dir: localDir,
         backend: 'mock', // Use mock backend
-        backendOptions: {
-          fs,
-          dir: localDir,
-        },
       });
 
       await localJJ.init({ userName: 'Test', userEmail: 'test@example.com' });
@@ -159,20 +156,18 @@ describe('Git Remote Operations', () => {
       await fs.promises.mkdir(localDir, { recursive: true });
 
       const localJJ = await createJJ({
+        fs,
+        dir: localDir,
         backend: 'mock',
-        backendOptions: {
-          fs,
-          dir: localDir,
-        },
       });
 
       await localJJ.init({ userName: 'Test', userEmail: 'test@example.com' });
 
-      await expect(localJJ.fetch({ remote: 'origin' })).rejects.toThrow(
+      await expect(localJJ.git.fetch({ remote: 'origin' })).rejects.toThrow(
         'Git backend not configured'
       );
 
-      await expect(localJJ.push({ remote: 'origin' })).rejects.toThrow(
+      await expect(localJJ.git.push({ remote: 'origin' })).rejects.toThrow(
         'Git backend not configured'
       );
     });

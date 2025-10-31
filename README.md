@@ -20,8 +20,10 @@ import http from 'isomorphic-git/http/node';
 
 // Create repository with Git backend
 const jj = await createJJ({
-  backend: 'isomorphic-git',
-  backendOptions: { git, fs, http, dir: './repo' }
+  fs,
+  dir: './repo',
+  git,
+  http
 });
 
 // Initialize (creates both .git and .jj)
@@ -207,13 +209,17 @@ Understanding isomorphic-jj requires understanding how concepts translate across
 ## Installation
 
 ```bash
-npm install isomorphic-jj isomorphic-git
+# Core library (protobufjs is the only required dependency)
+npm install isomorphic-jj
+
+# For Git backend support (recommended)
+npm install isomorphic-git
 
 # For browsers, add a filesystem
 npm install @isomorphic-git/lightning-fs
 ```
 
-isomorphic-git runs in Node and browsers with user-provided fs/http—no native modules required.
+**Note**: isomorphic-git is an optional peer dependency. You only need it if you want Git backend integration. isomorphic-jj can work with other backends (or no backend) for testing and custom storage.
 
 ---
 
@@ -229,8 +235,10 @@ import http from 'isomorphic-git/http/node';
 import { createJJ } from 'isomorphic-jj';
 
 const jj = await createJJ({
-  backend: 'isomorphic-git',
-  backendOptions: { git, fs, http, dir: '/path/to/repo' }
+  fs,
+  dir: '/path/to/repo',
+  git,
+  http
 });
 
 await jj.init(); // Creates colocated .git and .jj
@@ -255,17 +263,14 @@ import { createJJ } from 'isomorphic-jj';
 const fs = new LightningFS('jj-repos');
 
 const jj = await createJJ({
-  backend: 'isomorphic-git',
-  backendOptions: { 
-    git, 
-    fs, 
-    http, 
-    dir: '/myrepo',
-    corsProxy: 'https://cors.isomorphic-git.org'
-  }
+  fs,
+  dir: '/myrepo',
+  git,
+  http,
+  corsProxy: 'https://cors.isomorphic-git.org'
 });
 
-await jj.remote.fetch({ remote: 'origin' });
+await jj.git.fetch({ remote: 'origin' });
 // Full JJ operations work in browser!
 ```
 
@@ -621,8 +626,10 @@ const customBackend = {
 };
 
 const jj = await createJJ({
+  fs,
+  dir: './repo',
   backend: customBackend,
-  backendOptions: { /* backend-specific options */ }
+  // Add any custom backend-specific options here
 });
 ```
 
@@ -776,12 +783,11 @@ await jj.resolveConflict({ /* ... */ });
 ```javascript
 // Browser optimization example
 const jj = await createJJ({
-  backend: 'isomorphic-git',
-  backendOptions: {
-    fs: new LightningFS('jj-repos', { wipe: false }), // persistent
-    http,
-    corsProxy: 'https://cors.isomorphic-git.org'
-  }
+  fs: new LightningFS('jj-repos', { wipe: false }), // persistent
+  dir: '/myrepo',
+  git,
+  http,
+  corsProxy: 'https://cors.isomorphic-git.org'
 });
 
 // Paginate large logs
@@ -805,8 +811,10 @@ import fs from 'fs';
 import http from 'isomorphic-git/http/node';
 
 const jj = await createJJ({
-  backend: 'isomorphic-git',
-  backendOptions: { git, fs, http, dir: process.cwd() }
+  fs,
+  dir: process.cwd(),
+  git,
+  http
 });
 
 // Full-speed native filesystem operations

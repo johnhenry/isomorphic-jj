@@ -7,6 +7,7 @@ import { createJJ } from '../../src/api/repository.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import git from 'isomorphic-git';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,8 +21,9 @@ describe('First-Class Conflicts Integration', () => {
     await fs.promises.mkdir(testDir, { recursive: true });
 
     jj = await createJJ({
-      backend: 'isomorphic-git',
-      backendOptions: { fs, dir: testDir },
+      fs,
+      dir: testDir,
+      git,
     });
 
     await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });

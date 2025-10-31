@@ -19,14 +19,15 @@ This document defines the complete public API for isomorphic-jj v0.1 MVP. The AP
 **Parameters**:
 ```typescript
 interface JJOptions {
-  backend: 'isomorphic-git' | JJBackend;
-  backendOptions: {
-    git?: any;           // isomorphic-git module (if backend = 'isomorphic-git')
-    fs: any;             // Filesystem implementation (Node fs, LightningFS, OPFS)
-    http?: any;          // HTTP implementation (for network operations)
-    dir: string;         // Repository directory path
-    [key: string]: any;  // Additional backend-specific options
-  };
+  fs: any;             // Filesystem implementation (Node fs, LightningFS, OPFS)
+  dir: string;         // Repository directory path
+  git?: any;           // isomorphic-git module (enables Git backend)
+  http?: any;          // HTTP implementation (for network operations)
+  backend?: 'mock' | JJBackend; // Custom backend or 'mock' (auto-detects git if provided)
+  [key: string]: any;  // Additional backend-specific options
+
+  // DEPRECATED (backward compatibility only):
+  // backendOptions?: { fs, dir, git, http, ... }
 }
 ```
 
@@ -41,14 +42,15 @@ interface JJOptions {
 **Example**:
 ```javascript
 import { createJJ } from 'isomorphic-jj';
+import * as git from 'isomorphic-git';
 import fs from 'fs';
+import http from 'isomorphic-git/http/node';
 
 const jj = await createJJ({
-  backend: 'isomorphic-git',
-  backendOptions: {
-    fs,
-    dir: '/path/to/repo'
-  }
+  fs,
+  dir: '/path/to/repo',
+  git,
+  http
 });
 ```
 
