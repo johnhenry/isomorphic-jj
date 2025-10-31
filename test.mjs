@@ -333,7 +333,8 @@ const finalLogFull = await jj.log({ limit: 50 });
 console.log('All changes in repository:');
 finalLogFull.forEach((change, i) => {
   const abandoned = change.abandoned ? ' [ABANDONED]' : '';
-  console.log(`  ${i+1}. ${change.description}${abandoned} (${change.changeId.slice(0, 8)})`);
+  const commitId = change.commitId ? ` ${change.commitId.slice(0, 8)}` : '';
+  console.log(`  ${i+1}. ${change.description}${abandoned} (${change.changeId.slice(0, 8)}${commitId})`);
 });
 
 const finalStatus = await jj.status();

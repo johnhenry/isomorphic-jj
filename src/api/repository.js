@@ -1139,8 +1139,17 @@ export async function createJJ(options) {
         }
       }
 
-      // Sort by timestamp descending (newest first)
+      // Sort by topological order (children before parents), then by timestamp
+      // This matches jj's default log behavior
       changes.sort((a, b) => {
+        // Primary: Topological order - children (descendants) before parents
+        const aIsParentOfB = b.parents && b.parents.includes(a.changeId);
+        const bIsParentOfA = a.parents && a.parents.includes(b.changeId);
+
+        if (aIsParentOfB) return 1;  // a is parent of b, so b comes first
+        if (bIsParentOfA) return -1; // b is parent of a, so a comes first
+
+        // Secondary: Sort by timestamp descending (newest first)
         const aTime = new Date(a.timestamp).getTime();
         const bTime = new Date(b.timestamp).getTime();
         return bTime - aTime;
