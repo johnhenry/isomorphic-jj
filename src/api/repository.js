@@ -358,6 +358,7 @@ export async function createJJ(options) {
      * @param {Object} args - Arguments
      * @param {string} args.path - File path relative to repo root
      * @param {string|Uint8Array} args.data - File contents
+     * @returns {Promise<Object>} File information including path, size, and mode
      */
     async write(args) {
       if (!args || !args.path) {
@@ -397,7 +398,14 @@ export async function createJJ(options) {
         mode: stats.mode,
       });
 
-      return;
+      // Return useful information about the written file
+      return {
+        path: args.path,
+        size: stats.size,
+        mode: stats.mode,
+        mtime: stats.mtime,
+        type: typeof args.data === 'string' ? 'text' : 'binary',
+      };
     },
 
     /**
@@ -576,7 +584,7 @@ export async function createJJ(options) {
      * @param {string} [args.changeId] - Change ID to move (for history operations)
      * @param {string} [args.newParent] - New parent change ID (for history operations)
      * @param {string[]} [args.paths] - Paths to move between changes (for history operations)
-     * @returns {Promise<Object|void>} Returns change object for history operations, void for file operations
+     * @returns {Promise<Object>} Returns change object for history operations, file info for file operations
      */
     async move(args) {
       if (!args || typeof args !== 'object') {
@@ -731,7 +739,7 @@ export async function createJJ(options) {
      *
      * @private
      * @param {Object} args - Move arguments
-     * @returns {Promise<void>}
+     * @returns {Promise<Object>} Operation result including from, to paths and file stats
      */
     async _moveFile(args) {
       if (!args.from || typeof args.from !== 'string') {
@@ -823,7 +831,14 @@ export async function createJJ(options) {
         mode: stats.mode,
       });
 
-      return;
+      // Return useful information about the move operation
+      return {
+        from: args.from,
+        to: args.to,
+        size: stats.size,
+        mode: stats.mode,
+        mtime: stats.mtime,
+      };
     },
 
     /**
@@ -831,6 +846,7 @@ export async function createJJ(options) {
      *
      * @param {Object} args - Arguments
      * @param {string} args.path - File path to remove
+     * @returns {Promise<Object>} Information about the removed file
      */
     async remove(args) {
       if (!args || !args.path) {
@@ -841,6 +857,9 @@ export async function createJJ(options) {
 
       const fullPath = `${dir}/${args.path}`;
 
+      // Get file stats before removing
+      const stats = await fs.promises.stat(fullPath);
+
       // Remove the file
       await fs.promises.unlink(fullPath);
 
@@ -848,7 +867,13 @@ export async function createJJ(options) {
       await workingCopy.load();
       await workingCopy.untrackFile(args.path);
 
-      return;
+      // Return information about the removed file
+      return {
+        path: args.path,
+        size: stats.size,
+        mode: stats.mode,
+        mtime: stats.mtime,
+      };
     },
 
     /**
@@ -1180,6 +1205,7 @@ export async function createJJ(options) {
      *
      * @param {Object} args - Arguments
      * @param {string} args.changeId - Change ID to edit
+     * @returns {Promise<Object>} Information about the edited change including changeId, description, and file count
      */
     async edit(args) {
       if (!args || !args.changeId) {
@@ -1251,7 +1277,14 @@ export async function createJJ(options) {
         },
       });
 
-      return;
+      // Return information about the edited change
+      return {
+        changeId: change.changeId,
+        description: change.description,
+        parents: change.parents,
+        fileCount: change.fileSnapshot ? Object.keys(change.fileSnapshot).length : 0,
+        timestamp: change.timestamp,
+      };
     },
     
     /**
@@ -1409,9 +1442,10 @@ export async function createJJ(options) {
     
     /**
      * Abandon a change
-     * 
+     *
      * @param {Object} args - Arguments
      * @param {string} args.changeId - Change ID to abandon
+     * @returns {Promise<Object>} The abandoned change object including changeId, description, and abandoned flag
      */
     async abandon(args) {
       await graph.load();

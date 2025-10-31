@@ -46,8 +46,8 @@ console.log('   ✓ User: Alice Developer <alice@example.com>\n');
 // ============================================================================
 console.log('📝 2. Basic Workflow (No Staging!)');
 
-await jj.write({ path: 'README.md', data: '# My Project\n\nA demo repository.\n' });
-await jj.describe({ message: 'Initial commit' });
+const w = await jj.write({ path: 'README.md', data: '# My Project\n\nA demo repository.\n' });
+const d = await jj.describe({ message: 'Initial commit' });
 console.log('   ✓ Created README.md and described change');
 
 await jj.write({ path: 'src/main.js', data: 'console.log("Hello");\n' });
@@ -180,7 +180,7 @@ console.log(`   ✓ Split change into two: ${original.changeId.slice(0, 8)} and 
 // ============================================================================
 console.log('🔨 10. Squash Changes');
 
-await jj.new({ message: 'Setup' });
+const n = await jj.new({ message: 'Setup' });
 await jj.write({ path: 'config.js', data: 'export const config = {};\n' });
 const setup = await jj.describe({ message: 'Add config' });
 
@@ -340,3 +340,4 @@ finalLogFull.forEach((change, i) => {
 const finalStatus = await jj.status();
 console.log(`\nCurrent working copy: ${finalStatus.workingCopy.description} (${finalStatus.workingCopy.changeId.slice(0, 8)})`);
 console.log(`Files in working copy: ${(await jj.listFiles()).join(', ')}`);
+console.log({w,d, n})

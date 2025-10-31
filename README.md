@@ -239,7 +239,7 @@ Understanding isomorphic-jj requires understanding how concepts translate across
 ### History and Evolution
 
 | Concept | Git | JJ | isomorphic-jj |
-|---------|-----|----|--------------| 
+|---------|-----|----|--------------|
 | **History model** | Commit DAG | Operation log creates commit views | `.obslog()` returns evolution history |
 | **Undo** | `git reflog` (per-ref, manual) | `jj undo` (complete repo state) | `.undo()` method |
 | **Rewriting history** | Manual `rebase -i` | Automatic descendant rebasing | Edit any change; descendants auto-update |
@@ -689,13 +689,40 @@ console.log({
   removed: status.removed
 });
 
-// File operations
-await jj.move({ from: 'old.js', to: 'new.js' });
-await jj.remove({ path: 'obsolete.js' });
-await jj.write({ path: 'fresh.js', data: '...' });
+// File operations (all return useful information)
+const moveResult = await jj.move({ from: 'old.js', to: 'new.js' });
+console.log(`Moved: ${moveResult.from} → ${moveResult.to} (${moveResult.size} bytes)`);
+
+const removeResult = await jj.remove({ path: 'obsolete.js' });
+console.log(`Removed: ${removeResult.path} (${removeResult.size} bytes)`);
+
+const writeResult = await jj.write({ path: 'fresh.js', data: '...' });
+console.log(`Written: ${writeResult.path} (${writeResult.size} bytes, ${writeResult.type})`);
 
 // Describe when ready
 await jj.describe({ message: 'Reorganize files' });
+```
+
+#### File Operation Return Values (v0.4)
+
+All file operations now return useful information:
+
+```javascript
+// write() returns file metadata
+const result = await jj.write({ path: 'src/app.js', data: 'console.log("Hello");' });
+// { path, size, mode, mtime, type: 'text'|'binary' }
+
+// move() returns operation details
+const result = await jj.move({ from: 'old.js', to: 'new.js' });
+// { from, to, size, mode, mtime }
+
+// remove() returns removed file info
+const result = await jj.remove({ path: 'temp.js' });
+// { path, size, mode, mtime }
+
+// edit() returns change information
+const result = await jj.edit({ changeId: 'abc...' });
+// { changeId, description, parents, fileCount, timestamp }
 ```
 
 ### Git Interop
