@@ -11,6 +11,7 @@ import { RevsetEngine } from '../core/revset-engine.js';
 import { ConflictModel } from '../core/conflict-model.js';
 import { WorktreeManager } from '../core/worktree-manager.js';
 import { BackgroundOps } from '../core/background-ops.js';
+import { UserConfig } from '../core/user-config.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
@@ -77,6 +78,14 @@ export async function createJJ(options) {
   const revset = new RevsetEngine(graph, workingCopy);
   const conflicts = new ConflictModel(storage, fs);
   const worktrees = new WorktreeManager(storage, fs, dir);
+  const userConfig = new UserConfig(storage);
+
+  // Helper to get user info for oplog operations
+  const getUserOplogInfo = async () => {
+    await userConfig.load();
+    const user = userConfig.getUser();
+    return { name: user.name, email: user.email, hostname: 'localhost' };
+  };
 
   // Create Git backend if specified
   // Auto-detect: if git instance provided, use isomorphic-git backend
@@ -102,6 +111,7 @@ export async function createJJ(options) {
     revset,
     conflicts,
     worktrees,
+    userConfig,
     backgroundOps: null,  // Will be initialized below
     backend: gitBackend,  // Expose backend for advanced users
     
@@ -120,6 +130,12 @@ export async function createJJ(options) {
       // Otherwise, initialize without Git backend (mock backend, etc.)
       await storage.init();
 
+      // Initialize user config first
+      await userConfig.init({
+        userName: opts.userName,
+        userEmail: opts.userEmail,
+      });
+
       // Initialize components
       await graph.init();
       await oplog.init();
@@ -129,19 +145,20 @@ export async function createJJ(options) {
 
       // Create root change
       const rootChangeId = generateChangeId();
+      const user = userConfig.getUser();
       const rootChange = {
         changeId: rootChangeId,
         commitId: '0000000000000000000000000000000000000000',
         parents: [],
         tree: '0000000000000000000000000000000000000000',
         author: {
-          name: opts.userName || 'User',
-          email: opts.userEmail || 'user@example.com',
+          name: user.name,
+          email: user.email,
           timestamp: new Date().toISOString(),
         },
         committer: {
-          name: opts.userName || 'User',
-          email: opts.userEmail || 'user@example.com',
+          name: user.name,
+          email: user.email,
           timestamp: new Date().toISOString(),
         },
         description: '(root)',
@@ -155,8 +172,8 @@ export async function createJJ(options) {
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: {
-          name: opts.userName || 'User',
-          email: opts.userEmail || 'user@example.com',
+          name: user.name,
+          email: user.email,
           hostname: 'localhost',
         },
         description: 'initialize repository',
@@ -530,7 +547,7 @@ export async function createJJ(options) {
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        user: await getUserOplogInfo(),
         description: `move change ${changeId.slice(0, 8)} to ${newParent.slice(0, 8)}`,
         parents: [],
         view: {
@@ -675,9 +692,11 @@ export async function createJJ(options) {
     async describe(args = {}) {
       await graph.load();
       await workingCopy.load();
+      await userConfig.load();
 
       const currentChangeId = workingCopy.getCurrentChangeId();
       const change = await graph.getChange(currentChangeId);
+      const user = userConfig.getUser();
 
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Working copy change ${currentChangeId} not found`, {
@@ -776,8 +795,8 @@ export async function createJJ(options) {
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: {
-          name: 'User',
-          email: 'user@example.com',
+          name: user.name,
+          email: user.email,
           hostname: 'localhost',
         },
         description: `describe change ${currentChangeId.slice(0, 8)}`,
@@ -799,38 +818,40 @@ export async function createJJ(options) {
     async new(args = {}) {
       await graph.load();
       await workingCopy.load();
-      
+      await userConfig.load();
+
       const parentChangeId = workingCopy.getCurrentChangeId();
       const newChangeId = generateChangeId();
-      
+      const user = userConfig.getUser();
+
       const newChange = {
         changeId: newChangeId,
         commitId: '0000000000000000000000000000000000000000', // Placeholder
         parents: [parentChangeId],
         tree: '0000000000000000000000000000000000000000', // Empty tree
         author: {
-          name: 'User',
-          email: 'user@example.com',
+          name: user.name,
+          email: user.email,
           timestamp: new Date().toISOString(),
         },
         committer: {
-          name: 'User',
-          email: 'user@example.com',
+          name: user.name,
+          email: user.email,
           timestamp: new Date().toISOString(),
         },
         description: args.message || '(no description)',
         timestamp: new Date().toISOString(),
       };
-      
+
       await graph.addChange(newChange);
       await workingCopy.setCurrentChange(newChangeId);
-      
+
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: {
-          name: 'User',
-          email: 'user@example.com',
+          name: user.name,
+          email: user.email,
           hostname: 'localhost',
         },
         description: `new change ${newChangeId.slice(0, 8)}`,
@@ -842,7 +863,7 @@ export async function createJJ(options) {
           workingCopy: newChangeId,
         },
       });
-      
+
       return newChange;
     },
     
@@ -934,8 +955,10 @@ export async function createJJ(options) {
 
       await graph.load();
       await workingCopy.load();
+      await userConfig.load();
 
       const change = await graph.getChange(args.changeId);
+      const user = userConfig.getUser();
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`, {
           changeId: args.changeId,
@@ -979,8 +1002,8 @@ export async function createJJ(options) {
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: {
-          name: 'User',
-          email: 'user@example.com',
+          name: user.name,
+          email: user.email,
           hostname: 'localhost',
         },
         description: `edit change ${args.changeId.slice(0, 8)}`,
@@ -1031,11 +1054,7 @@ export async function createJJ(options) {
       // Record undo operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
-        user: {
-          name: 'User',
-          email: 'user@example.com',
-          hostname: 'localhost',
-        },
+        user: await getUserOplogInfo(),
         description: 'undo operation',
         parents: [],
         view: previousView,
@@ -1080,7 +1099,7 @@ export async function createJJ(options) {
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        user: await getUserOplogInfo(),
         description: `squash ${args.source.slice(0, 8)} into ${args.dest.slice(0, 8)}`,
         parents: [],
         view: {
@@ -1102,20 +1121,22 @@ export async function createJJ(options) {
      */
     async abandon(args) {
       await graph.load();
-      
+      await userConfig.load();
+
       const change = await graph.getChange(args.changeId);
-      
+      const user = userConfig.getUser();
+
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
       }
-      
+
       change.abandoned = true;
       await graph.updateChange(change);
-      
+
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        user: { name: user.name, email: user.email, hostname: 'localhost' },
         description: `abandon change ${args.changeId.slice(0, 8)}`,
         parents: [],
         view: {
@@ -1125,7 +1146,7 @@ export async function createJJ(options) {
           workingCopy: workingCopy.getCurrentChangeId(),
         },
       });
-      
+
       return change;
     },
     
@@ -1137,20 +1158,22 @@ export async function createJJ(options) {
      */
     async restore(args) {
       await graph.load();
-      
+      await userConfig.load();
+
       const change = await graph.getChange(args.changeId);
-      
+      const user = userConfig.getUser();
+
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
       }
-      
+
       change.abandoned = false;
       await graph.updateChange(change);
-      
+
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        user: { name: user.name, email: user.email, hostname: 'localhost' },
         description: `restore change ${args.changeId.slice(0, 8)}`,
         parents: [],
         view: {
@@ -1160,7 +1183,7 @@ export async function createJJ(options) {
           workingCopy: workingCopy.getCurrentChangeId(),
         },
       });
-      
+
       return change;
     },
     
@@ -1203,7 +1226,7 @@ export async function createJJ(options) {
       // Record operation
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        user: await getUserOplogInfo(),
         description: `split change ${args.changeId.slice(0, 8)}`,
         parents: [],
         view: {
@@ -1250,6 +1273,12 @@ export async function createJJ(options) {
 
         await storage.init();
 
+        // Initialize user config first
+        await userConfig.init({
+          userName: opts.userName,
+          userEmail: opts.userEmail,
+        });
+
         // Initialize components
         await graph.init();
         await oplog.init();
@@ -1259,19 +1288,20 @@ export async function createJJ(options) {
 
         // Create root change
         const rootChangeId = generateChangeId();
+        const user = userConfig.getUser();
         const rootChange = {
           changeId: rootChangeId,
           commitId: '0000000000000000000000000000000000000000',
           parents: [],
           tree: '0000000000000000000000000000000000000000',
           author: {
-            name: opts.userName || 'User',
-            email: opts.userEmail || 'user@example.com',
+            name: user.name,
+            email: user.email,
             timestamp: new Date().toISOString(),
           },
           committer: {
-            name: opts.userName || 'User',
-            email: opts.userEmail || 'user@example.com',
+            name: user.name,
+            email: user.email,
             timestamp: new Date().toISOString(),
           },
           description: '(root)',
@@ -1285,8 +1315,8 @@ export async function createJJ(options) {
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
           user: {
-            name: opts.userName || 'User',
-            email: opts.userEmail || 'user@example.com',
+            name: user.name,
+            email: user.email,
             hostname: 'localhost',
           },
           description: 'initialize git-backed repository',
@@ -1328,7 +1358,7 @@ export async function createJJ(options) {
         // Record operation
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
-          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          user: await getUserOplogInfo(),
           description: `git fetch from ${args.remote}`,
           parents: [],
           view: {
@@ -1372,7 +1402,7 @@ export async function createJJ(options) {
         // Record operation
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
-          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          user: await getUserOplogInfo(),
           description: `git push to ${args.remote}`,
           parents: [],
           view: {
@@ -1484,7 +1514,7 @@ export async function createJJ(options) {
       // Record operation with conflicts snapshot
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
-        user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+        user: await getUserOplogInfo(),
         description: `merge ${args.source}`,
         parents: [],
         view: {
@@ -1603,7 +1633,7 @@ export async function createJJ(options) {
         // Record operation
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
-          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          user: await getUserOplogInfo(),
           description: `add worktree at ${args.path}`,
           parents: [],
           view: {
@@ -1635,7 +1665,7 @@ export async function createJJ(options) {
         // Record operation
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
-          user: { name: 'User', email: 'user@example.com', hostname: 'localhost' },
+          user: await getUserOplogInfo(),
           description: `remove worktree ${args.id}`,
           parents: [],
           view: {
