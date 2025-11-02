@@ -460,6 +460,14 @@ console.log(`✓ Created worktree "${worktree1.name}"`);
 console.log(`  • ID: ${worktree1.id}`);
 console.log(`  • Path: ${worktree1.path}`);
 console.log(`  • Change: ${worktree1.changeId.slice(0, 8)}`);
+
+// Verify worktree markers were created
+const gitFile = await fs.promises.readFile('./demo-worktree/.git', 'utf8').catch(() => null);
+const jjFile = await fs.promises.readFile('./demo-worktree/.jj', 'utf8').catch(() => null);
+
+console.log('  • Worktree markers created:');
+console.log(`    - .git file: ${gitFile ? '✓ ' + gitFile.trim() : '✗ missing'}`);
+console.log(`    - .jj file: ${jjFile ? '✓ ' + jjFile.trim() : '✗ missing'}`);
 console.log('  • Can work on Layer 1 independently!\n');
 
 const allWorktrees = await jj.worktree.list();

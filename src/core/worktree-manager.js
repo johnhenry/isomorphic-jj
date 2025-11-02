@@ -8,6 +8,7 @@
 import { JJError } from '../utils/errors.js';
 import { validateChangeId, validatePath } from '../utils/validation.js';
 import { generateId } from '../utils/id-generation.js';
+import path from 'path';
 
 export class WorktreeManager {
   /**
@@ -80,8 +81,8 @@ export class WorktreeManager {
       });
     }
 
-    validatePath(args.path);
-
+    // Worktree paths can be absolute (unlike regular file paths)
+    // Just validate changeId if provided
     if (args.changeId) {
       validateChangeId(args.changeId);
     }
@@ -106,6 +107,20 @@ export class WorktreeManager {
 
     // Create worktree directory
     await this.fs.promises.mkdir(args.path, { recursive: true });
+
+    // Create .git file pointing to main repo's .git directory
+    // This allows Git tools to work in the worktree
+    const gitFilePath = path.join(args.path, '.git');
+    const mainGitDir = path.join(this.repoDir, '.git');
+    const gitFileContent = `gitdir: ${mainGitDir}\n`;
+    await this.fs.promises.writeFile(gitFilePath, gitFileContent, 'utf8');
+
+    // Create .jj file pointing to main repo's .jj directory
+    // This allows JJ tools to work in the worktree
+    const jjFilePath = path.join(args.path, '.jj');
+    const mainJJDir = path.join(this.repoDir, '.jj');
+    const jjFileContent = `jjdir: ${mainJJDir}\n`;
+    await this.fs.promises.writeFile(jjFilePath, jjFileContent, 'utf8');
 
     this.worktrees.set(worktreeId, worktree);
     await this.save();
@@ -147,6 +162,20 @@ export class WorktreeManager {
         if (error.code !== 'ENOENT') {
           throw error;
         }
+      }
+    }
+
+    // Remove the worktree directory and all its contents
+    try {
+      await this.fs.promises.rm(worktree.path, { recursive: true, force: true });
+    } catch (error) {
+      // Ignore errors if directory doesn't exist
+      if (error.code !== 'ENOENT') {
+        throw new JJError(
+          'WORKTREE_REMOVAL_FAILED',
+          `Failed to remove worktree directory: ${error.message}`,
+          { path: worktree.path, originalError: error.message }
+        );
       }
     }
 

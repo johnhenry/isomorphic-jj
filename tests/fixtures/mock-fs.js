@@ -13,6 +13,8 @@ export class MockFS {
       unlink: this.unlink.bind(this),
       stat: this.stat.bind(this),
       access: this.access.bind(this),
+      readdir: this.readdir.bind(this),
+      rm: this.rm.bind(this),
     };
   }
 
@@ -76,6 +78,46 @@ export class MockFS {
     }
     // Mock access - always return success if file exists
     return;
+  }
+
+  async readdir(path) {
+    // Return all files that start with this path
+    const results = [];
+    for (const [filePath, file] of this.files.entries()) {
+      if (filePath.startsWith(path + '/')) {
+        const relativePath = filePath.substring(path.length + 1);
+        const firstSegment = relativePath.split('/')[0];
+        if (firstSegment && !results.includes(firstSegment)) {
+          results.push(firstSegment);
+        }
+      }
+    }
+    return results;
+  }
+
+  async rm(path, opts = {}) {
+    // Remove file or directory
+    if (opts.recursive) {
+      // Remove all files that start with this path
+      const toDelete = [];
+      for (const filePath of this.files.keys()) {
+        if (filePath === path || filePath.startsWith(path + '/')) {
+          toDelete.push(filePath);
+        }
+      }
+      for (const filePath of toDelete) {
+        this.files.delete(filePath);
+      }
+    } else {
+      // Just remove the single path
+      const file = this.files.get(path);
+      if (!file && !opts.force) {
+        const error = new Error(`ENOENT: no such file or directory, rm '${path}'`);
+        error.code = 'ENOENT';
+        throw error;
+      }
+      this.files.delete(path);
+    }
   }
 
   reset() {
