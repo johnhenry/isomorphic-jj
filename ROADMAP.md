@@ -194,4 +194,4 @@ Future explorations beyond v1.0 for consideration:
 
 ---
 
-**Current Status**: 393 tests, 100% passing | v1.0.0 with JJ-compatible workspaces!
+**Current Status**: 408 tests, 100% passing | v1.0.0 with JJ-compatible workspaces!

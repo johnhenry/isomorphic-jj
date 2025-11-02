@@ -608,6 +608,110 @@ export async function createJJ(options) {
     },
 
     /**
+     * Create a readable stream for a file (Node.js only)
+     *
+     * For large files, use streaming to avoid loading entire file into memory.
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.path - File path relative to repo root
+     * @param {string} [args.changeId] - Change ID to read from (defaults to working copy)
+     * @param {string} [args.encoding] - Optional encoding ('utf-8', etc.)
+     * @returns {Promise<ReadableStream>} Readable stream
+     * @throws {JJError} If not in Node.js environment or file not found
+     */
+    async readStream(args) {
+      if (!args || !args.path) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing path argument', {
+          suggestion: 'Provide a path for the file to read',
+        });
+      }
+
+      // Check if we're in Node.js
+      if (typeof process === 'undefined' || !fs.createReadStream) {
+        throw new JJError('UNSUPPORTED_OPERATION', 'readStream() is only supported in Node.js', {
+          suggestion: 'Use read() instead for browser environments',
+        });
+      }
+
+      // Reading from working copy
+      if (!args.changeId) {
+        const fullPath = path.join(dir, args.path);
+        try {
+          const stream = fs.createReadStream(fullPath, args.encoding ? { encoding: args.encoding } : {});
+          return stream;
+        } catch (error) {
+          throw new JJError('FILE_NOT_FOUND', `File ${args.path} not found in working copy`, {
+            path: args.path,
+            originalError: error.message,
+          });
+        }
+      }
+
+      // Reading from a specific change - for historical data, fall back to read()
+      // Streaming from Git objects requires more complex implementation
+      throw new JJError('UNSUPPORTED_OPERATION', 'Streaming from historical changes not yet supported', {
+        suggestion: 'Use read({ path, changeId }) for historical file access, or readStream({ path }) for working copy',
+      });
+    },
+
+    /**
+     * Create a writable stream for a file (Node.js only)
+     *
+     * For large files, use streaming to avoid loading entire file into memory.
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.path - File path relative to repo root
+     * @param {string} [args.encoding] - Optional encoding ('utf-8', etc.)
+     * @returns {Promise<WritableStream>} Writable stream
+     * @throws {JJError} If not in Node.js environment
+     */
+    async writeStream(args) {
+      if (!args || !args.path) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing path argument', {
+          suggestion: 'Provide a path for the file to write',
+        });
+      }
+
+      // Check if we're in Node.js
+      if (typeof process === 'undefined' || !fs.createWriteStream) {
+        throw new JJError('UNSUPPORTED_OPERATION', 'writeStream() is only supported in Node.js', {
+          suggestion: 'Use write() instead for browser environments',
+        });
+      }
+
+      const fullPath = path.join(dir, args.path);
+
+      // Ensure directory exists
+      const pathParts = args.path.split('/');
+      if (pathParts.length > 1) {
+        const dirPath = pathParts.slice(0, -1).join('/');
+        const fullDirPath = path.join(dir, dirPath);
+        await fs.promises.mkdir(fullDirPath, { recursive: true });
+      }
+
+      // Create writable stream
+      const stream = fs.createWriteStream(fullPath, args.encoding ? { encoding: args.encoding } : {});
+
+      // Track file when stream finishes
+      stream.on('finish', async () => {
+        try {
+          await workingCopy.load();
+          const stats = await fs.promises.stat(fullPath);
+          await workingCopy.trackFile(args.path, {
+            mtime: stats.mtime,
+            size: stats.size,
+            mode: stats.mode,
+          });
+        } catch (error) {
+          // Log but don't throw - stream already finished
+          console.error(`Warning: Failed to track file ${args.path}:`, error);
+        }
+      });
+
+      return stream;
+    },
+
+    /**
      * Move/rename a file in the working copy OR move/rebase a change to a new parent
      *
      * This method is polymorphic and handles two distinct operations:
@@ -1357,7 +1461,7 @@ export async function createJJ(options) {
     async edit(args) {
       if (!args || !args.changeId) {
         throw new JJError('INVALID_ARGUMENT', 'Missing changeId argument', {
-          suggestion: 'Provide a change ID to edit',
+          suggestion: 'Provide a changeId to edit',
         });
       }
 

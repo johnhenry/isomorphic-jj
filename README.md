@@ -139,7 +139,7 @@ git rebase -i HEAD~3         # Manually rewrite history
 await jj.describe({ message: 'message' });  // Describe current change
 
 // Edit any change in history
-await jj.edit({ change: 'abc123' });
+await jj.edit({ changeId: 'abc123' });
 // Make changes...
 await jj.amend();
 // Descendants automatically rebased!
@@ -185,7 +185,7 @@ await jj.new({ message: 'Start feature Y' });
 await jj.amend({ message: 'Fix typo in feature X' });
 
 // Edit historical changes
-await jj.edit({ change: 'abc123' });
+await jj.edit({ changeId: 'abc123' });
 // Make changes...
 await jj.amend();
 // Descendants are automatically rebased!
@@ -589,7 +589,7 @@ await jj.new({ message: 'Feature B using feature A' });
 await jj.write({ path: 'feature-b.js', data: '...' });
 
 // Edit the middle change - descendants auto-rebase!
-await jj.edit({ change: featureA.changeId });
+await jj.edit({ changeId: featureA.changeId });
 await jj.amend({ message: 'Updated feature A' });
 // Feature B is automatically updated!
 ```
@@ -617,7 +617,7 @@ await jj.new({ message: 'Better approach' });
 const changeId = await jj.describe({ message: 'Initial implementation' });
 
 // Reviewer comments applied
-await jj.edit({ change: changeId });
+await jj.edit({ changeId: changeId });
 await jj.amend({ message: 'Address review comments' });
 // Same changeId, different commitId
 

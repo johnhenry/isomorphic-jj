@@ -345,6 +345,23 @@ export interface ListFilesArgs {
 }
 
 /**
+ * Read stream arguments (Node.js only)
+ */
+export interface ReadStreamArgs {
+  path: string;
+  changeId?: ChangeID;
+  encoding?: string;
+}
+
+/**
+ * Write stream arguments (Node.js only)
+ */
+export interface WriteStreamArgs {
+  path: string;
+  encoding?: string;
+}
+
+/**
  * Describe change arguments
  */
 export interface DescribeArgs {
@@ -371,7 +388,7 @@ export interface AmendArgs {
  * Edit change arguments
  */
 export interface EditArgs {
-  change: Revset;
+  changeId: Revset;
 }
 
 /**
@@ -626,6 +643,8 @@ export interface JJ {
   move(args: MoveFileArgs): Promise<MoveResult>;
   remove(args: RemoveArgs): Promise<RemoveResult>;
   listFiles(args?: ListFilesArgs): Promise<string[]>;
+  readStream(args: ReadStreamArgs): Promise<any>;
+  writeStream(args: WriteStreamArgs): Promise<any>;
 
   // Change operations
   describe(args?: DescribeArgs): Promise<Change>;

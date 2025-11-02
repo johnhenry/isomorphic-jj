@@ -11,7 +11,8 @@
 2. [API Comparison](#api-comparison)
 3. [Code Examples](#code-examples)
 4. [Key Differences](#key-differences)
-5. [Migration Strategy](#migration-strategy)
+5. [Architecture Comparison](#architecture-comparison)
+6. [Migration Strategy](#migration-strategy)
 
 ---
 
@@ -407,6 +408,123 @@ await jj.describe({ message: 'Change' });
 ### 6. Cleaner API
 **isomorphic-git:** Pass `fs, dir` to every call
 **isomorphic-jj:** Create instance once, clean methods
+
+---
+
+## Architecture Comparison
+
+Understanding the architectural differences helps explain why isomorphic-jj offers a simpler API while maintaining full Git compatibility.
+
+### isomorphic-git Architecture
+
+**Approach**: Pure JavaScript reimplementation of Git
+
+```
+┌─────────────────────────────────────┐
+│      Your Application Code          │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│      isomorphic-git Library         │
+│   (Pure JavaScript implementation)  │
+│                                     │
+│  • Read/write .git objects          │
+│  • Create commits (JavaScript)      │
+│  • Network operations (JavaScript)  │
+│  • All git logic in JavaScript      │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│      Filesystem (.git directory)    │
+│                                     │
+│  Compatible with native git CLI     │
+└─────────────────────────────────────┘
+```
+
+**Key Points**:
+- ✅ No git CLI dependency
+- ✅ Works in browsers (with appropriate fs implementation)
+- ✅ Creates Git-compatible repositories
+- ✅ 100% pure JavaScript
+
+**Philosophy**: Reimplement Git's internals in JavaScript to achieve portability
+
+### isomorphic-jj Architecture
+
+**Approach**: Hybrid - Pure JavaScript for JJ semantics, delegates to isomorphic-git for Git operations
+
+```
+┌─────────────────────────────────────┐
+│      Your Application Code          │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│     isomorphic-jj Library           │
+│   (Pure JavaScript JJ semantics)    │
+│                                     │
+│  • Change-centric model             │
+│  • Operation log                    │
+│  • ConflictModel                    │
+│  • Revset queries                   │
+└──────────┬──────────┬────────────────┘
+           │          │
+           ▼          ▼
+┌──────────────────┐ ┌──────────────────┐
+│  isomorphic-git  │ │  Optional: jj    │
+│  (Git backend)   │ │  CLI for full    │
+│                  │ │  jj metadata     │
+│  • Git commits   │ │                  │
+│  • Pure JS       │ │  • Protobuf      │
+└────────┬─────────┘ └────────┬─────────┘
+         │                    │
+         ▼                    ▼
+┌─────────────────────────────────────┐
+│   Filesystem (.git + .jj dirs)      │
+│                                     │
+│  • .git/  - Git objects (via        │
+│             isomorphic-git)         │
+│  • .jj/   - JJ metadata (pure JS)   │
+└─────────────────────────────────────┘
+```
+
+**Key Points**:
+- ✅ No jj CLI dependency for core functionality
+- ✅ Works in browsers (with appropriate fs implementation)
+- ✅ Creates Git-compatible repositories via isomorphic-git
+- ✅ JJ semantics (stable changeIds, operation log) in pure JavaScript
+- ✅ Pragmatic: reuses isomorphic-git instead of reimplementing Git
+
+**Philosophy**: Implement JJ's model in JavaScript, leverage existing tools for Git compatibility
+
+### Why Different Approaches?
+
+**isomorphic-git's Choice (Pure JS)**
+- **Reason**: Git is the standard. A pure JS implementation enables browser compatibility and universal deployment
+- **Trade-off**: Had to reimplement all of Git (huge effort, but worth it)
+
+**isomorphic-jj's Choice (Hybrid)**
+- **Reason**: JJ's value is in its semantics, not its file format
+- **Benefits**:
+  1. Git compatibility via isomorphic-git (don't reinvent the wheel)
+  2. JJ semantics in pure JavaScript (change-centric model, operation log, conflicts)
+  3. Works standalone without jj CLI
+  4. Pragmatic layering on proven technology
+- **Trade-off**: None for most users! Full compatibility maintained
+
+### Architecture Summary
+
+| Feature | isomorphic-git | isomorphic-jj |
+|---------|---------------|---------------|
+| Pure JavaScript? | ✅ Yes (Git internals) | ✅ Yes (JJ semantics) + isomorphic-git |
+| Works in browsers? | ✅ Yes | ✅ Yes |
+| Creates Git repos? | ✅ Yes | ✅ Yes (via isomorphic-git) |
+| Native CLI dependency? | ❌ None | ❌ None (jj CLI optional) |
+| Reimplements everything? | ✅ Yes (all of Git) | ⚠️ No (reuses isomorphic-git) |
+| Primary value | Git portability | JJ semantics + Git compatibility |
+| File format created | .git/ (pure JS) | .git/ (via isomorphic-git) + .jj/ (pure JS) |
 
 ---
 

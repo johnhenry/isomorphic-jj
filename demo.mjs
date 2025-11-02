@@ -720,7 +720,7 @@ console.log('║                                                                
 console.log('╚═══════════════════════════════════════════════════════════════════════════╝\n');
 
 console.log('Ready for production use:');
-console.log('  ✓ 393 tests passing (100% success rate)');
+console.log('  ✓ 408 tests passing (100% success rate)');
 console.log('  ✓ 95%+ code coverage');
 console.log('  ✓ Semantic versioning commitment');
 console.log('  ✓ Complete documentation');

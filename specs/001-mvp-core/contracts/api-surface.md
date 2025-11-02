@@ -197,9 +197,9 @@ interface EditArgs {
 
 **Example**:
 ```javascript
-await jj.edit({ change: 'abc123...' });
+await jj.edit({ changeId: 'abc123...' });
 // Or with revset:
-await jj.edit({ change: 'bookmark(main)' });
+await jj.edit({ changeId: 'bookmark(main)' });
 ```
 
 **Side Effects**:
@@ -693,7 +693,7 @@ class JJError extends Error {
 **Example Error Handling**:
 ```javascript
 try {
-  await jj.edit({ change: 'invalid-id' });
+  await jj.edit({ changeId: 'invalid-id' });
 } catch (error) {
   if (error.code === 'CHANGE_NOT_FOUND') {
     console.error(error.message);
