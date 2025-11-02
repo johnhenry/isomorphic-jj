@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
 [![test coverage](https://img.shields.io/badge/tests-314%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
-[![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](https://github.com/johnhenry/isomorphic-jj/blob/main/LICENSE)
+[![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
 
@@ -376,22 +376,30 @@ await jj.background.queue(async () => {
 });
 ```
 
-#### Event Hooks
+#### Event System
 ```javascript
-const jj = await createJJ({
-  fs, dir: './repo', git, http,
-  hooks: {
-    preCommit: async (context) => {
-      // Run linters, tests, etc.
-      const result = await runLinter(context.changeId);
-      if (!result.success) throw new Error('Linting failed');
-    },
-    postCommit: async (context) => {
-      console.log(`Committed: ${context.change.description}`);
-      await notifyTeam(context.changeId);
-    }
-  }
+// JJ extends EventTarget - listen to repository events
+jj.addEventListener('change:creating', (event) => {
+  console.log('Creating change:', event.detail.description);
+  // event.preventDefault() to cancel operation
 });
+
+jj.addEventListener('change:created', (event) => {
+  console.log('Change created:', event.detail.changeId);
+  // Informational only, cannot cancel
+});
+
+jj.addEventListener('change:updating', (event) => {
+  console.log('Updating change:', event.detail.changeId);
+  // Can run validation and preventDefault() if needed
+});
+
+jj.addEventListener('change:updated', (event) => {
+  console.log('Change updated:', event.detail.changeId);
+});
+
+// Events fire automatically during describe(), new(), amend(), etc.
+await jj.describe({ message: 'Fix bug' });  // Fires events!
 ```
 
 #### Shallow Clones
@@ -581,7 +589,7 @@ repo/
 - ✅ v0.1: Core JJ experience (stable IDs, undo, bookmarks, revsets)
 - ✅ v0.2: History editing (squash, split, abandon, restore, move)
 - ✅ v0.3: Git backend, conflicts, worktrees, browser support
-- ✅ v0.4: Shallow clones, advanced revsets, event hooks
+- ✅ v0.4: Shallow clones, advanced revsets, event system
 
 **Coming Next (v0.5):**
 - Repository analytics and debugging tools

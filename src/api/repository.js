@@ -1236,6 +1236,76 @@ export async function createJJ(options) {
     },
 
     /**
+     * Show detailed information about a specific change
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.change - Change ID or revset to show
+     * @returns {Promise<Object>} Detailed change information
+     */
+    async show(args) {
+      if (!args || !args.change) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing change argument', {
+          suggestion: 'Provide { change: changeId }'
+        });
+      }
+
+      await graph.load();
+
+      // Resolve revset if needed
+      let changeId = args.change;
+      if (args.change === '@') {
+        await workingCopy.load();
+        changeId = workingCopy.getCurrentChangeId();
+      } else {
+        // Try to resolve as revset
+        try {
+          const changes = await revset.evaluate(args.change);
+          if (changes.length > 0) {
+            changeId = changes[0];
+          }
+        } catch {
+          // Use as-is
+        }
+      }
+
+      const change = await graph.getChange(changeId);
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
+      }
+
+      // Get additional context
+      const children = await graph.getChildren(change.changeId);
+      await oplog.load();
+      await bookmarks.load();
+
+      // Find bookmarks pointing to this change
+      const allBookmarks = await bookmarks.list();
+      const changeBookmarks = allBookmarks
+        .filter(b => b.target === change.changeId)
+        .map(b => b.name);
+
+      // Find operations that modified this change
+      const ops = await oplog.list();
+      const relatedOps = ops.filter(op =>
+        op.view && (
+          op.view.workingCopy === change.changeId ||
+          (op.view.heads && op.view.heads.includes(change.changeId))
+        )
+      );
+
+      return {
+        ...change,
+        children,
+        bookmarks: changeBookmarks,
+        operations: relatedOps.map(op => ({
+          id: op.id,
+          timestamp: op.timestamp,
+          description: op.description,
+        })),
+      };
+    },
+
+    /**
      * Amend the working copy change
      *
      * @param {Object} args - Arguments
@@ -1442,7 +1512,116 @@ export async function createJJ(options) {
         },
       };
     },
-    
+
+    /**
+     * View operation log (operation history)
+     *
+     * @param {Object} [opts] - Options
+     * @param {number} [opts.limit] - Maximum number of operations to return
+     * @param {string} [opts.change] - Show operations for specific change
+     * @returns {Promise<Array>} Array of operations
+     */
+    async obslog(opts = {}) {
+      await oplog.load();
+      let operations = await oplog.list();
+
+      // Filter by change if specified
+      if (opts.change) {
+        operations = operations.filter(op =>
+          op.view && (
+            op.view.workingCopy === opts.change ||
+            (op.view.heads && op.view.heads.includes(opts.change))
+          )
+        );
+      }
+
+      // Apply limit
+      if (opts.limit && opts.limit > 0) {
+        operations = operations.slice(-opts.limit);
+      }
+
+      // Reverse to show newest first
+      return operations.reverse();
+    },
+
+    /**
+     * Operations namespace for advanced operation log queries
+     */
+    operations: {
+      /**
+       * List all operations
+       *
+       * @param {Object} [opts] - Options
+       * @param {number} [opts.limit] - Maximum number to return
+       * @returns {Promise<Array>} Array of operations
+       */
+      async list(opts = {}) {
+        await oplog.load();
+        let ops = await oplog.list();
+
+        if (opts.limit && opts.limit > 0) {
+          ops = ops.slice(-opts.limit);
+        }
+
+        return ops.reverse();
+      },
+
+      /**
+       * View repository at a specific operation (time travel)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.operation - Operation ID to view at
+       * @returns {Promise<Object>} Read-only repository view at that operation
+       */
+      async at(args) {
+        if (!args || !args.operation) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing operation ID', {
+            suggestion: 'Provide { operation: operationId }'
+          });
+        }
+
+        await oplog.load();
+        const ops = await oplog.list();
+        const targetOp = ops.find(op => op.id === args.operation);
+
+        if (!targetOp) {
+          throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
+        }
+
+        // Create a read-only view at this operation
+        return {
+          async log(logArgs = {}) {
+            // Get changes that existed at this operation
+            await graph.load();
+            const allChanges = await graph.getAllChanges();
+
+            // Filter to changes that existed before or at this operation
+            const opIndex = ops.indexOf(targetOp);
+            const validChanges = allChanges.filter(change => {
+              // Check if this change was created before this operation
+              const changeOps = ops.filter(op =>
+                op.view && op.view.heads && op.view.heads.includes(change.changeId)
+              );
+              return changeOps.length > 0 && ops.indexOf(changeOps[0]) <= opIndex;
+            });
+
+            return validChanges;
+          },
+
+          async status() {
+            return {
+              workingCopy: targetOp.view.workingCopy,
+              operation: targetOp.id,
+              timestamp: targetOp.timestamp,
+              description: targetOp.description,
+            };
+          },
+
+          // Other methods can be added as needed
+        };
+      },
+    },
+
     // ========================================
     // v0.2 FEATURES: History Editing
     // ========================================

@@ -274,8 +274,24 @@ describe('ConflictModel', () => {
 
       const conflict = conflicts.getConflict('conflict123');
       expect(conflict.resolved).toBe(true);
-      expect(conflict.resolution).toBe('resolved content');
+      expect(conflict.resolution).toEqual({ type: 'manual', value: 'resolved content' });
       expect(conflict.resolvedAt).toBeDefined();
+    });
+
+    it('should resolve conflict with object-based resolution', async () => {
+      await conflicts.resolveConflict('conflict123', { side: 'ours' });
+
+      const conflict = conflicts.getConflict('conflict123');
+      expect(conflict.resolved).toBe(true);
+      expect(conflict.resolution).toEqual({ type: 'side', side: 'ours' });
+    });
+
+    it('should resolve conflict with custom content', async () => {
+      await conflicts.resolveConflict('conflict123', { content: 'custom resolution' });
+
+      const conflict = conflicts.getConflict('conflict123');
+      expect(conflict.resolved).toBe(true);
+      expect(conflict.resolution).toEqual({ type: 'content', content: 'custom resolution' });
     });
 
     it('should throw error when resolving non-existent conflict', async () => {

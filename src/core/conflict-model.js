@@ -253,8 +253,38 @@ export class ConflictModel {
       throw new JJError('CONFLICT_NOT_FOUND', `Conflict ${conflictId} not found`);
     }
 
+    // Support both object-based and legacy string resolutions
+    let resolvedContent;
+
+    if (typeof resolution === 'string') {
+      // Legacy string format: 'manual', 'ours', 'theirs', etc.
+      resolvedContent = { type: 'manual', value: resolution };
+    } else if (resolution && typeof resolution === 'object') {
+      // New object-based format
+      if (resolution.side) {
+        // { side: 'ours' | 'theirs' | 'base' }
+        if (!['ours', 'theirs', 'base'].includes(resolution.side)) {
+          throw new JJError('INVALID_RESOLUTION', `Invalid side: ${resolution.side}`, {
+            suggestion: 'Use "ours", "theirs", or "base"'
+          });
+        }
+        resolvedContent = { type: 'side', side: resolution.side };
+      } else if (resolution.content !== undefined) {
+        // { content: string | Uint8Array }
+        resolvedContent = { type: 'content', content: resolution.content };
+      } else if (resolution.hunks) {
+        // { hunks: [...] } for partial resolution
+        resolvedContent = { type: 'hunks', hunks: resolution.hunks };
+      } else {
+        // Store as-is for extensibility
+        resolvedContent = resolution;
+      }
+    } else {
+      throw new JJError('INVALID_RESOLUTION', 'Resolution must be a string or object');
+    }
+
     conflict.resolved = true;
-    conflict.resolution = resolution;
+    conflict.resolution = resolvedContent;
     conflict.resolvedAt = new Date().toISOString();
 
     await this.save();

@@ -405,7 +405,7 @@ All operations now return useful information:
 **✅ v0.4: COMPLETE**
 - ✅ Shallow clone support (complete)
 - ✅ Advanced revset functions (complete)
-- ✅ Event hooks system (complete)
+- ✅ Event system (EventTarget-based) (complete)
 - ✅ Operation return values (complete)
 - 314 tests, 100% passing
 
