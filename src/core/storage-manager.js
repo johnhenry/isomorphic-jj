@@ -15,16 +15,34 @@ export class Storage {
     this.fs = fs;
     this.dir = dir;
     this.jjDir = `${dir}/.jj`;
+    this.repoDir = `${dir}/.jj/repo`;  // Core repo data
+    this.workingCopyDir = `${dir}/.jj/working_copy`;  // Default workspace working copy
     this.cache = new Map();
   }
 
   /**
-   * Initialize .jj directory structure
+   * Initialize .jj directory structure (JJ workspace model)
+   *
+   * Structure:
+   * .jj/
+   *   repo/           - Core repository data (shared by all workspaces)
+   *     store/        - Change graph, operations, bookmarks
+   *   working_copy/   - Default workspace working copy state
    */
   async init() {
     try {
+      // Create main directories
       await this.fs.promises.mkdir(this.jjDir, { recursive: true });
-      await this.fs.promises.mkdir(`${this.jjDir}/conflicts`, { recursive: true });
+      await this.fs.promises.mkdir(this.repoDir, { recursive: true });
+      await this.fs.promises.mkdir(this.workingCopyDir, { recursive: true });
+
+      // Create repo subdirectories
+      await this.fs.promises.mkdir(`${this.repoDir}/store`, { recursive: true });
+      await this.fs.promises.mkdir(`${this.repoDir}/op_log`, { recursive: true });
+      await this.fs.promises.mkdir(`${this.repoDir}/conflicts`, { recursive: true });
+
+      // Create default workspace directory
+      await this.fs.promises.mkdir(`${this.workingCopyDir}/default`, { recursive: true });
     } catch (error) {
       throw new JJError('STORAGE_INIT_FAILED', `Failed to initialize .jj directory: ${error.message}`, {
         dir: this.jjDir,

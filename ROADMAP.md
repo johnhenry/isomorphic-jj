@@ -61,11 +61,12 @@ This roadmap outlines feature development organized by functional area, showing 
 - Graph analytics: `descendants()`, `common_ancestor()`, `range()`, `diverge_point()`, `connected()`
 - Set operations: `&` (intersection), `|` (union), `~` (difference)
 
-#### ✅ Multiple Working Copies
-- Create and manage multiple working copies
-- `worktree` commands (add, remove, list, get)
-- Independent working directory support
-- File restoration from change snapshots
+#### ✅ Multiple Working Copies (Workspaces)
+- Create and manage multiple JJ-style workspaces
+- `workspace` commands (add, remove, list, get)
+- JJ CLI-compatible directory structure (.jj/repo + .jj/working_copy)
+- Independent working directory support with .git and .jj markers
+- Per-workspace state isolation
 
 #### ✅ Browser Support
 - LightningFS integration (IndexedDB backend)
@@ -193,4 +194,4 @@ Future explorations beyond v1.0 for consideration:
 
 ---
 
-**Current Status**: 371 tests, 100% passing | v1.0.0 Released!
+**Current Status**: 393 tests, 100% passing | v1.0.0 with JJ-compatible workspaces!

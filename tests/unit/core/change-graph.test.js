@@ -33,8 +33,8 @@ describe('ChangeGraph', () => {
 
     it('should create graph.json on init', async () => {
       await graph.init();
-      
-      const data = await storage.read('graph.json');
+
+      const data = await storage.read('repo/store/graph.json');
       expect(data).toEqual({
         version: 1,
         changes: {},

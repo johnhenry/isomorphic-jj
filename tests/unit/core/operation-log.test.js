@@ -42,8 +42,8 @@ describe('OperationLog', () => {
 
     it('should create oplog.jsonl on init', async () => {
       await oplog.init();
-      
-      const exists = await storage.exists('oplog.jsonl');
+
+      const exists = await storage.exists('repo/op_log/oplog.jsonl');
       expect(exists).toBe(true);
     });
   });

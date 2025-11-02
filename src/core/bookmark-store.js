@@ -23,8 +23,8 @@ export class BookmarkStore {
   async init() {
     this.local.clear();
     this.remote.clear();
-    
-    await this.storage.write('bookmarks.json', {
+
+    await this.storage.write('repo/store/bookmarks.json', {
       version: 1,
       local: {},
       remote: {},
@@ -36,10 +36,10 @@ export class BookmarkStore {
    * Load bookmarks from storage
    */
   async load() {
-    const data = await this.storage.read('bookmarks.json');
-    
+    const data = await this.storage.read('repo/store/bookmarks.json');
+
     if (!data) {
-      throw new JJError('STORAGE_CORRUPT', 'bookmarks.json not found', {
+      throw new JJError('STORAGE_CORRUPT', 'repo/store/bookmarks.json not found', {
         suggestion: 'Initialize repository with init()',
       });
     }
@@ -90,7 +90,7 @@ export class BookmarkStore {
       }
     }
 
-    await this.storage.write('bookmarks.json', {
+    await this.storage.write('repo/store/bookmarks.json', {
       version: 1,
       local,
       remote,

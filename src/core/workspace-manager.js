@@ -47,7 +47,7 @@ export class WorkspaceManager {
    */
   async load() {
     try {
-      const data = await this.storage.read('workspaces.json');
+      const data = await this.storage.read('repo/store/workspaces.json');
       if (data) {
         this.workspaces = new Map(Object.entries(data.workspaces || {}));
       }
@@ -64,7 +64,7 @@ export class WorkspaceManager {
     const data = {
       workspaces: Object.fromEntries(this.workspaces),
     };
-    await this.storage.write('workspaces.json', data);
+    await this.storage.write('repo/store/workspaces.json', data);
   }
 
   /**
@@ -109,6 +109,10 @@ export class WorkspaceManager {
 
     // Create workspace directory
     await this.fs.promises.mkdir(args.path, { recursive: true });
+
+    // Create workspace-specific working_copy directory in .jj
+    const workspaceCopyDir = path.join(this.repoDir, '.jj', 'working_copy', workspaceId);
+    await this.fs.promises.mkdir(workspaceCopyDir, { recursive: true });
 
     // Create .git file pointing to main repo's .git directory
     // This allows Git tools to work in the workspace

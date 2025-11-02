@@ -23,16 +23,16 @@ export class OperationLog {
   async init() {
     this.operations = [];
     this.headOperationId = null;
-    
-    await this.storage.write('oplog.jsonl', '');
+
+    await this.storage.write('repo/op_log/oplog.jsonl', '');
   }
 
   /**
    * Load operation log from storage
    */
   async load() {
-    const lines = await this.storage.readLines('oplog.jsonl');
-    
+    const lines = await this.storage.readLines('repo/op_log/oplog.jsonl');
+
     this.operations = lines;
     this.headOperationId = lines.length > 0 ? lines[lines.length - 1].id : null;
   }
@@ -65,7 +65,7 @@ export class OperationLog {
 
     // Append to log
     const line = JSON.stringify(fullOperation);
-    await this.storage.appendLine('oplog.jsonl', line);
+    await this.storage.appendLine('repo/op_log/oplog.jsonl', line);
 
     // Update in-memory state
     this.operations.push(fullOperation);

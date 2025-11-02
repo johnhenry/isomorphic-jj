@@ -443,25 +443,29 @@ console.log('  • All changes, files, and conflicts reverted\n');
 console.log('  • Fearless experimentation - undo any mistake!\n');
 
 // ============================================================================
-// PART 11: MULTIPLE WORKING COPIES (Workspaces)
+// PART 11: MULTIPLE WORKING COPIES (JJ Workspaces)
 // ============================================================================
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-console.log('🌳 PART 11: Multiple Working Copies (Workspaces)');
+console.log('🌳 PART 11: Multiple Working Copies (JJ Workspaces)');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+console.log('Note: Using JJ CLI-compatible workspace structure:');
+console.log('  • .jj/repo/ - Shared repository data (graph, operations, bookmarks)');
+console.log('  • .jj/working_copy/{id}/ - Per-workspace state');
+console.log('  • Each workspace has .git and .jj marker files\n');
 
 console.log('Creating additional working copy for Layer 1...');
-const worktree1 = await jj.workspace.add({
+const workspace1 = await jj.workspace.add({
   path: './demo-workspace',
   name: 'auth-workspace',
   changeId: layer1Id
 });
 
-console.log(`✓ Created worktree "${worktree1.name}"`);
-console.log(`  • ID: ${worktree1.id}`);
-console.log(`  • Path: ${worktree1.path}`);
-console.log(`  • Change: ${worktree1.changeId.slice(0, 8)}`);
+console.log(`✓ Created workspace "${workspace1.name}"`);
+console.log(`  • ID: ${workspace1.id}`);
+console.log(`  • Path: ${workspace1.path}`);
+console.log(`  • Change: ${workspace1.changeId.slice(0, 8)}`);
 
-// Verify worktree markers were created
+// Verify workspace markers were created
 const gitFile = await fs.promises.readFile('./demo-workspace/.git', 'utf8').catch(() => null);
 const jjFile = await fs.promises.readFile('./demo-workspace/.jj', 'utf8').catch(() => null);
 
@@ -477,7 +481,7 @@ allWorkspaces.forEach((wt, i) => {
 });
 
 console.log('\nCleaning up workspace...');
-await jj.workspace.remove({ id: worktree1.id, force: true });
+await jj.workspace.remove({ id: workspace1.id, force: true });
 console.log('✓ Workspace removed\n');
 
 // ============================================================================
@@ -716,7 +720,7 @@ console.log('║                                                                
 console.log('╚═══════════════════════════════════════════════════════════════════════════╝\n');
 
 console.log('Ready for production use:');
-console.log('  ✓ 381 tests passing (100% success rate)');
+console.log('  ✓ 393 tests passing (100% success rate)');
 console.log('  ✓ 95%+ code coverage');
 console.log('  ✓ Semantic versioning commitment');
 console.log('  ✓ Complete documentation');

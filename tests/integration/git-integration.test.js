@@ -48,7 +48,7 @@ describe('Git Backend Integration', () => {
       expect(gitConfig).toContain('[core]');
 
       // Check .jj directory exists
-      const jjGraph = await fs.promises.readFile(`${testDir}/.jj/graph.json`, 'utf8');
+      const jjGraph = await fs.promises.readFile(`${testDir}/.jj/repo/store/graph.json`, 'utf8');
       expect(JSON.parse(jjGraph)).toBeDefined();
     });
 

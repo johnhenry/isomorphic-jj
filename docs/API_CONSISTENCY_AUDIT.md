@@ -9,7 +9,7 @@
 - `restore({ changeId })` - line 992
 - `split({ changeId })` - line 1029
 - `move({ changeId, newParent })` - line 245
-- `worktree.add({ changeId })` - line 1417
+- `workspace.add({ changeId })` - line 1417
 
 #### ❌ Inconsistent (Use `change`)
 - `edit({ change })` - line 777-843

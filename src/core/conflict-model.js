@@ -42,7 +42,7 @@ export class ConflictModel {
    */
   async init() {
     try {
-      const data = await this.storage.read('conflicts.json');
+      const data = await this.storage.read('repo/conflicts/conflicts.json');
       if (data) {
         // storage.read() already parses JSON
         this.conflicts = new Map(Object.entries(data.conflicts || {}));
@@ -71,7 +71,7 @@ export class ConflictModel {
       fileConflicts: Object.fromEntries(this.fileConflicts),
     };
     // storage.write() will handle JSON stringification
-    await this.storage.write('conflicts.json', data);
+    await this.storage.write('repo/conflicts/conflicts.json', data);
   }
 
   /**

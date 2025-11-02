@@ -39,10 +39,11 @@ describe('WorkingCopy', () => {
 
     it('should create working-copy.json on init', async () => {
       await workingCopy.init(tid(1));
-      
-      const data = await storage.read('working-copy.json');
+
+      const data = await storage.read('working_copy/default/state.json');
       expect(data.version).toBe(1);
       expect(data.changeId).toBe(tid(1));
+      expect(data.workspaceId).toBe('default');
     });
   });
 
@@ -69,8 +70,8 @@ describe('WorkingCopy', () => {
 
     it('should persist to storage', async () => {
       await workingCopy.setCurrentChange(tid(4));
-      
-      const data = await storage.read('working-copy.json');
+
+      const data = await storage.read('working_copy/default/state.json');
       expect(data.changeId).toBe(tid(4));
     });
   });

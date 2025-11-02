@@ -508,17 +508,17 @@ console.log(`Using ${quota.percentage}% of available storage`);
 
 ### Advanced Features
 
-#### Multiple Working Copies (Worktrees)
+#### Multiple Working Copies (Workspaces)
 ```javascript
 // Work on multiple changes simultaneously
-const worktree = await jj.worktree.add({
+const workspace = await jj.workspace.add({
   path: './feature-branch',
   name: 'feature-work',
   changeId: someChangeId
 });
 
-const all = await jj.worktree.list();
-await jj.worktree.remove({ id: worktree.id });
+const all = await jj.workspace.list();
+await jj.workspace.remove({ id: workspace.id });
 ```
 
 #### Background Operations (Node.js)
@@ -650,7 +650,7 @@ const jj: JJ = await createJJ(options: CreateJJOptions);
 - **Bookmarks**: `bookmark.list()`, `bookmark.set()`, `bookmark.move()`, `bookmark.delete()`
 - **Git**: `git.init()`, `git.fetch()`, `git.push()`, `git.import()`, `git.export()`
 - **Remotes**: `remote.add()`, `remote.fetch()`, `remote.push()`
-- **Worktrees**: `worktree.add()`, `worktree.list()`, `worktree.remove()`
+- **Workspaces**: `workspace.add()`, `workspace.list()`, `workspace.remove()`
 - **Conflicts**: `merge()`, `conflicts.list()`, `conflicts.resolve()`, `conflicts.resolveAll()` (v0.5), `conflicts.markers()` (v0.5)
 - **Merge Drivers** (v0.5): `mergeDrivers.register()`, `mergeDrivers.get()`, Built-in drivers: `jsonDriver`, `packageJsonDriver`, `yamlDriver`, `markdownDriver`
 - **Background** (Node.js): `background.start()`, `background.stop()`, `background.enableAutoSnapshot()`
@@ -746,7 +746,7 @@ repo/
 **Completed:**
 - ✅ v0.1: Core JJ experience (stable IDs, undo, bookmarks, revsets)
 - ✅ v0.2: History editing (squash, split, abandon, restore, move)
-- ✅ v0.3: Git backend, conflicts, worktrees, browser support
+- ✅ v0.3: Git backend, conflicts, workspaces, browser support
 - ✅ v0.4: Shallow clones, advanced revsets, event system
 - ✅ v0.5: Custom merge drivers, enhanced revsets (time-based, graph analytics), conflict resolution enhancements
 

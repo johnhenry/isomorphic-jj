@@ -42,7 +42,7 @@ describe('ConflictModel', () => {
       };
 
       // Mock storage returns objects directly (already parsed)
-      storage.data['conflicts.json'] = {
+      storage.data['repo/conflicts/conflicts.json'] = {
         conflicts: { conflict123: testConflict },
         fileConflicts: { 'file.txt': 'conflict123' },
       };

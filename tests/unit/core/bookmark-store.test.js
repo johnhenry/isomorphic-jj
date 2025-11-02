@@ -38,8 +38,8 @@ describe('BookmarkStore', () => {
 
     it('should create bookmarks.json on init', async () => {
       await bookmarks.init();
-      
-      const data = await storage.read('bookmarks.json');
+
+      const data = await storage.read('repo/store/bookmarks.json');
       expect(data.version).toBe(1);
       expect(data.local).toEqual({});
       expect(data.remote).toEqual({});

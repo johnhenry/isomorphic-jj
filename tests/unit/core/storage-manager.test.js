@@ -30,8 +30,8 @@ describe('Storage Manager', () => {
 
     it('should create conflicts subdirectory', async () => {
       await storage.init();
-      
-      const conflictsDir = fs.files.get('/test/repo/.jj/conflicts');
+
+      const conflictsDir = fs.files.get('/test/repo/.jj/repo/conflicts');
       expect(conflictsDir).toBeDefined();
       expect(conflictsDir.type).toBe('dir');
     });

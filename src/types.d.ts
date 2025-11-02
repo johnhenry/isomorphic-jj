@@ -167,13 +167,13 @@ export type ConflictResolution =
   | { content: Uint8Array | string };
 
 // ============================================================================
-// Worktree Types
+// Workspace Types
 // ============================================================================
 
 /**
- * A worktree (working copy)
+ * A workspace (working copy)
  */
-export interface Worktree {
+export interface Workspace {
   id: string;
   path: string;
   name: string;
@@ -522,18 +522,18 @@ export interface GitExportArgs {
 }
 
 /**
- * Worktree add arguments
+ * Workspace add arguments
  */
-export interface WorktreeAddArgs {
+export interface WorkspaceAddArgs {
   path: string;
   name: string;
   changeId?: ChangeID;
 }
 
 /**
- * Worktree remove arguments
+ * Workspace remove arguments
  */
-export interface WorktreeRemoveArgs {
+export interface WorkspaceRemoveArgs {
   id: string;
 }
 
@@ -610,7 +610,7 @@ export interface JJ {
   oplog: any;
   bookmarks: any;
   conflicts: any;
-  worktrees: any;
+  workspaces: any;
   userConfig: any;
   revset: any;
   gitBackend?: any;
@@ -680,12 +680,12 @@ export interface JJ {
     push(args?: RemotePushArgs): Promise<void>;
   };
 
-  // Worktrees
-  worktree: {
-    add(args: WorktreeAddArgs): Promise<Worktree>;
-    list(): Promise<Worktree[]>;
-    remove(args: WorktreeRemoveArgs): Promise<void>;
-    get(args: { id: string }): Promise<Worktree | null>;
+  // Workspaces
+  workspace: {
+    add(args: WorkspaceAddArgs): Promise<Workspace>;
+    list(): Promise<Workspace[]>;
+    remove(args: WorkspaceRemoveArgs): Promise<void>;
+    get(args: { id: string }): Promise<Workspace | null>;
   };
 
   // Background operations (only available in Node.js)

@@ -12,17 +12,19 @@ export class WorkingCopy {
    * @param {Storage} storage - Storage manager instance
    * @param {Object} fs - Filesystem implementation
    * @param {string} dir - Repository directory
+   * @param {string} [workspaceId='default'] - Workspace identifier
    */
-  constructor(storage, fs, dir) {
+  constructor(storage, fs, dir, workspaceId = 'default') {
     this.storage = storage;
     this.fs = fs;
     this.dir = dir;
+    this.workspaceId = workspaceId;
     this.state = null;
   }
 
   /**
    * Initialize working copy state
-   * 
+   *
    * @param {string} changeId - Initial change ID
    * @param {string} [operationId] - Operation ID that created this state
    */
@@ -31,6 +33,7 @@ export class WorkingCopy {
 
     this.state = {
       version: 1,
+      workspaceId: this.workspaceId,
       changeId,
       operation: operationId,
       fileStates: {},
@@ -41,13 +44,17 @@ export class WorkingCopy {
 
   /**
    * Load working copy state from storage
+   *
+   * Workspace-specific path: working_copy/workspace_id/state.json
    */
   async load() {
-    const data = await this.storage.read('working-copy.json');
+    const workspacePath = `working_copy/${this.workspaceId}/state.json`;
+    const data = await this.storage.read(workspacePath);
 
     if (!data) {
-      throw new JJError('STORAGE_CORRUPT', 'working-copy.json not found', {
+      throw new JJError('STORAGE_CORRUPT', `${workspacePath} not found`, {
         suggestion: 'Initialize repository with init()',
+        workspaceId: this.workspaceId,
       });
     }
 
@@ -67,9 +74,12 @@ export class WorkingCopy {
 
   /**
    * Save working copy state to storage
+   *
+   * Workspace-specific path: working_copy/workspace_id/state.json
    */
   async save() {
-    await this.storage.write('working-copy.json', this.state);
+    const workspacePath = `working_copy/${this.workspaceId}/state.json`;
+    await this.storage.write(workspacePath, this.state);
   }
 
   /**

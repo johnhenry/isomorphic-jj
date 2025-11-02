@@ -23,8 +23,8 @@ export class ChangeGraph {
   async init() {
     this.nodes.clear();
     this.commitIndex.clear();
-    
-    await this.storage.write('graph.json', {
+
+    await this.storage.write('repo/store/graph.json', {
       version: 1,
       changes: {},
     });
@@ -34,10 +34,10 @@ export class ChangeGraph {
    * Load graph from storage
    */
   async load() {
-    const data = await this.storage.read('graph.json');
-    
+    const data = await this.storage.read('repo/store/graph.json');
+
     if (!data) {
-      throw new JJError('STORAGE_CORRUPT', 'graph.json not found', {
+      throw new JJError('STORAGE_CORRUPT', 'repo/store/graph.json not found', {
         suggestion: 'Initialize repository with init() or check .jj directory',
       });
     }
@@ -67,7 +67,7 @@ export class ChangeGraph {
       changes[changeId] = change;
     }
 
-    await this.storage.write('graph.json', {
+    await this.storage.write('repo/store/graph.json', {
       version: 1,
       changes,
     });
