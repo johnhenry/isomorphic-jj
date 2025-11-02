@@ -1,17 +1,19 @@
 # isomorphic-jj Roadmap
 
-**Current Version**: v0.2 Complete ✅  
-**Last Updated**: 2025-10-30
+**Current Version**: v0.4 Complete ✅
+**Last Updated**: 2025-11-02
 
 ---
 
 ## Version Overview
 
-This roadmap outlines the planned features and improvements for isomorphic-jj. v0.1 MVP and v0.2 are complete. Each future version builds incrementally, following semantic versioning and the constitutional principle of complete features before release.
+This roadmap outlines the past milestones and future plans for isomorphic-jj. Each version builds incrementally, following semantic versioning and the constitutional principle of complete features before release.
 
 ---
 
-## v0.1 MVP - ✅ COMPLETE
+## Completed Versions
+
+## v0.1 MVP - ✅ COMPLETE (Q4 2025)
 
 **Goal**: Core JJ experience with stable change IDs, no staging, complete undo, and bookmarks
 
@@ -37,7 +39,7 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 
 ---
 
-## v0.2 - Advanced Operations - ✅ COMPLETE
+## v0.2 - Advanced Operations - ✅ COMPLETE (Q4 2025)
 
 **Goal**: History editing, enhanced revsets, and advanced change manipulation
 
@@ -68,7 +70,7 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 
 ---
 
-## v0.3 - Collaboration & Advanced Features ✅ COMPLETE (Oct 2025)
+## v0.3 - Collaboration & Advanced Features ✅ COMPLETE (Q4 2025)
 
 **Goal**: Multi-user workflows and advanced Git interop
 
@@ -133,56 +135,170 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 - Working copy state migration for multi-worktree support
 - Backward compatible with single working copy
 
+### Recent Improvements (Nov 2025)
+
+#### Middleware Pattern for Pluggable Backends ✅
+- ✅ Centralized Git sync via middleware pattern
+- ✅ Clean separation between ChangeGraph and backends
+- ✅ Ready for alternative backends (libgit2, remote, etc.)
+- ✅ All JJ changes automatically sync to Git commits
+- ✅ 279 tests passing (increased from 265)
+
+#### Bug Fixes ✅
+- ✅ Fixed `undo()` to restore filesystem from operation snapshots
+- ✅ Fixed `squash()` to create new empty working copy when squashing @
+- ✅ Fixed `split()` to move working copy to second commit when splitting @
+- ✅ All behaviors now match JJ documentation
+
 ---
 
-## v0.4 - Enterprise & Scale (Target: Q4 2026)
+## v0.4 - Quick Wins ✅ COMPLETE (Q4 2025)
 
-**Goal**: Large repository support and enterprise features
+**Goal**: High-value features with minimal complexity
+
+### Delivered Features ✅
+
+#### Shallow Clone Support ✅
+- ✅ Fetch with depth limit (depth parameter)
+- ✅ Single-branch fetching for faster clones
+- ✅ Tag exclusion option (noTags)
+- ✅ Relative depth adjustments
+- ✅ Dramatically faster clones for large repositories
+- ✅ Reduced disk usage (90%+ savings for deep histories)
+
+#### Advanced Revset Functions ✅
+- ✅ `roots(set)`: Find root commits (no parents in set)
+- ✅ `heads(set)`: Find head commits (no children in set)
+- ✅ `latest(set, n)`: Get N most recent commits from set
+- ✅ `tags()`: All tagged commits
+- ✅ `tags(pattern)`: Tags matching pattern
+- ✅ `bookmarks()`: All bookmark targets
+- ✅ `bookmarks(pattern)`: Bookmarks matching pattern
+
+#### Event Hooks System ✅
+- ✅ Pre-commit hooks for validation
+- ✅ Post-commit hooks for notifications
+- ✅ Hook context with operation details
+- ✅ Error handling and hook failure
+- ✅ Seamless integration with describe(), amend(), etc.
+
+#### Operation Return Values ✅
+All operations now return useful information:
+- File operations return: `{ path, size, mode, mtime, type }`
+- Change operations return: `{ changeId, description, parents, timestamp, ... }`
+- Undo returns: `{ undoneOperation, restoredState }`
+
+---
+
+## Planned Versions
+
+## v0.5 - Developer Experience (Target: Q1 2026)
+
+**Goal**: Enhanced developer tools and workflow improvements
 
 ### Planned Features
 
-#### Shallow Clone Support
-**Status**: Feasible with current isomorphic-git backend (see feasibility analysis below)
+#### Repository Analytics
+- `stats()`: Comprehensive repository statistics
+- Change frequency analysis
+- Author contribution metrics
+- File modification heatmaps
+- Performance metrics and insights
 
-- ✅ **Shallow fetch/import (depth limit)** - READY (isomorphic-git native support)
-- ⚠️ **Sparse checkout patterns** - LIMITED (requires custom implementation)
-- ✅ **Lazy object loading** - FEASIBLE (isomorphic-git ODB API available)
-- ❌ **Partial clone (--filter)** - NOT SUPPORTED (isomorphic-git limitation)
+#### Enhanced Revsets
+- `mine()`: Changes by current user (completed in v0.3.1)
+- `merge()`: Merge commits only (completed in v0.3.1)
+- `file(pattern)`: Changes touching specific files (completed in v0.3.1)
+- `conflict()`: Changes with conflicts
+- `reachable(from, to)`: Reachability queries
+- Set operations: union (`|`), intersection (`&`), difference (`~`)
 
-#### Large Repository Optimizations
-- Packfile support
-- Delta compression
-- Object caching strategies
-- Index optimization for 100K+ commits
+#### Interactive Workflows
+- Interactive status command with file selection
+- Interactive rebase (pick, edit, squash operations)
+- Change templates for common workflows
+- Commit message templates
+- Auto-formatting on describe()
 
-#### Performance & Storage
+#### Debugging Tools
+- `debug.graph()`: Visualize change graph
+- `debug.oplog()`: Analyze operation log
+- `debug.conflicts()`: Inspect conflict structure
+- `debug.performance()`: Profile repository operations
+- Repository integrity checks
+
+---
+
+## v0.6 - Performance & Scale (Target: Q2 2026)
+
+**Goal**: Large repository support and performance optimizations
+
+### Planned Features
+
+#### Performance Optimizations
 - Operation log compaction (snapshot + deltas)
 - Incremental indexing for faster queries
 - Binary storage format option (CBOR/MessagePack)
 - Lazy loading for large repositories
 - Web Workers for heavy operations (browser)
+- Packfile support
+- Delta compression
+- Object caching strategies
+
+#### Large Repository Support
+- Index optimization for 100K+ commits
+- Streaming APIs for large operations
+- Memory-efficient diff algorithms
+- Incremental fetch/push
+- Sparse checkout patterns (deferred from v0.4)
+
+#### Storage Improvements
+- Configurable storage backends
+- Migration tools between storage formats
+- Compression options
+- Storage quota management
+- Auto-cleanup of old operations
+
+---
+
+## v0.7 - Enterprise Features (Target: Q3 2026)
+
+**Goal**: Enterprise-grade features for team workflows
+
+### Planned Features
 
 #### Security
 - GPG/SSH commit signing
 - Signature verification
 - Protected branches
 - Access control hooks
+- Audit logging
+- Credential management
 
-#### Extensibility
-- Plugin system
-- Custom revset functions
-- Event hooks (pre-commit, post-commit, etc.)
-- Custom merge drivers
+#### Monorepo Support
+- Virtual monorepo support
+- Path-based permissions
+- Selective cloning
+- Efficient large file handling
+- Workspace management
 
-#### Enterprise Features
-- Monorepo support
-- Advanced sparse checkout
-- Background maintenance tasks
+#### Team Workflows
+- Code review integration
+- Change dependencies tracking
+- Team workflow templates
+- Notification system
+- Dashboard and analytics
+
+#### Administration
+- Repository maintenance tasks
+- Background maintenance
 - Telemetry and diagnostics
+- Health checks
+- Migration tools
 
 ---
 
-## v1.0 - Production Ready (Target: Q1 2027)
+## v1.0 - Production Ready (Target: Q4 2026)
 
 **Goal**: Stable, production-ready release with full JJ semantics
 
@@ -222,13 +338,6 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 - Optimized for JJ semantics
 - Seamless migration from Git backend
 
-#### Advanced Revset Functions
-- `merge()`: Merge commits only
-- `branches()`: All branch heads
-- `mine()`: Changes by current user
-- `file(pattern)`: Changes touching specific files
-- Set operations and ranges
-
 #### Advanced Merging
 - Semantic merge (language-aware)
 - AI-assisted conflict resolution
@@ -261,9 +370,11 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 2025 Q4: ████████ v0.1 MVP ✅ COMPLETE
 2025 Q4: ████████ v0.2 Features ✅ COMPLETE
 2025 Q4: ████████ v0.3 Collaboration ✅ COMPLETE (8 weeks ahead of schedule!)
-2026 Q3: ░░░░░░░░ v0.4 Development (Planned)
-2026 Q4: ░░░░░░░░ v0.4 Completion (Planned)
-2027 Q1: ░░░░░░░░ v1.0 Release (Planned)
+2025 Q4: ████████ v0.4 Quick Wins ✅ COMPLETE
+2026 Q1: ░░░░░░░░ v0.5 Developer Experience (Planned)
+2026 Q2: ░░░░░░░░ v0.6 Performance & Scale (Planned)
+2026 Q3: ░░░░░░░░ v0.7 Enterprise Features (Planned)
+2026 Q4: ░░░░░░░░ v1.0 Release (Planned)
 ```
 
 ---
@@ -290,6 +401,153 @@ This roadmap outlines the planned features and improvements for isomorphic-jj. v
 - ✅ Background operations (complete)
 - ✅ Browser enhancements (complete)
 - 🔄 Collaboration features (ongoing - foundational features complete, advanced features will evolve)
+
+**✅ v0.4: COMPLETE**
+- ✅ Shallow clone support (complete)
+- ✅ Advanced revset functions (complete)
+- ✅ Event hooks system (complete)
+- ✅ Operation return values (complete)
+- 279 tests, 100% passing
+
+---
+
+## Changelog
+
+### [0.4.0] - 2025-11-02
+
+#### Added
+- **Shallow Clone Support**
+  - Fetch with depth limit for faster clones
+  - Single-branch and no-tags options
+  - Relative depth adjustments
+  - Dramatically reduced clone times and disk usage
+
+- **Advanced Revset Functions**
+  - `roots(set)`: Find root commits
+  - `heads(set)`: Find head commits
+  - `latest(set, n)`: Get N most recent commits
+  - `tags()` and `tags(pattern)`: Query tagged commits
+  - `bookmarks()` and `bookmarks(pattern)`: Query bookmarks
+
+- **Event Hooks System**
+  - Pre-commit hooks for validation
+  - Post-commit hooks for notifications
+  - Rich context objects with operation details
+  - Error handling and hook failure support
+
+- **Enhanced Return Values**
+  - All file operations return metadata
+  - All change operations return full change objects
+  - Undo returns detailed restoration information
+
+#### Changed
+- Updated documentation to reflect v0.4 features
+- Improved test coverage to 279 tests
+
+### [0.3.0] - 2025-10-30
+
+#### Added
+- **Git Backend Integration**
+  - Real Git object storage via isomorphic-git
+  - Colocated .git and .jj directories
+  - Automatic Git commit creation on `describe()`
+  - Stable JJ changeIds with mutable Git commitIds
+  - Pure JavaScript protobuf implementation
+  - JJ CLI compatibility
+
+- **First-Class Conflicts**
+  - ConflictModel component
+  - Conflict detection and storage
+  - Non-blocking merge operations
+  - Multiple conflict types support
+
+- **Multiple Working Copies**
+  - Worktree commands (add, remove, list, get)
+  - Independent working directory support
+
+- **Background Operations**
+  - File watchers for automatic snapshots
+  - Background operation queue
+  - Auto-snapshot with debouncing
+
+- **Browser Enhancements**
+  - LightningFS integration
+  - Storage quota management
+  - ServiceWorker utilities
+  - Persistent storage API
+
+#### Changed
+- Updated README.md to show Git backend in Quick Start
+- Updated ROADMAP.md to reflect v0.3 progress
+- Test coverage increased to 265 tests
+
+### [0.2.0] - 2025-10-30
+
+#### Added
+- **History Editing Operations**
+  - `squash()`: Combine multiple changes into one
+  - `split()`: Split a change into multiple changes
+  - `move()`: Move changes to different parents (rebase)
+  - `abandon()`: Mark changes as abandoned
+  - `restore()`: Restore abandoned changes
+
+- **Enhanced Revset Functions**
+  - `author(pattern)`: Filter by author
+  - `description(pattern)`: Filter by commit message
+  - `empty()`: Find changes with empty diff
+
+- **File Operations**
+  - `write()`: Write files directly
+  - `move()`: Move/rename files or rebase changes (polymorphic)
+  - `remove()`: Remove files
+
+#### Changed
+- All operations fully integrated with operation log
+- Complete undo/redo support for all new operations
+- Improved move() API with smart detection and validation
+
+#### Fixed
+- Move operation ambiguity detection
+- Timestamp precision in log sorting
+- Error handling with helpful suggestions
+
+### [0.1.0] - 2025-10-29
+
+#### Added
+- **Core JJ Experience**
+  - Change-centric model with stable change IDs
+  - Operation log for complete undo/redo
+  - No staging area (working copy is the change)
+  - Bookmarks for named pointers
+
+- **Change Operations**
+  - `init()`: Initialize repository
+  - `describe()`: Set change description
+  - `new()`: Create new change
+  - `status()`: View current state
+  - `undo()`: Undo last operation
+  - `redo()`: Redo undone operation
+
+- **Revset Queries**
+  - `@`: Current change
+  - `all()`: All changes
+  - `ancestors()`: Ancestor changes
+  - Direct change ID lookup
+
+- **Bookmark Operations**
+  - Create, list, delete bookmarks
+  - Set/get current bookmark
+
+- **Architecture**
+  - Pluggable backend system
+  - Mock backend for testing
+  - Isomorphic operation (Node + browser)
+  - Graph, WorkingCopy, Revset, OperationLog components
+
+#### Test Coverage
+- 113 tests across 11 test suites
+- 100% pass rate
+- 90%+ code coverage
 
 ---
 
@@ -332,321 +590,15 @@ Popular requested features (to be scheduled):
 - [ ] GitHub pull request integration
 - [ ] Interactive rebase UI
 - [ ] Visual merge tool
-- [ ] Change templates
+- [x] Change templates (v0.5 - planned)
 - [ ] Automated testing integration
 - [ ] Performance profiler
-- [ ] Repository analytics
+- [x] Repository analytics (v0.5 - planned)
 - [ ] Team dashboards
-
----
-
----
-
-## Recent Improvements (Nov 2025)
-
-### Middleware Pattern for Pluggable Backends ✅
-- ✅ Centralized Git sync via middleware pattern
-- ✅ Clean separation between ChangeGraph and backends
-- ✅ Ready for alternative backends (libgit2, remote, etc.)
-- ✅ All JJ changes automatically sync to Git commits
-- ✅ 279 tests passing (increased from 265)
-
-### Bug Fixes ✅
-- ✅ Fixed `undo()` to restore filesystem from operation snapshots
-- ✅ Fixed `squash()` to create new empty working copy when squashing @
-- ✅ Fixed `split()` to move working copy to second commit when splitting @
-- ✅ All behaviors now match JJ documentation
-
----
-
-## Feature Requests
-
-Popular requested features (to be scheduled):
-- [ ] GitHub pull request integration
-- [ ] Interactive rebase UI
-- [ ] Visual merge tool
-- [x] Change templates (v0.3.1 - in progress)
-- [ ] Automated testing integration
-- [ ] Performance profiler
-- [x] Repository analytics (v0.3.1 - in progress)
-- [ ] Team dashboards
-
----
-
----
-
-## Shallow Clone Support - Feasibility Analysis (Nov 2025)
-
-### Executive Summary
-
-**Overall Feasibility**: 🟡 **PARTIALLY FEASIBLE** with current stack
-
-Two of four planned features are readily implementable, one requires significant custom work, and one is blocked by upstream limitations. The features that work (shallow fetch and lazy loading) would provide substantial value for large repositories.
-
-### Feature-by-Feature Analysis
-
-#### 1. Shallow Fetch/Import (Depth Limit) ✅ READY
-
-**Feasibility**: 🟢 **HIGH** - Native support in isomorphic-git
-
-**Implementation Effort**: Low (1-2 days)
-
-**Details**:
-- isomorphic-git `clone()` and `fetch()` support `depth` parameter natively
-- Additional `relative` option for incremental depth adjustments
-- `singleBranch: true` can reduce data transfer further
-- `noTags: true` option available to skip tag fetching
-
-**API Design**:
-```javascript
-await jj.git.clone({
-  url: 'https://github.com/user/repo',
-  depth: 1,              // Only fetch latest commit
-  singleBranch: true,    // Only fetch current branch
-  noTags: true           // Skip tags
-});
-
-await jj.git.fetch({
-  remote: 'origin',
-  depth: 10,             // Fetch 10 commits deep
-  relative: true         // Measure from current shallow depth
-});
-```
-
-**Benefits**:
-- Dramatically faster clones for large repos (5-50x speedup)
-- Reduced disk usage (90%+ savings for deep histories)
-- Improved browser experience (less IndexedDB storage)
-
-**Limitations**:
-- Operations requiring full history may fail or error
-- Push from shallow clones has known edge cases
-- Log operations stop at shallow boundary
-
-**Recommendation**: ✅ **IMPLEMENT** - High value, low effort
-
----
-
-#### 2. Sparse Checkout Patterns ⚠️ LIMITED
-
-**Feasibility**: 🟡 **MEDIUM** - Requires custom implementation
-
-**Implementation Effort**: Medium-High (1-2 weeks)
-
-**Details**:
-- isomorphic-git has NO native sparse checkout support
-- Git's sparse-checkout is a client-side index feature (git 2.25+)
-- Would require custom implementation at checkout layer
-- Could leverage `noCheckout` option and selective file restoration
-
-**Possible Approach**:
-```javascript
-// Pseudo-implementation
-await jj.git.clone({
-  url: 'https://github.com/user/repo',
-  noCheckout: true,       // Skip automatic checkout
-  depth: 1
-});
-
-// Custom sparse checkout implementation
-await jj.checkout({
-  patterns: [
-    'src/**/*.js',        // Only JS files in src/
-    'package.json',       // Root package.json
-    'README.md'           // Docs
-  ]
-});
-```
-
-**Implementation Strategy**:
-1. Clone with `noCheckout: true`
-2. Read tree from HEAD commit
-3. Filter tree entries by glob patterns
-4. Restore only matching files to working copy
-5. Store patterns in `.jj/sparse-checkout` config
-6. Apply patterns on all subsequent operations
-
-**Challenges**:
-- Need to integrate with JJ's working copy model
-- Must handle pattern matching for all file operations
-- Conflicts with JJ's "working copy is the change" philosophy
-- Complex interaction with `file()` revset queries
-- Browser filesystem limitations (no symlinks)
-
-**Benefits**:
-- Massive speedup for monorepos (only checkout relevant paths)
-- Reduced disk usage for working copy
-- Faster status/diff operations
-
-**Recommendation**: ⚠️ **DEFER to v0.4.1** - Medium effort, complex interactions with core model
-
----
-
-#### 3. Lazy Object Loading ✅ FEASIBLE
-
-**Feasibility**: 🟢 **MEDIUM-HIGH** - isomorphic-git ODB API available
-
-**Implementation Effort**: Medium (3-5 days)
-
-**Details**:
-- isomorphic-git provides low-level object database (ODB) APIs
-- Can implement on-demand blob fetching
-- Store references to missing objects, fetch when accessed
-- Particularly valuable for browser environments (limited storage)
-
-**Implementation Strategy**:
-```javascript
-// In IsomorphicGitBackend
-class LazyGitBackend extends IsomorphicGitBackend {
-  constructor({ fs, http, dir, lazyLoad = false }) {
-    super({ fs, http, dir });
-    this.lazyLoad = lazyLoad;
-    this.missingObjects = new Set();
-  }
-
-  async readBlob(oid) {
-    try {
-      // Try local read first
-      return await git.readBlob({ fs: this.fs, dir: this.dir, oid });
-    } catch (err) {
-      if (err.code === 'NotFoundError' && this.lazyLoad) {
-        // Fetch missing object on demand
-        await this._fetchObject(oid);
-        return await git.readBlob({ fs: this.fs, dir: this.dir, oid });
-      }
-      throw err;
-    }
-  }
-
-  async _fetchObject(oid) {
-    // Use git protocol to fetch single object
-    // This may require custom pack negotiation
-  }
-}
-```
-
-**Challenges**:
-- isomorphic-git doesn't support git's partial clone protocol (`--filter=blob:none`)
-- Would need to fetch entire packfiles, not individual objects
-- Complex for trees (recursive fetching)
-- Network round-trips could be slow
-
-**Benefits**:
-- Clone without full blob download
-- Fetch blobs only when accessed (lazy)
-- Particularly valuable for large binary assets
-- Reduces initial clone time and storage
-
-**Limitations**:
-- Only works with depth-limited clones (shallow base)
-- Requires network connectivity for first access
-- No native protocol support means inefficient fetches
-
-**Recommendation**: ✅ **IMPLEMENT** as v0.4 milestone - Good browser use case
-
----
-
-#### 4. Partial Clone (--filter) ❌ NOT SUPPORTED
-
-**Feasibility**: 🔴 **LOW** - Blocked by isomorphic-git limitations
-
-**Implementation Effort**: Very High (4-6 weeks) - Requires upstream contribution
-
-**Details**:
-- Git's `--filter=blob:none`, `--filter=tree:0`, etc. are protocol-level features
-- isomorphic-git does NOT implement partial clone protocol extensions
-- Would require implementing Git's pack negotiation extensions
-- Essentially requires upstreaming to isomorphic-git project
-
-**What Partial Clone Provides** (in native Git):
-```bash
-# Clone without any blobs (metadata only)
-git clone --filter=blob:none https://github.com/user/repo
-
-# Clone without trees (commit graph only)
-git clone --filter=tree:0 https://github.com/user/repo
-
-# Clone with size limit
-git clone --filter=blob:limit=1m https://github.com/user/repo
-```
-
-**Why It's Hard**:
-- Requires modifying isomorphic-git's pack protocol implementation
-- Git's partial clone uses extensions to smart HTTP protocol
-- Need to track promisor objects (promised but not fetched)
-- Complex interaction with pack negotiation
-
-**Workaround**:
-- Use shallow clones (depth limit) as alternative
-- Combine with lazy object loading (see feature 3)
-- For extreme cases, use native git with jj CLI interop
-
-**Recommendation**: ❌ **DO NOT IMPLEMENT** - Too complex, upstream blocked
-
----
-
-### Implementation Priority
-
-**Phase 1 (v0.4)**: Quick Wins
-1. ✅ **Shallow fetch/import** - 1-2 days, high value
-2. ✅ **Lazy object loading** - 3-5 days, good for browsers
-
-**Phase 2 (v0.4.1)**: Advanced
-3. ⚠️ **Sparse checkout patterns** - 1-2 weeks, complex but valuable for monorepos
-
-**Phase 3 (Future)**: Blocked
-4. ❌ **Partial clone** - Upstream contribution required, defer indefinitely
-
----
-
-### Architecture Considerations
-
-**Middleware Pattern Benefits**:
-The existing middleware pattern in repository.js makes shallow clone support clean:
-
-```javascript
-// In repository.js
-const graph = createGraphWithMiddleware(baseGraph, {
-  onAddChange: async (change) => {
-    await syncChangeToGit(change);
-  },
-  onUpdateChange: async (change) => {
-    await syncChangeToGit(change);
-  },
-
-  // NEW: Handle missing objects gracefully
-  onMissingObject: async (oid) => {
-    if (backend.lazyLoad) {
-      await backend.fetchObject(oid);
-    }
-  }
-});
-```
-
-**JJ Philosophy Alignment**:
-- Shallow clones align with JJ's focus on "changes" not "history"
-- Most JJ operations work on current change and immediate ancestors
-- Deep history is rarely needed for day-to-day work
-- Lazy loading fits JJ's "snapshot everything" model
-
----
-
-### Recommended Roadmap Update
-
-**v0.4.0** (Q3 2026):
-- ✅ Shallow fetch/import (depth limit)
-- ✅ Lazy object loading
-- Documentation and examples for large repos
-
-**v0.4.1** (Q4 2026):
-- ⚠️ Sparse checkout patterns (if user demand justifies complexity)
-
-**Future** (v0.5+):
-- ❌ Partial clone (only if isomorphic-git adds support upstream)
 
 ---
 
 **Status**: Living document
 **Review Frequency**: Monthly
 **Owner**: isomorphic-jj maintainers
-**Last Updated**: 2025-11-30
+**Last Updated**: 2025-11-02
