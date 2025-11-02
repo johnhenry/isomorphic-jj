@@ -32,7 +32,7 @@ await jj.undo();
 
 ## Quick Start
 
-**Coming from Git?** Read the [Migration Guide](./MIGRATION_FROM_GIT.md) to understand how JJ concepts map to Git.
+**Coming from isomorphic-git?** Read the [Migration Guide](./MIGRATION_FROM_ISOMORPHIC_GIT.md) to see how isomorphic-jj simplifies your JavaScript version control workflow.
 
 ### Installation
 
