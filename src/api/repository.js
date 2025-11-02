@@ -10,7 +10,7 @@ import { BookmarkStore } from '../core/bookmark-store.js';
 import { RevsetEngine } from '../core/revset-engine.js';
 import { ConflictModel } from '../core/conflict-model.js';
 import { MergeDriverRegistry } from '../core/merge-driver-registry.js';
-import { WorktreeManager } from '../core/worktree-manager.js';
+import { WorkspaceManager } from '../core/workspace-manager.js';
 import { BackgroundOps } from '../core/background-ops.js';
 import { UserConfig } from '../core/user-config.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
@@ -63,7 +63,7 @@ export async function createJJ(options) {
   const bookmarks = new BookmarkStore(storage);
   const mergeDrivers = new MergeDriverRegistry(); // v0.5: merge drivers
   const conflicts = new ConflictModel(storage, fs, mergeDrivers); // v0.5: pass registry
-  const worktrees = new WorktreeManager(storage, fs, dir);
+  const workspaces = new WorkspaceManager(storage, fs, dir);
   const userConfig = new UserConfig(storage);
 
   /**
@@ -324,7 +324,7 @@ export async function createJJ(options) {
     bookmarks,
     revset,
     conflicts,
-    worktrees,
+    workspaces,
     userConfig,
     mergeDrivers,  // v0.5: expose merge driver registry
     backgroundOps: null,  // Will be initialized below
@@ -356,7 +356,7 @@ export async function createJJ(options) {
       await oplog.init();
       await bookmarks.init();
       await conflicts.init();
-      await worktrees.init();
+      await workspaces.init();
 
       // Create root change
       const rootChangeId = generateChangeId();
@@ -1974,7 +1974,7 @@ export async function createJJ(options) {
         await oplog.init();
         await bookmarks.init();
         await conflicts.init();
-        await worktrees.init();
+        await workspaces.init();
 
         // Create root change
         const rootChangeId = generateChangeId();
@@ -2434,22 +2434,22 @@ export async function createJJ(options) {
     },
 
     /**
-     * Worktree API - Multiple working copies
+     * Workspace API - Multiple working copies
      */
-    worktree: {
+    workspace: {
       /**
-       * Add a new worktree
+       * Add a new workspace
        *
-       * @param {Object} args - Worktree arguments
-       * @param {string} args.path - Path for the new worktree
+       * @param {Object} args - Workspace arguments
+       * @param {string} args.path - Path for the new workspace
        * @param {string} [args.name] - Optional name
        * @param {string} [args.changeId] - Change to check out
        */
       async add(args) {
-        await worktrees.load();
-        const worktree = await worktrees.add(args);
+        await workspaces.load();
+        const workspace = await workspaces.add(args);
 
-        // If a change was specified, check it out in the new worktree
+        // If a change was specified, check it out in the new workspace
         if (args.changeId) {
           await graph.load();
           const change = await graph.getChange(args.changeId);
@@ -2457,7 +2457,7 @@ export async function createJJ(options) {
             throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
           }
 
-          // Restore files from change snapshot to the new worktree
+          // Restore files from change snapshot to the new workspace
           if (change.fileSnapshot) {
             for (const [filePath, content] of Object.entries(change.fileSnapshot)) {
               try {
@@ -2475,9 +2475,9 @@ export async function createJJ(options) {
                 await fs.promises.writeFile(fullPath, content, 'utf8');
               } catch (error) {
                 throw new JJError(
-                  'WORKTREE_FILE_RESTORE_FAILED',
-                  `Failed to restore file ${filePath} to worktree: ${error.message}`,
-                  { filePath, worktreePath: args.path, originalError: error.message }
+                  'WORKSPACE_FILE_RESTORE_FAILED',
+                  `Failed to restore file ${filePath} to workspace: ${error.message}`,
+                  { filePath, workspacePath: args.path, originalError: error.message }
                 );
               }
             }
@@ -2488,7 +2488,7 @@ export async function createJJ(options) {
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
           user: await getUserOplogInfo(),
-          description: `add worktree at ${args.path}`,
+          description: `add workspace at ${args.path}`,
           parents: [],
           view: {
             bookmarks: {},
@@ -2498,29 +2498,29 @@ export async function createJJ(options) {
           },
         });
 
-        return worktree;
+        return workspace;
       },
 
       /**
-       * Remove a worktree
+       * Remove a workspace
        *
        * @param {Object} args - Remove arguments
-       * @param {string} args.id - Worktree ID
+       * @param {string} args.id - Workspace ID
        * @param {boolean} [args.force=false] - Force removal
        */
       async remove(args) {
         if (!args || !args.id) {
-          throw new JJError('INVALID_ARGUMENT', 'Missing worktree ID');
+          throw new JJError('INVALID_ARGUMENT', 'Missing workspace ID');
         }
 
-        await worktrees.load();
-        await worktrees.remove(args.id, args.force);
+        await workspaces.load();
+        await workspaces.remove(args.id, args.force);
 
         // Record operation
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
           user: await getUserOplogInfo(),
-          description: `remove worktree ${args.id}`,
+          description: `remove workspace ${args.id}`,
           parents: [],
           view: {
             bookmarks: {},
@@ -2534,25 +2534,25 @@ export async function createJJ(options) {
       },
 
       /**
-       * List all worktrees
+       * List all workspaces
        */
       async list() {
-        await worktrees.load();
-        return worktrees.list();
+        await workspaces.load();
+        return workspaces.list();
       },
 
       /**
-       * Get a specific worktree
+       * Get a specific workspace
        *
-       * @param {string} id - Worktree ID
+       * @param {string} id - Workspace ID
        */
       async get(id) {
-        await worktrees.load();
-        const worktree = worktrees.get(id);
-        if (!worktree) {
-          throw new JJError('WORKTREE_NOT_FOUND', `Worktree ${id} not found`);
+        await workspaces.load();
+        const workspace = workspaces.get(id);
+        if (!workspace) {
+          throw new JJError('WORKSPACE_NOT_FOUND', `Workspace ${id} not found`);
         }
-        return worktree;
+        return workspace;
       },
     },
 

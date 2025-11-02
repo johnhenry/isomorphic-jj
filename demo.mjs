@@ -19,7 +19,7 @@ import http from 'isomorphic-git/http/node';
 import { createJJ } from './src/index.js';
 
 // Clean up any existing test repositories
-['./demo-repo', './demo-worktree', './demo-clone'].forEach(dir => {
+['./demo-repo', './demo-workspace', './demo-clone'].forEach(dir => {
   try { rmSync(dir, { recursive: true, force: true }); } catch {}
 });
 
@@ -443,16 +443,16 @@ console.log('  • All changes, files, and conflicts reverted\n');
 console.log('  • Fearless experimentation - undo any mistake!\n');
 
 // ============================================================================
-// PART 11: MULTIPLE WORKING COPIES (Worktrees)
+// PART 11: MULTIPLE WORKING COPIES (Workspaces)
 // ============================================================================
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-console.log('🌳 PART 11: Multiple Working Copies (Worktrees)');
+console.log('🌳 PART 11: Multiple Working Copies (Workspaces)');
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
 console.log('Creating additional working copy for Layer 1...');
-const worktree1 = await jj.worktree.add({
-  path: './demo-worktree',
-  name: 'auth-worktree',
+const worktree1 = await jj.workspace.add({
+  path: './demo-workspace',
+  name: 'auth-workspace',
   changeId: layer1Id
 });
 
@@ -462,23 +462,23 @@ console.log(`  • Path: ${worktree1.path}`);
 console.log(`  • Change: ${worktree1.changeId.slice(0, 8)}`);
 
 // Verify worktree markers were created
-const gitFile = await fs.promises.readFile('./demo-worktree/.git', 'utf8').catch(() => null);
-const jjFile = await fs.promises.readFile('./demo-worktree/.jj', 'utf8').catch(() => null);
+const gitFile = await fs.promises.readFile('./demo-workspace/.git', 'utf8').catch(() => null);
+const jjFile = await fs.promises.readFile('./demo-workspace/.jj', 'utf8').catch(() => null);
 
-console.log('  • Worktree markers created:');
+console.log('  • Workspace markers created:');
 console.log(`    - .git file: ${gitFile ? '✓ ' + gitFile.trim() : '✗ missing'}`);
 console.log(`    - .jj file: ${jjFile ? '✓ ' + jjFile.trim() : '✗ missing'}`);
 console.log('  • Can work on Layer 1 independently!\n');
 
-const allWorktrees = await jj.worktree.list();
-console.log(`Active worktrees: ${allWorktrees.length}`);
-allWorktrees.forEach((wt, i) => {
+const allWorkspaces = await jj.workspace.list();
+console.log(`Active workspaces: ${allWorkspaces.length}`);
+allWorkspaces.forEach((wt, i) => {
   console.log(`  ${i + 1}. ${wt.name} → ${wt.path}`);
 });
 
-console.log('\nCleaning up worktree...');
-await jj.worktree.remove({ id: worktree1.id, force: true });
-console.log('✓ Worktree removed\n');
+console.log('\nCleaning up workspace...');
+await jj.workspace.remove({ id: worktree1.id, force: true });
+console.log('✓ Workspace removed\n');
 
 // ============================================================================
 // PART 12: GIT INTEGRATION
@@ -692,7 +692,7 @@ const features = [
     'Git tools work seamlessly'
   ]],
   ['Advanced Features', [
-    'Multiple working copies (worktrees)',
+    'Multiple working copies (workspaces)',
     'Background operations & file watching',
     'Auto-snapshot on file changes',
     'File operations (move, remove, read)',
