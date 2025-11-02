@@ -480,10 +480,6 @@ console.log('\nCleaning up worktree...');
 await jj.worktree.remove({ id: worktree1.id, force: true });
 console.log('✓ Worktree removed\n');
 
-// Uncomment to remove worktree:
-// await jj.worktree.remove({ id: worktree1.id, force: true });
-// console.log('✓ Worktree removed\n');
-
 // ============================================================================
 // PART 12: GIT INTEGRATION
 // ============================================================================

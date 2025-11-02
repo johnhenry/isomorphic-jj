@@ -3,6 +3,11 @@ export default {
   testMatch: [
     '**/tests/**/*.test.js'
   ],
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/demo-.*/',
+    '/test-.*/'
+  ],
   collectCoverageFrom: [
     'src/**/*.js',
     '!src/types.d.ts',
