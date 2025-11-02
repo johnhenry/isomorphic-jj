@@ -45,6 +45,57 @@ export class RevsetEngine {
       return [];
     }
 
+    // v1.0: root() - the first commit (oldest commit with no parents)
+    if (trimmed === 'root()') {
+      await this.graph.load();
+      const allChanges = this.graph.getAll();
+      const rootCommits = allChanges.filter(c => !c.parents || c.parents.length === 0);
+      if (rootCommits.length === 0) return [];
+      // Return the oldest root by timestamp
+      const oldest = rootCommits.sort((a, b) =>
+        new Date(a.timestamp) - new Date(b.timestamp)
+      )[0];
+      return [oldest.changeId];
+    }
+
+    // v1.0: visible_heads() - all commits with no children
+    if (trimmed === 'visible_heads()') {
+      await this.graph.load();
+      const allChanges = this.graph.getAll();
+      const changeIdSet = new Set(allChanges.map(c => c.changeId));
+      const hasChildren = new Set();
+
+      // Mark all commits that have children
+      for (const change of allChanges) {
+        if (change.parents) {
+          for (const parent of change.parents) {
+            if (changeIdSet.has(parent)) {
+              hasChildren.add(parent);
+            }
+          }
+        }
+      }
+
+      // Return commits without children
+      return allChanges
+        .filter(c => !hasChildren.has(c.changeId))
+        .map(c => c.changeId);
+    }
+
+    // v1.0: git_refs() - all commits with bookmarks
+    if (trimmed === 'git_refs()') {
+      if (!this.bookmarkStore) return [];
+      await this.bookmarkStore.load();
+      const allBookmarks = await this.bookmarkStore.list();
+      return allBookmarks.map(b => b.target);
+    }
+
+    // v1.0: git_head() - current working copy (Git HEAD equivalent)
+    if (trimmed === 'git_head()') {
+      const currentId = this.workingCopy.getCurrentChangeId();
+      return currentId ? [currentId] : [];
+    }
+
     // ancestors(changeId) - all ancestors including the change itself
     const ancestorsMatch = trimmed.match(/^ancestors\(([0-9a-f]{32})\)$/);
     if (ancestorsMatch) {
@@ -257,7 +308,7 @@ export class RevsetEngine {
 
     throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
       expression,
-      suggestion: 'Use @, all(), none(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
+      suggestion: 'Use @, all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
     });
   }
 
