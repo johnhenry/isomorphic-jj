@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-351%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-367%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
@@ -31,6 +31,8 @@ await jj.undo();
 ---
 
 ## Quick Start
+
+**Coming from Git?** Read the [Migration Guide](./MIGRATION_FROM_GIT.md) to understand how JJ concepts map to Git.
 
 ### Installation
 
@@ -213,6 +215,8 @@ await jj.move({ from: 'feature', to: 'updated-main', paths: ['file.js'] });
 ```javascript
 // Simple revsets
 await jj.log({ revset: '@' });                    // working copy
+await jj.log({ revset: 'all()' });                // all commits
+await jj.log({ revset: 'none()' });               // empty set (v1.0)
 await jj.log({ revset: 'bookmark(main)' });       // bookmark
 await jj.log({ revset: 'roots()' });              // root commits
 
@@ -223,6 +227,17 @@ await jj.log({ revset: 'description(fix)' });
 // File-based queries
 await jj.log({ revset: 'file(*.js)' });           // commits touching JS files
 await jj.log({ revset: 'mine()' });               // my commits
+
+// ✨ NEW in v1.0: Navigation functions
+await jj.log({ revset: 'parents(@)' });           // direct parents
+await jj.log({ revset: 'children(@)' });          // direct children
+await jj.log({ revset: 'parents(all())' });       // all commits with children
+
+// ✨ NEW in v1.0: Shorthand operators
+await jj.log({ revset: '@-' });                   // parent (like HEAD~1)
+await jj.log({ revset: '@--' });                  // grandparent (like HEAD~2)
+await jj.log({ revset: '@+' });                   // children
+await jj.log({ revset: '@++' });                  // grandchildren
 
 // ✨ NEW in v0.5: Time-based queries
 await jj.log({ revset: 'last(5)' });              // last 5 commits
@@ -836,4 +851,4 @@ Built on the shoulders of:
 - [Jujutsu](https://github.com/martinvonz/jj) by Martin von Zweigbergk
 - The Git and JavaScript communities
 
-**Status**: v0.5.0 | **Tests**: 351 passing | **Ready for**: Experimentation and prototyping
+**Status**: v0.5.0 | **Tests**: 367 passing | **Ready for**: Experimentation and prototyping

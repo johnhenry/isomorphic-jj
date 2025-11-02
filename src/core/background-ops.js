@@ -18,6 +18,7 @@ export class BackgroundOps {
     this.dir = dir;
     this.watchers = new Map();
     this.operations = new Map(); // operationId -> operation
+    this.timers = new Map(); // watcherId -> timer
     this.running = false;
   }
 
@@ -39,6 +40,12 @@ export class BackgroundOps {
     if (!this.running) {
       return;
     }
+
+    // Clear all timers
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
 
     // Stop all watchers
     for (const watcher of this.watchers.values()) {
@@ -99,6 +106,13 @@ export class BackgroundOps {
     const watcher = this.watchers.get(watcherId);
     if (!watcher) {
       return;
+    }
+
+    // Clear any pending timer for this watcher
+    const timer = this.timers.get(watcherId);
+    if (timer) {
+      clearTimeout(timer);
+      this.timers.delete(watcherId);
     }
 
     if (watcher.close) {
@@ -197,7 +211,6 @@ export class BackgroundOps {
    */
   async enableAutoSnapshot(opts = {}) {
     const debounceMs = opts.debounceMs || 1000;
-    let debounceTimer = null;
 
     const watcherId = await this.watch(this.dir, (event, filename) => {
       if (filename && filename.startsWith('.jj/')) {
@@ -209,11 +222,12 @@ export class BackgroundOps {
       }
 
       // Debounce: wait for changes to settle
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
+      const existingTimer = this.timers.get(watcherId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
       }
 
-      debounceTimer = setTimeout(async () => {
+      const timer = setTimeout(async () => {
         try {
           // Create automatic snapshot
           await this.queue(async () => {
@@ -221,8 +235,18 @@ export class BackgroundOps {
           }, { description: 'auto-snapshot' });
         } catch (error) {
           console.error('Auto-snapshot failed:', error);
+        } finally {
+          // Clean up timer reference
+          this.timers.delete(watcherId);
         }
       }, debounceMs);
+
+      // Use unref() to allow process to exit if this is the only pending timer
+      if (timer.unref) {
+        timer.unref();
+      }
+
+      this.timers.set(watcherId, timer);
     });
 
     return watcherId;

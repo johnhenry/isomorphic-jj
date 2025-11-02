@@ -40,6 +40,11 @@ export class RevsetEngine {
       return this.graph.getAll().map((c) => c.changeId);
     }
 
+    // v1.0: none() - empty set
+    if (trimmed === 'none()') {
+      return [];
+    }
+
     // ancestors(changeId) - all ancestors including the change itself
     const ancestorsMatch = trimmed.match(/^ancestors\(([0-9a-f]{32})\)$/);
     if (ancestorsMatch) {
@@ -97,6 +102,22 @@ export class RevsetEngine {
       const innerRevset = headsMatch[1];
       const innerResults = await this.evaluate(innerRevset);
       return await this.filterHeads(innerResults);
+    }
+
+    // v1.0: parents(revset) - direct parents of commits in set
+    const parentsMatch = trimmed.match(/^parents\((.+?)\)$/);
+    if (parentsMatch) {
+      const innerRevset = parentsMatch[1];
+      const innerResults = await this.evaluate(innerRevset);
+      return await this.getParentsOfSet(innerResults);
+    }
+
+    // v1.0: children(revset) - direct children of commits in set
+    const childrenMatch = trimmed.match(/^children\((.+?)\)$/);
+    if (childrenMatch) {
+      const innerRevset = childrenMatch[1];
+      const innerResults = await this.evaluate(innerRevset);
+      return await this.getChildrenOfSet(innerResults);
     }
 
     // v0.4: latest(revset, [count]) - latest N commits by committer timestamp
@@ -194,6 +215,34 @@ export class RevsetEngine {
       return await this.checkConnected(rev1, rev2);
     }
 
+    // v1.0: x- operator (parents) - handles chaining like x-- for grandparents
+    const parentsOpMatch = trimmed.match(/^([0-9a-f]{32})(-+)$/);
+    if (parentsOpMatch) {
+      const baseChangeId = parentsOpMatch[1];
+      const depth = parentsOpMatch[2].length; // Count number of '-' characters
+
+      let currentSet = [baseChangeId];
+      for (let i = 0; i < depth; i++) {
+        currentSet = await this.getParentsOfSet(currentSet);
+        if (currentSet.length === 0) break; // Stop if we reach root
+      }
+      return currentSet;
+    }
+
+    // v1.0: x+ operator (children) - handles chaining like x++ for grandchildren
+    const childrenOpMatch = trimmed.match(/^([0-9a-f]{32})(\++)$/);
+    if (childrenOpMatch) {
+      const baseChangeId = childrenOpMatch[1];
+      const depth = childrenOpMatch[2].length; // Count number of '+' characters
+
+      let currentSet = [baseChangeId];
+      for (let i = 0; i < depth; i++) {
+        currentSet = await this.getChildrenOfSet(currentSet);
+        if (currentSet.length === 0) break; // Stop if we reach leaves
+      }
+      return currentSet;
+    }
+
     // v0.5: Set operations - intersection (&), union (|), difference (~)
     if (trimmed.includes(' & ') || trimmed.includes(' | ') || trimmed.includes(' ~ ')) {
       return await this.evaluateSetOperation(trimmed);
@@ -208,7 +257,7 @@ export class RevsetEngine {
 
     throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
       expression,
-      suggestion: 'Use @, all(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), set operations (& | ~), or a direct change ID',
+      suggestion: 'Use @, all(), none(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
     });
   }
 
@@ -717,6 +766,52 @@ export class RevsetEngine {
     const isAncestor = ancestors.has(rev1);
 
     return [isAncestor];
+  }
+
+  /**
+   * Get direct parents of all commits in a set (v1.0)
+   *
+   * @param {Array<string>} changeIds - Array of change IDs
+   * @returns {Promise<Array<string>>} Array of parent change IDs (deduplicated)
+   */
+  async getParentsOfSet(changeIds) {
+    await this.graph.load();
+
+    const parents = new Set();
+
+    for (const changeId of changeIds) {
+      const change = await this.graph.getChange(changeId);
+      if (change && change.parents) {
+        for (const parent of change.parents) {
+          parents.add(parent);
+        }
+      }
+    }
+
+    return Array.from(parents);
+  }
+
+  /**
+   * Get direct children of all commits in a set (v1.0)
+   *
+   * @param {Array<string>} changeIds - Array of change IDs
+   * @returns {Promise<Array<string>>} Array of child change IDs (deduplicated)
+   */
+  async getChildrenOfSet(changeIds) {
+    await this.graph.load();
+
+    const children = new Set();
+    const changeIdSet = new Set(changeIds);
+
+    // Get all changes and check if their parents include any from our set
+    const allChanges = this.graph.getAll();
+    for (const change of allChanges) {
+      if (change.parents && change.parents.some((p) => changeIdSet.has(p))) {
+        children.add(change.changeId);
+      }
+    }
+
+    return Array.from(children);
   }
 
   /**

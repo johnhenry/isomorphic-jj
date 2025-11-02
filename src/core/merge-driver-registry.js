@@ -104,15 +104,23 @@ async function defaultMergeDriver(context) {
  */
 function wrapDriver(driver, timeout = 5000) {
   return async (context) => {
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Driver timeout')), timeout)
-    );
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('Driver timeout')), timeout);
+      // Use unref() to allow process to exit if this is the only pending timer
+      if (timeoutId.unref) {
+        timeoutId.unref();
+      }
+    });
 
     try {
       const result = await Promise.race([
         driver(context),
         timeoutPromise,
       ]);
+
+      // Clear timeout if driver completed successfully
+      clearTimeout(timeoutId);
 
       // Validate result
       if (!result || typeof result.hasConflict !== 'boolean') {
@@ -121,6 +129,8 @@ function wrapDriver(driver, timeout = 5000) {
 
       return result;
     } catch (error) {
+      // Clear timeout on error too
+      clearTimeout(timeoutId);
       console.warn(`Driver failed for ${context.path}: ${error.message}`);
       // Fall back to default merge
       return defaultMergeDriver(context);
