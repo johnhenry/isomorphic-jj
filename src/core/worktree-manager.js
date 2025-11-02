@@ -110,15 +110,17 @@ export class WorktreeManager {
 
     // Create .git file pointing to main repo's .git directory
     // This allows Git tools to work in the worktree
+    // IMPORTANT: Must use absolute paths for Git compatibility
     const gitFilePath = path.join(args.path, '.git');
-    const mainGitDir = path.join(this.repoDir, '.git');
+    const mainGitDir = path.resolve(this.repoDir, '.git');
     const gitFileContent = `gitdir: ${mainGitDir}\n`;
     await this.fs.promises.writeFile(gitFilePath, gitFileContent, 'utf8');
 
     // Create .jj file pointing to main repo's .jj directory
     // This allows JJ tools to work in the worktree
+    // IMPORTANT: Must use absolute paths for JJ CLI compatibility
     const jjFilePath = path.join(args.path, '.jj');
-    const mainJJDir = path.join(this.repoDir, '.jj');
+    const mainJJDir = path.resolve(this.repoDir, '.jj');
     const jjFileContent = `jjdir: ${mainJJDir}\n`;
     await this.fs.promises.writeFile(jjFilePath, jjFileContent, 'utf8');
 
