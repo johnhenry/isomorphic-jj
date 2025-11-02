@@ -1,24 +1,57 @@
 # isomorphic-jj
 
-**Status**: v0.4 Quick Wins Implemented ✅ (Shallow clones, Advanced revsets, Event hooks)
-**Test Coverage**: 314 tests, 100% passing
-**Ready for**: Production experimentation, prototyping, tool building with full Git interop
+[![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-314%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](https://github.com/johnhenry/isomorphic-jj/blob/main/LICENSE)
 
-A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers. Built on pluggable storage backends with isomorphic-git as the default.
+> **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
 
-**What you get**: Changes with stable IDs, operation log for fearless undo, bookmarks (not branches), revsets, and advanced history editing—all in JavaScript, everywhere.
+**What makes it different:**
+- 🎯 **Stable change IDs** that survive rebases/squashes
+- ↩️  **Complete undo** for any operation (not just commits)
+- 🚫 **No staging area**—your working copy IS a commit
+- 🌳 **Conflicts as data**—merge now, resolve later
+- 🌐 **True isomorphic**—same API in Node, browsers, and Web Workers
+
+```javascript
+import { createJJ } from 'isomorphic-jj';
+import git from 'isomorphic-git';
+import fs from 'fs';
+
+const jj = await createJJ({ fs, dir: './my-repo', git });
+await jj.git.init({ userName: 'You', userEmail: 'you@example.com' });
+
+// Edit files, then describe (no staging!)
+await jj.describe({ message: 'Add feature' });
+
+// Made a mistake? Undo it.
+await jj.undo();
+```
 
 ---
 
 ## Quick Start
 
+### Installation
+
+```bash
+npm install isomorphic-jj isomorphic-git
+```
+
+For browsers, also install:
+```bash
+npm install @isomorphic-git/lightning-fs
+```
+
+### Basic Workflow
+
 ```javascript
 import { createJJ } from 'isomorphic-jj';
-import * as git from 'isomorphic-git';
+import git from 'isomorphic-git';
 import fs from 'fs';
 import http from 'isomorphic-git/http/node';
 
-// Create repository with Git backend
+// Create repository
 const jj = await createJJ({
   fs,
   dir: './repo',
@@ -26,713 +59,561 @@ const jj = await createJJ({
   http
 });
 
-// Initialize (creates both .git and .jj) - matches `jj git init` CLI
-await jj.git.init({ userName: 'Your Name', userEmail: 'you@example.com' });
+// Initialize (creates both .git and .jj directories)
+await jj.git.init({
+  userName: 'Your Name',
+  userEmail: 'you@example.com'
+});
 
-// Work with changes
-await jj.describe({ message: 'Initial work' });
-await jj.new({ message: 'Feature X' });
+// Write files and describe changes (no staging!)
+await jj.write({ path: 'README.md', data: '# My Project' });
+await jj.describe({ message: 'Initial commit' });
 
-// Advanced v0.2 operations
-await jj.squash({ source: change2, dest: change1 });
-await jj.split({ changeId: big, description1: 'Part 1', description2: 'Part 2' });
-await jj.abandon({ changeId: experimental });
+// Create a new change on top
+await jj.new({ message: 'Add feature' });
+await jj.write({ path: 'feature.js', data: 'export const feature = () => {}' });
+await jj.amend({ message: 'Add feature implementation' });
 
-// Query changes
-const aliceChanges = await jj.revset.evaluate('author(Alice)');
-const bugFixes = await jj.revset.evaluate('description(fix)');
-
-// Undo anything
+// Oops! Undo the last operation
 await jj.undo();
+
+// View history
+const log = await jj.log({ limit: 10 });
+console.log(log);
 ```
 
-### Git Interoperability
-
-Repositories created with the Git backend work seamlessly with standard Git tools:
-
-```bash
-cd test-repo
-
-# Use Git commands
-git log --oneline
-git show HEAD
-git diff
-
-# View branches
-git branch -a
-
-# The .jj directory is automatically ignored by Git
-git status  # Shows only your working files
-```
-
-### v0.3 New Features
-
-#### Multiple Working Copies (Worktrees)
-
-Work on multiple changes simultaneously in different directories:
+### Browser Usage
 
 ```javascript
-// Add a new worktree for a different change
-const worktree = await jj.worktree.add({
-  path: './feature-branch',
-  name: 'feature-work',
-  changeId: someChangeId
-});
-
-// List all worktrees
-const all = await jj.worktree.list();
-
-// Remove a worktree
-await jj.worktree.remove({ id: worktree.id });
-```
-
-#### Background Operations
-
-Enable file watching and automatic snapshots:
-
-```javascript
-// Start background operations
-await jj.background.start();
-
-// Enable auto-snapshot on file changes
-await jj.background.enableAutoSnapshot({ debounceMs: 1000 });
-
-// Queue async operations
-const { promise } = await jj.background.queue(async () => {
-  await jj.git.fetch({ remote: 'origin' });
-});
-
-// Watch specific paths
-const watcherId = await jj.background.watch('./src', (event, filename) => {
-  console.log(`File ${filename} changed`);
-});
-```
-
-#### Browser Support with LightningFS
-
-Run in browsers using IndexedDB for persistence:
-
-```javascript
-import { createBrowserFS, requestPersistentStorage } from 'isomorphic-jj/browser';
 import { createJJ } from 'isomorphic-jj';
+import { createBrowserFS } from 'isomorphic-jj/browser';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web';
 
-// Request persistent storage (prevents eviction)
-const persistent = await requestPersistentStorage();
+// Create browser filesystem (uses IndexedDB)
+const fs = createBrowserFS({ name: 'my-repo' });
 
-// Create browser filesystem
-const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
-
-// Create JJ instance
 const jj = await createJJ({ fs, dir: '/repo', git, http });
 await jj.git.init({ userName: 'User', userEmail: 'user@example.com' });
+// ... same API as Node.js!
 ```
 
-#### First-Class Conflicts
+---
 
-Conflicts are structured data, not blockers:
+## How is this Different?
 
+### JJ vs Git Concepts
+
+| Concept | Git | JJ / isomorphic-jj |
+|---------|-----|-------------------|
+| **Primary ID** | Commit SHA (changes on rewrite) | Change ID (stable) + Commit ID (mutable) |
+| **Working state** | Working tree + staging index | Working copy IS a commit |
+| **Branches** | Required for work | Optional bookmarks for sync only |
+| **"Dirty" state** | Blocks many operations | Doesn't exist—always committed |
+| **Undo** | `git reflog` (per-ref, manual) | `jj.undo()` (complete repo state) |
+| **Conflicts** | Text markers that block workflow | Structured data you can commit |
+| **Rewriting history** | Manual `rebase -i`, can lose work | Edit any change, descendants auto-update |
+
+### Mental Model Shift
+
+**Git thinking:**
+```bash
+# Edit files
+git add .                    # Stage changes
+git commit -m "message"      # Create commit
+git rebase -i HEAD~3         # Manually rewrite history
+# Hope you didn't mess up!
+```
+
+**JJ thinking:**
 ```javascript
-// Merge creates conflicts but doesn't fail
-const result = await jj.merge({ source: otherChangeId });
-console.log(`Detected ${result.conflicts.length} conflicts`);
+// Edit files (no staging!)
+await jj.describe({ message: 'message' });  // Describe current change
 
-// List unresolved conflicts
-const conflicts = await jj.conflicts.list();
+// Edit any change in history
+await jj.edit({ change: 'abc123' });
+// Make changes...
+await jj.amend();
+// Descendants automatically rebased!
 
-// Resolve manually
-for (const conflict of conflicts) {
-  if (conflict.type === 'content') {
-    const markers = jj.conflicts.generateConflictMarkers(conflict);
-    // Edit file, then mark resolved
-    await jj.conflicts.resolve({ conflictId: conflict.conflictId });
-  }
-}
-
-// Undo restores conflict state
-await jj.undo(); // Conflicts come back
+// Made a mistake? Just undo.
+await jj.undo();
 ```
 
 ---
 
 ## Features
 
-### v0.1 MVP (Complete) ✅
-- ✅ **Change-centric model**: Stable change IDs that persist through rewrites
-- ✅ **Operation log**: Complete undo/redo for every repository mutation
-- ✅ **No staging area**: Working copy IS a commit; edit files directly
-- ✅ **Bookmarks**: Named pointers for sync/push (not branches)
-- ✅ **Basic revsets**: Query changes with @, all(), ancestors()
-- ✅ **Time travel**: View repository at any past operation
+### Core Operations
 
-### v0.2 Features (Complete) ✅
-- ✅ **History editing**: squash, split, abandon, restore, move operations
-- ✅ **Enhanced revsets**: Filter by author(), description(), empty()
-- ✅ **Complete undo**: All operations fully reversible
-
-### v0.3 Features (Complete) ✅
-- ✅ **Pure JavaScript implementation**: No jj CLI dependency - 100% JavaScript protobuf encoding!
-- ✅ **Git backend integration**: Real Git commits from JJ changes (isomorphic-git)
-- ✅ **Colocated repositories**: Both .git and .jj directories work together
-- ✅ **Automatic commit creation**: describe() creates Git commits automatically
-- ✅ **File reading API**: read(), cat(), listFiles() for reading from working copy or any change
-- ✅ **User configuration**: Persistent user name/email configuration with generic config storage
-- ✅ **First-class conflicts**: ConflictModel with detection, storage, and resolution
-- ✅ **Git fetch/push operations**: Full remote repository synchronization
-- ✅ **jj CLI compatibility**: Repositories created by isomorphic-jj are readable by jj CLI
-- ✅ **Multiple working copies**: Support for multiple concurrent working directories (worktrees)
-- ✅ **Browser support**: LightningFS integration with IndexedDB persistence
-- ✅ **Background operations**: File watchers, auto-snapshots, and async operation queue
-- ✅ **Browser enhancements**: ServiceWorker utilities, storage quota management, capability detection
-- ✅ **Collaboration foundation**: Worktrees, background ops, and conflicts enable team workflows
-
-### v0.4 Quick Wins (Just Implemented!) 🎉
-- ✅ **Shallow clone support**: Fetch with depth limit for faster clones and reduced disk usage
-- ✅ **Advanced revset functions**: roots(), heads(), latest(), tags(), bookmarks()
-- ✅ **Event hooks system**: Pre-commit and post-commit hooks for extensibility
-
-**Pure JavaScript Achievement**: isomorphic-jj now implements complete JJ repository creation using JavaScript protobuf encoding (via protobufjs). This means:
-- No jj CLI required for repository creation
-- Repositories work with both Git and jj CLI
-- Following the same pure-JS model as isomorphic-git
-- Full protobuf implementation for .jj/working_copy and .jj/repo/op_store files
-
-This hybrid approach gives you the best of both worlds: JavaScript-based repo creation and full jj CLI support.
-
----
-
-## Why?
-
-**JJ's model is better for everyday work**
-- **Change-centric**: Stable change IDs that persist through rewrites, unlike Git's mutable commit hashes
-- **Operation log**: Complete undo/redo history for every repository mutation—no more lost work
-- **First-class conflicts**: Conflicts are data you can commit, rebase, and resolve later—they never block you (v0.3)
-- **No staging area**: Your working copy IS a commit; edit files and describe changes directly
-- **Bookmarks not branches**: Named pointers for sync/push, but anonymous changes are the norm
-
-**We want this in JavaScript, everywhere**
-- isomorphic-git proved Git can run in Node and browsers (Web Workers/Service Workers) with user-provided fs/http
-- We extend this to JJ semantics while maintaining Git compatibility for fetch/push
-- True isomorphic operation: same API in Node, browser, Electron, React Native
-
-**Git interop is table stakes**
-- JJ can colocate with Git repositories for transparent collaboration (v0.3+)
-- Fetch/push to Git remotes using proven isomorphic-git infrastructure
-- Git users see normal commits; JJ users get superior UX
-
----
-
-## Architecture
-
-```
-┌────────────────────────────────────────────────────────────┐
-│  Your App / UI Layer                                       │
-│  ├─ Web UI  ├─ CLI wrapper  ├─ VS Code extension          │
-└─────────────────────────┬──────────────────────────────────┘
-                          │
-                          ▼
-┌────────────────────────────────────────────────────────────┐
-│  isomorphic-jj (Porcelain Layer)                           │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ Core Concepts                                        │  │
-│  │  • ChangeGraph    • RevsetEngine   • WorkingCopy   │  │
-│  │  • BookmarkStore  • OpLog          • Storage       │  │
-│  └──────────────────────────────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │ Operations (v0.1 + v0.2)                             │  │
-│  │  • init/describe/new/status         • undo/redo    │  │
-│  │  • squash/split/abandon/restore     • move/rebase  │  │
-│  │  • bookmark CRUD                    • revsets      │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────┬──────────────────────────────────┘
-                          │ Backend Interface (pluggable)
-                          ▼
-┌────────────────────────────────────────────────────────────┐
-│  Backend Adapter (Plumbing Layer)                          │
-│  • Mock backend (current)                                  │
-│  • isomorphic-git (v0.3+)                                  │
-└─────────────────────────┬──────────────────────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │ Storage Layer         │
-              │ (JSON, JSONL)         │
-              │  + your fs            │
-              └───────────────────────┘
-                          │
-                          ▼
-                   Git remotes
-```
-
-**Storage Philosophy**:
-- Backend provides Git-shaped plumbing (objects, refs, network)
-- isomorphic-jj adds JJ semantics via JSON storage (`.jj/graph.json`, `.jj/oplog.jsonl`)
-- Result: JJ UX with Git compatibility, fully isomorphic (Node + browser)
-
-### Three-Layer Design
-
-1. **Backend Layer** (Plumbing): Git object storage and network operations
-2. **Core Layer** (JJ Semantics): Change graph, operation log, conflicts
-3. **API Layer** (Porcelain): User-facing operations
-
-**Key Design Principles**:
-- Emulate JJ semantics, not implementation
-- Backend agnostic with pluggable adapters
-- Isomorphic (Node + browser) by design
-- JSON storage for JJ metadata
-- Operation-first, not commit-first
-
----
-
-## Installation
-
-```bash
-# Core library (protobufjs is the only required dependency)
-npm install isomorphic-jj
-
-# For Git backend support (recommended)
-npm install isomorphic-git
-
-# For browsers, add a filesystem
-npm install @isomorphic-git/lightning-fs
-```
-
-**Note**: isomorphic-git is an optional peer dependency. You only need it if you want Git backend integration. isomorphic-jj can work with other backends (or no backend) for testing and custom storage.
-
----
-
-## Core API
-
-### No Staging - Working Copy is a Commit
-
+#### File Operations
 ```javascript
-// ❌ Git-style (what we DON'T have)
-await git.add({ fs, dir, filepath: 'file.js' });
-await git.commit({ fs, dir, message: 'Update' });
+// Write files
+await jj.write({ path: 'file.txt', data: 'content' });
 
-// ✅ JJ-style (what we DO have)
-await jj.write({ path: 'file.js', data: '...' });
-await jj.describe({ message: 'Update' });
+// Read from working copy or any change
+const content = await jj.read({ path: 'file.txt' });
+const oldVersion = await jj.read({ path: 'file.txt', changeId: 'abc123' });
 
-// Or create a new stacked change
-await jj.new({ message: 'Next feature' });
-// Old working copy becomes a regular change
-```
+// Move/rename
+await jj.move({ from: 'old.txt', to: 'new.txt' });
 
-### File Reading
+// Remove
+await jj.remove({ path: 'file.txt' });
 
-```javascript
-// Read from working copy
-const content = await jj.read({ path: 'file.js' });
-
-// Read from specific change
-const oldVersion = await jj.read({
-  path: 'file.js',
-  changeId: 'abc123'
-});
-
-// List all files in working copy
+// List files
 const files = await jj.listFiles();
-
-// List files from specific change
-const oldFiles = await jj.listFiles({ changeId: 'abc123' });
-
-// cat() is an alias for read()
-const data = await jj.cat({ path: 'README.md' });
 ```
 
-### User Configuration
-
+#### Change Management
 ```javascript
-// Get current user
-const user = jj.userConfig.getUser();
-console.log(`${user.name} <${user.email}>`);
+// Describe current change (creates Git commit automatically)
+await jj.describe({ message: 'Implement feature X' });
 
-// Update user info
-await jj.userConfig.setUser({
-  name: 'Alice Developer',
-  email: 'alice@example.com'
-});
+// Create new change on top of working copy
+await jj.new({ message: 'Start feature Y' });
 
-// Generic config with dot notation
-await jj.userConfig.set('ui.color', 'always');
-await jj.userConfig.set('editor.command', 'vim');
+// Amend current change
+await jj.amend({ message: 'Fix typo in feature X' });
 
-const color = jj.userConfig.get('ui.color'); // 'always'
-```
-
-### Change-Centric Workflow
-
-```javascript
-// Create a change (no bookmark needed)
-await jj.write({ path: 'auth.js', data: 'export const login = ...' });
-const changeA = await jj.describe({ message: 'Add authentication' });
-
-// Stack another change on top
-await jj.new({ message: 'Add authorization' });
-await jj.write({ path: 'authz.js', data: 'export const authorize = ...' });
-const changeB = await jj.amend({ message: 'Add authorization logic' });
-
-// Changes have stable IDs
-console.log(changeA.changeId);  // "kpqxywon" (stable)
-console.log(changeA.commitId);  // "a7f3c29d" (Git SHA, changes on rewrite)
-
-// Edit any change in history
-await jj.edit({ change: changeA.changeId });
+// Edit historical changes
+await jj.edit({ change: 'abc123' });
 // Make changes...
 await jj.amend();
-// changeB automatically rebased!
+// Descendants are automatically rebased!
+
+// Check status
+const status = await jj.status();
+console.log(status.modified, status.added, status.removed);
 ```
 
-### Operation Log - Fearless Undo
-
+#### History Editing
 ```javascript
-// View complete operation history
-const ops = await jj.obslog({ limit: 20 });
-ops.forEach(op => {
-  console.log(`${op.id} ${op.timestamp} ${op.description}`);
+// Squash changes together
+await jj.squash({ source: 'change1', dest: 'change2' });
+
+// Split a change
+await jj.split({
+  changeId: 'abc123',
+  description1: 'Part 1',
+  description2: 'Part 2'
 });
 
-// Undo last operation (any operation, not just commit)
+// Abandon (hide from log, keep data)
+await jj.abandon({ changeId: 'experimental' });
+
+// Restore abandoned changes
+await jj.restore({ changeId: 'experimental' });
+
+// Move changes to different parent
+await jj.move({ from: 'feature', to: 'updated-main', paths: ['file.js'] });
+```
+
+#### Revsets - Powerful Queries
+```javascript
+// Simple revsets
+await jj.log({ revset: '@' });                    // working copy
+await jj.log({ revset: 'bookmark(main)' });       // bookmark
+await jj.log({ revset: 'roots()' });              // root commits
+
+// Filter by author or description
+await jj.log({ revset: 'author(alice)' });
+await jj.log({ revset: 'description(fix)' });
+
+// File-based queries
+await jj.log({ revset: 'file(*.js)' });           // commits touching JS files
+await jj.log({ revset: 'mine()' });               // my commits
+
+// Graph analysis
+await jj.log({ revset: 'roots(all())' });         // commits with no parents
+await jj.log({ revset: 'heads(all())' });         // commits with no children
+await jj.log({ revset: 'latest(mine(), 5)' });    // my 5 latest commits
+
+// Repository analytics
+const stats = await jj.stats();
+console.log(`Total: ${stats.changes.total}, Mine: ${stats.changes.mine}`);
+```
+
+#### Complete Undo/Redo
+```javascript
+// View operation history
+const ops = await jj.obslog({ limit: 20 });
+
+// Undo last operation (works for ANY operation)
 await jj.undo();
 
 // Undo multiple operations
 await jj.undo({ count: 3 });
 
-// Time-travel: view repo at any operation
+// Time travel to any past state
 const historical = await jj.operations.at({ operation: ops[5].id });
 const oldLog = await historical.log({ revset: 'all()' });
+```
+
+### Git Interoperability
+
+```javascript
+// Initialize colocated repository (both .git and .jj)
+await jj.git.init({
+  userName: 'Your Name',
+  userEmail: 'you@example.com'
+});
+
+// Fetch from Git remotes
+await jj.git.fetch({ remote: 'origin' });
+
+// Push to Git remotes
+await jj.git.push({ remote: 'origin', refs: ['main'] });
+
+// Import Git refs as bookmarks
+await jj.git.import();
+
+// Git users see normal commits
+// JJ users get superior UX
+// Full bidirectional compatibility!
+```
+
+**Git interop works seamlessly:**
+```bash
+cd my-repo
+git log --oneline          # See commits from JJ
+git show HEAD              # View latest change
+git branch -a              # See bookmarks as branches
+git status                 # .jj directory is ignored
 ```
 
 ### First-Class Conflicts
 
 ```javascript
-// Merge with conflicts - no error thrown!
-const merged = await jj.merge({
-  ours: 'bookmark(main)',
-  theirs: 'bookmark(feature)'
+// Merge creates conflicts but doesn't fail
+const result = await jj.merge({
+  source: 'feature-branch',
+  dest: 'main'
 });
-
-// Conflicts are data, not errors
-const conflicts = await jj.conflicts(merged.changeId);
-console.log('Conflicts in:', conflicts.map(c => c.path));
+console.log(`Detected ${result.conflicts.length} conflicts`);
 
 // Continue working on something else
-await jj.new({ message: 'Work on unrelated feature' });
+await jj.new({ message: 'Unrelated work' });
 
 // Later, resolve conflicts
-await jj.edit({ change: merged.changeId });
+const conflicts = await jj.conflicts.list();
 for (const conflict of conflicts) {
-  await jj.resolveConflict({
-    change: merged.changeId,
-    path: conflict.path,
-    resolution: { side: 'ours' } // or provide custom content
+  await jj.conflicts.resolve({
+    conflictId: conflict.conflictId,
+    resolution: { side: 'ours' }  // or provide custom content
   });
 }
+
+// Undo restores conflict state if needed
+await jj.undo();
 ```
 
-### Revsets - Powerful Queries
+### Bookmarks (Not Branches)
+
+In JJ, bookmarks are for remote sync, not local navigation:
 
 ```javascript
-// Simple revsets
-await jj.log({ revset: '@' });           // working copy
-await jj.log({ revset: 'bookmark(main)' }); // main bookmark
-await jj.log({ revset: 'roots()' });     // root commits
-
-// Range queries
-await jj.log({ revset: 'bookmark(main)..@' });  // main to working copy
-
-// Filters (v0.2+)
-await jj.log({ revset: 'author(alice)' });     // by author
-await jj.log({ revset: 'description(fix)' });  // by message
-await jj.log({ revset: 'empty()' });           // empty commits
-
-// New in v0.3.1
-await jj.log({ revset: 'mine()' });            // my commits
-await jj.log({ revset: 'merge()' });           // merge commits
-await jj.log({ revset: 'file(*.js)' });        // commits touching JS files
-await jj.log({ revset: 'file(src/*)' });       // commits touching src/
-
-// New in v0.4 - Graph analysis
-await jj.log({ revset: 'roots(all())' });      // root commits (no parents in set)
-await jj.log({ revset: 'heads(all())' });      // head commits (no children in set)
-await jj.log({ revset: 'latest(mine(), 5)' }); // my 5 latest commits
-await jj.log({ revset: 'bookmarks()' });       // all bookmark targets
-await jj.log({ revset: 'bookmarks(feat*)' }); // bookmarks matching pattern
-
-// Repository analytics (v0.3.1)
-const stats = await jj.stats();
-console.log(`Total changes: ${stats.changes.total}`);
-console.log(`My commits: ${stats.changes.mine}`);
-console.log(`Files tracked: ${stats.files.total}`);
-console.log(`Authors: ${stats.authors.total}`);
-```
-
-### Bookmarks (not Branches)
-
-```javascript
-// Bookmarks are for remote sync, not local navigation
-await jj.bookmark.set({ name: 'feature-x', target: '@' });
-
-// Push to Git remote (creates Git branch)
-await jj.remote.push({
-  remote: 'origin',
-  refs: ['feature-x']
-});
-
-// But local work doesn't need bookmarks
+// Most work doesn't need bookmarks
 await jj.new();
 await jj.describe({ message: 'Anonymous change' });
-// No bookmark required!
+
+// Bookmarks when pushing to remotes
+await jj.bookmark.set({ name: 'feature-x', target: '@' });
+await jj.remote.push({ remote: 'origin', refs: ['feature-x'] });
+
+// List bookmarks
+const bookmarks = await jj.bookmark.list();
 ```
 
----
-
-## Advanced Usage Examples
-
-### Shallow Clones (v0.4)
+### Browser Support
 
 ```javascript
-// Clone with depth limit for faster downloads
-await jj.git.fetch({
-  remote: 'origin',
-  depth: 1,           // Only fetch latest commit
-  singleBranch: true, // Only current branch
-  noTags: true        // Skip tags
+import { createBrowserFS, requestPersistentStorage } from 'isomorphic-jj/browser';
+
+// Request persistent storage (prevents eviction)
+const persistent = await requestPersistentStorage();
+
+// Create filesystem with IndexedDB backend
+const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
+
+// Check browser capabilities
+import { detectCapabilities } from 'isomorphic-jj/browser';
+const caps = detectCapabilities();
+if (caps.indexedDB && caps.serviceWorker) {
+  // Enable offline support
+}
+
+// Get storage quota
+import { getStorageQuota } from 'isomorphic-jj/browser';
+const quota = await getStorageQuota();
+console.log(`Using ${quota.percentage}% of available storage`);
+```
+
+### Advanced Features
+
+#### Multiple Working Copies (Worktrees)
+```javascript
+// Work on multiple changes simultaneously
+const worktree = await jj.worktree.add({
+  path: './feature-branch',
+  name: 'feature-work',
+  changeId: someChangeId
 });
 
-// Shallow clone saves disk space and time
-// Perfect for CI/CD or large repositories
+const all = await jj.worktree.list();
+await jj.worktree.remove({ id: worktree.id });
+```
 
-// Fetch more history later
-await jj.git.fetch({
-  remote: 'origin',
-  depth: 10,          // Fetch 10 commits deep
-  relative: true      // Measured from current shallow depth
+#### Background Operations (Node.js)
+```javascript
+// Enable file watching and auto-snapshots
+await jj.background.start();
+await jj.background.enableAutoSnapshot({ debounceMs: 1000 });
+
+// Queue async operations
+await jj.background.queue(async () => {
+  await jj.git.fetch({ remote: 'origin' });
 });
 ```
 
-### Event Hooks (v0.4)
-
+#### Event Hooks
 ```javascript
-// Add hooks during repository creation
 const jj = await createJJ({
-  fs,
-  dir: './repo',
-  git,
-  http,
+  fs, dir: './repo', git, http,
   hooks: {
-    // Run linters before commits
     preCommit: async (context) => {
-      console.log(`Pre-commit: ${context.operation}`);
-      // Run linter, formatter, tests, etc.
+      // Run linters, tests, etc.
       const result = await runLinter(context.changeId);
-      if (!result.success) {
-        throw new Error('Linting failed!');
-      }
+      if (!result.success) throw new Error('Linting failed');
     },
-
-    // Log or notify after commits
     postCommit: async (context) => {
       console.log(`Committed: ${context.change.description}`);
-      // Send notifications, update dashboards, etc.
       await notifyTeam(context.changeId);
     }
   }
 });
-
-// Hooks integrate seamlessly with describe(), amend(), etc.
-await jj.describe({ message: 'Fix bug' });  // Hooks run automatically
 ```
+
+#### Shallow Clones
+```javascript
+// Fetch with depth limit for faster clones
+await jj.git.fetch({
+  remote: 'origin',
+  depth: 1,           // Only latest commit
+  singleBranch: true,
+  noTags: true
+});
+```
+
+---
+
+## Use Cases
 
 ### Stacked Changes (Like Stacked PRs)
 
 ```javascript
-// Create a series of dependent changes
-await jj.write({ path: 'lib/core.js', data: '...' });
-const core = await jj.describe({ message: 'Refactor core logic' });
+// Create dependent changes
+await jj.write({ path: 'core.js', data: '...' });
+const core = await jj.describe({ message: 'Refactor core' });
 
-await jj.new({ message: 'Add feature A using new core' });
-await jj.write({ path: 'features/a.js', data: '...' });
+await jj.new({ message: 'Feature A using new core' });
+await jj.write({ path: 'feature-a.js', data: '...' });
 const featureA = await jj.amend();
 
-await jj.new({ message: 'Add feature B using feature A' });
-await jj.write({ path: 'features/b.js', data: '...' });
-const featureB = await jj.amend();
-
-// View the stack
-const stack = await jj.log({
-  revset: `${core.changeId}::${featureB.changeId}`
-});
+await jj.new({ message: 'Feature B using feature A' });
+await jj.write({ path: 'feature-b.js', data: '...' });
 
 // Edit the middle change - descendants auto-rebase!
 await jj.edit({ change: featureA.changeId });
-// Make changes...
-await jj.amend();
-// featureB automatically updated!
+await jj.amend({ message: 'Updated feature A' });
+// Feature B is automatically updated!
 ```
 
-### History Editing
+### Experimentation Without Fear
 
 ```javascript
-// Squash changes together
-await jj.squash({
-  from: 'changeId1',
-  to: 'changeId2'
-});
+// Try something risky
+await jj.new({ message: 'Experimental refactor' });
+// ... make major changes ...
+await jj.describe({ message: 'Attempt 1' });
 
-// Split a change
-await jj.edit({ change: 'bigChange' });
-await jj.split({
-  paths: ['part1.js', 'part2.js']  // first change gets these
-  // remaining files go to second change
-});
+// Didn't work? Just undo
+await jj.undo();
 
-// Move specific changes between commits
-await jj.move({
-  from: 'changeA',
-  to: 'changeB',
-  paths: ['file.js']
-});
-
-// Rebase onto new parent
-await jj.rebase({
-  revset: 'myChanges',
-  dest: 'bookmark(updated-main)'
-});
+// Or try a different approach
+await jj.new({ message: 'Better approach' });
+// Operation log has complete history
 ```
 
-### Git Interop
+### Code Review Workflow
 
 ```javascript
-// Colocated repos work with both Git and JJ
-await jj.git.init();  // Creates both .git and .jj
+// Changes have stable IDs across iterations
+const changeId = await jj.describe({ message: 'Initial implementation' });
 
-// Fetch from Git remote
-await jj.git.fetch({ remote: 'origin' });
+// Reviewer comments applied
+await jj.edit({ change: changeId });
+await jj.amend({ message: 'Address review comments' });
+// Same changeId, different commitId
 
-// Import Git refs to JJ bookmarks
-await jj.git.import();
-
-// Work with JJ semantics
-await jj.new();
-// ...make changes...
-
-// Export to Git for pushing
-await jj.git.export({ bookmark: 'feature-x' });
-await jj.remote.push({ refs: ['feature-x'] });
+// Push for review
+await jj.bookmark.set({ name: 'review/feature-x', target: changeId });
+await jj.remote.push({ remote: 'origin', refs: ['review/feature-x'] });
 ```
 
 ---
 
-## Mental Model: Git → JJ → isomorphic-jj
+## API Reference
 
-Understanding isomorphic-jj requires understanding how concepts translate across all three systems:
+Full API documentation available in [TypeScript definitions](./src/types.d.ts).
 
-### Identity and State
+### Main Interface
 
-| Concept | Git | JJ | isomorphic-jj |
-|---------|-----|----|--------------|
-| **Primary identifier** | Commit SHA (changes on rewrite) | Change ID (stable) + Commit ID (mutable) | `{ changeId, commitId }` object |
-| **Working state** | Working tree + staging index | Working copy IS a commit | No `add()`/`stage()` methods |
-| **Branches** | Current branch required | Anonymous changes; bookmarks optional | `bookmark.*` namespace, not primary |
-| **"Dirty" state** | Blocks operations | Does not exist—always committed | Operations never fail on uncommitted work |
+```typescript
+import { createJJ, type JJ, type CreateJJOptions } from 'isomorphic-jj';
 
-### History and Evolution
+const jj: JJ = await createJJ(options: CreateJJOptions);
+```
 
-| Concept | Git | JJ | isomorphic-jj |
-|---------|-----|----|--------------|
-| **History model** | Commit DAG | Operation log creates commit views | `.obslog()` returns evolution history |
-| **Undo** | `git reflog` (per-ref, manual) | `jj undo` (complete repo state) | `.undo()` method |
-| **Rewriting history** | Manual `rebase -i` | Automatic descendant rebasing | Edit any change; descendants auto-update |
-| **Time travel** | Checkout old commits | `--at-op` to view any state | `.operations.at(opId)` returns snapshot |
+### Core Methods
 
-### Conflicts
+- **Repository**: `init()`, `status()`, `stats()`
+- **Files**: `write()`, `read()`, `cat()`, `move()`, `remove()`, `listFiles()`
+- **Changes**: `describe()`, `new()`, `amend()`, `edit()`, `show()`
+- **History**: `log()`, `obslog()`, `squash()`, `split()`, `abandon()`, `restore()`
+- **Operations**: `undo()`, `operations.list()`, `operations.at()`
+- **Bookmarks**: `bookmark.list()`, `bookmark.set()`, `bookmark.move()`, `bookmark.delete()`
+- **Git**: `git.init()`, `git.fetch()`, `git.push()`, `git.import()`, `git.export()`
+- **Remotes**: `remote.add()`, `remote.fetch()`, `remote.push()`
+- **Worktrees**: `worktree.add()`, `worktree.list()`, `worktree.remove()`
+- **Conflicts**: `merge()`, `conflicts.list()`, `conflicts.resolve()`
+- **Background** (Node.js): `background.start()`, `background.stop()`, `background.enableAutoSnapshot()`
 
-| Concept | Git | JJ | isomorphic-jj |
-|---------|-----|----|--------------|
-| **Conflict model** | Text markers block operations | Structured data in commits | First-class `Conflict` objects (v0.3) |
-| **Resolution** | Must resolve to continue | Resolve anytime; can commit conflicts | `.conflicts()` returns `Conflict[]` (v0.3) |
-| **Propagation** | Manual rebase needed | Automatic with descendant rebasing | Resolution cascades automatically (v0.3) |
-
-**Key insight**: We emulate JJ's *semantics* and *user experience* using JS-friendly storage (JSON), not JJ's Rust internals.
+See [complete API documentation](./src/types.d.ts) for detailed signatures and options.
 
 ---
 
-## Storage Format
+## Why isomorphic-jj?
 
+### JJ's Model is Better for Everyday Work
+
+- **Stable change IDs** survive rebases/squashes—like "review comments that follow the code"
+- **Operation log** means you can undo anything, not just commits
+- **No staging area** eliminates a major source of confusion
+- **First-class conflicts** let you merge now, resolve later
+- **Anonymous changes** simplify experimental work and stacked changes
+
+### We Want This in JavaScript, Everywhere
+
+- **isomorphic-git** proved Git can run in Node and browsers
+- **isomorphic-jj** extends this to JJ semantics while maintaining Git compatibility
+- **True isomorphic**: Same API in Node, browsers, Web Workers, Service Workers
+- **Git interop** is table stakes—fetch/push to GitHub/GitLab just works
+
+### Git Compatibility Matters
+
+- Colocated repositories work with both Git and JJ tools
+- Git users see normal commits; JJ users get superior UX
+- Fetch/push to Git remotes using proven isomorphic-git infrastructure
+- Transparent collaboration between Git and JJ workflows
+
+---
+
+## Architecture
+
+isomorphic-jj follows a three-layer architecture:
+
+```
+┌─────────────────────────────────────────────┐
+│  Your App / UI Layer                        │
+│  (Web UI, CLI, VS Code extension)          │
+└────────────────┬────────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────────┐
+│  isomorphic-jj (Porcelain Layer)            │
+│  ┌───────────────────────────────────────┐  │
+│  │ Core: ChangeGraph, OpLog, Revsets    │  │
+│  │ Operations: describe, new, squash     │  │
+│  │ Conflicts: First-class conflict model │  │
+│  └───────────────────────────────────────┘  │
+└────────────────┬────────────────────────────┘
+                 │ Backend Interface (pluggable)
+                 ▼
+┌─────────────────────────────────────────────┐
+│  Backend Adapter (Plumbing Layer)           │
+│  • isomorphic-git (default)                 │
+│  • Mock backend (testing)                   │
+└────────────────┬────────────────────────────┘
+                 │
+                 ▼
+         Git objects + remotes
+```
+
+**Design Principles:**
+- Emulate JJ semantics, not implementation
+- Backend agnostic with pluggable adapters
+- Isomorphic by design (Node + browser)
+- JSON storage for JJ metadata (`.jj/graph.json`, `.jj/oplog.jsonl`)
+- Operation-first, not commit-first
+
+**Storage:**
 ```
 repo/
 ├── .git/                    # Git objects (via backend)
 └── .jj/
-    ├── graph.json           # Change graph: nodes, parents, metadata
+    ├── graph.json           # Change graph with stable IDs
     ├── oplog.jsonl          # Append-only operation log
-    ├── bookmarks.json       # Bookmark name → ChangeID mapping
-    ├── conflicts/           # Per-path conflict descriptors
-    │   └── path/to/file.json
-    └── working-copy.json    # Current working copy state
+    ├── bookmarks.json       # Bookmarks
+    ├── conflicts/           # Conflict descriptors
+    └── working-copy.json    # Working copy state
 ```
-
-**Why JSON, not JJ's Rust format?**
-
-1. **Browser compatibility**: JSON works in IndexedDB, localStorage, OPFS
-2. **Portability**: Easy to inspect, debug, and sync
-3. **Simplicity**: Focus on semantics, not storage optimization
-4. **Pluggable**: Backend handles Git objects; we add JJ metadata
-
-This is an implementation detail. Users interact with JJ semantics, not storage format.
 
 ---
 
-## Performance & Environment
+## Project Status
+
+**Current Version**: v0.4.0
+**Test Coverage**: 314 tests, 100% passing
+**Status**: Ready for experimentation and prototyping
+
+**Completed:**
+- ✅ v0.1: Core JJ experience (stable IDs, undo, bookmarks, revsets)
+- ✅ v0.2: History editing (squash, split, abandon, restore, move)
+- ✅ v0.3: Git backend, conflicts, worktrees, browser support
+- ✅ v0.4: Shallow clones, advanced revsets, event hooks
+
+**Coming Next (v0.5):**
+- Repository analytics and debugging tools
+- Interactive workflows
+- Enhanced revset language
+
+See [ROADMAP.md](./ROADMAP.md) for detailed plans through v1.0.
+
+---
+
+## Installation & Environment
+
+### Requirements
+
+- **Node.js**: 18.0.0 or higher
+- **Browsers**: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
+- **Optional**: Git CLI (for JJ CLI interop testing)
+
+### Dependencies
+
+**Required:**
+- `protobufjs` - For JJ repository format encoding
+
+**Peer Dependencies (optional):**
+- `isomorphic-git` - For Git backend support
+- `@isomorphic-git/lightning-fs` - For browser filesystem
 
 ### Browser Considerations
 
-- **Storage**: Uses LightningFS (IndexedDB) or browser-native filesystem (OPFS when available)
-- **Large histories**: Use pagination (`limit` option) and shallow fetch patterns
-- **CORS**: Remote fetch/push requires CORS proxy for GitHub/GitLab
-- **Memory**: IndexedDB handles large repos better than localStorage
-
-```javascript
-// Browser optimization example
-const jj = await createJJ({
-  fs: new LightningFS('jj-repos', { wipe: false }), // persistent
-  dir: '/myrepo',
-  git,
-  http,
-  corsProxy: 'https://cors.isomorphic-git.org'
-});
-
-// Paginate large logs
-const recent = await jj.log({ limit: 50 });
-// Infinite scroll: fetch next page
-const older = await jj.log({
-  revset: `ancestors(${recent[recent.length - 1].changeId})`,
-  limit: 50
-});
-```
-
-### Node.js Considerations
-
-- **Storage**: Uses native `fs` module (fast!)
-- **Large repos**: Stream-friendly APIs coming in v0.2
-- **Concurrency**: Operation log enables lock-free concurrent access (future)
-
-```javascript
-// Node optimization example
-import fs from 'fs';
-import http from 'isomorphic-git/http/node';
-
-const jj = await createJJ({
-  fs,
-  dir: process.cwd(),
-  git,
-  http
-});
-
-// Full-speed native filesystem operations
-```
+- Uses IndexedDB or OPFS for storage
+- Remote operations require CORS proxy for most Git hosts
+- Memory limits apply (use `limit` options for large repos)
 
 ---
 
@@ -741,76 +622,72 @@ const jj = await createJJ({
 We welcome contributions! Here's how to help:
 
 **Before opening a PR:**
-1. Open an issue describing your use case and the JJ concept you need
-2. Discuss the API design - we follow "porcelain over plumbed backends"
-3. Include TypeScript types and a design note in your PR
-
-**Areas needing help:**
-- Revset parser/evaluator implementation
-- Conflict resolution algorithms
-- Browser storage optimization
-- Test coverage
-- Documentation & examples
-- VS Code extension
+1. Open an issue to discuss your use case
+2. Follow "porcelain over plumbed backends" design
+3. Include tests and TypeScript types
+4. Update documentation
 
 **Development setup:**
 ```bash
-git clone https://github.com/yourusername/isomorphic-jj
+git clone https://github.com/johnhenry/isomorphic-jj
 cd isomorphic-jj
 npm install
-npm test
+npm test              # Run tests
+npm run typecheck     # Check types
+npm run lint          # Check code style
 ```
+
+**Areas needing help:**
+- Revset parser/evaluator enhancements
+- Conflict resolution algorithms
+- Browser storage optimizations
+- Documentation and examples
+- VS Code extension
 
 ---
 
 ## FAQ
 
-**Q: Why not just use Git?**
-
-A: JJ's model is genuinely better for common workflows:
-- Stable change IDs survive rebases/squashes
-- No staging area confusion
-- Undo works for everything, not just commits
-- Conflicts don't block you
-- Anonymous changes simplify stacked changes
-
-**Q: Do I need to understand JJ to use this?**
-
-A: Basic familiarity helps. Key concepts:
-- Working copy IS a commit (no staging)
-- Changes have stable IDs (like "review comments that follow the code")
-- Operation log enables fearless undo
-- Bookmarks are for pushing, not local navigation
+**Q: Do I need to learn JJ to use this?**
+A: Basic familiarity helps. Key concepts: working copy IS a commit (no staging), changes have stable IDs, operation log enables fearless undo, bookmarks are for pushing not local navigation.
 
 **Q: Can Git users collaborate with me?**
-
 A: Yes! Colocated repos expose normal Git commits. Git users never see JJ metadata.
 
 **Q: What's the performance like?**
-
-A: Comparable to isomorphic-git for Git operations. JJ metadata (JSON) is fast in Node, acceptable in browser. Large histories need pagination.
+A: Comparable to isomorphic-git for Git operations. JJ metadata (JSON) is fast in Node, acceptable in browsers. Large histories need pagination.
 
 **Q: Does this support all JJ features?**
-
-A: Not yet. We're at v0.4. See ROADMAP.md for planned features.
+A: Not yet. We're at v0.4. See [ROADMAP.md](./ROADMAP.md) for planned features.
 
 **Q: Can I migrate my Git repo?**
+A: Yes! `jj.git.init()` works on existing Git repositories.
 
-A: Yes! `jj.init({ colocate: true })` works on existing Git repos.
+**Q: Why not just use Git?**
+A: JJ's model genuinely improves common workflows—stable change IDs, fearless undo, no staging confusion, conflicts as data instead of blockers.
 
 ---
 
-## Prior Art & References
+## Related Projects
 
-- [isomorphic-git](https://isomorphic-git.org/): Pure JS Git for Node + browser
-- [JJ documentation](https://jj-vcs.github.io/jj/): Official Jujutsu docs
-- [JJ Git comparison](https://jj-vcs.github.io/jj/latest/git-comparison/): How JJ differs from Git
-- [JJ tutorial](https://jj-vcs.github.io/jj/latest/tutorial/): Learn JJ concepts
-- [Colocated repos](https://jj-vcs.github.io/jj/latest/working-with-git/): Git interop patterns
-- [Git plumbing vs porcelain](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain): Architectural pattern we follow
+- [isomorphic-git](https://isomorphic-git.org/) - Pure JS Git implementation (our foundation)
+- [Jujutsu](https://jj-vcs.github.io/jj/) - The original JJ version control system
+- [simple-git](https://github.com/steveukx/git-js) - Git wrapper for Node.js
+- [Git plumbing vs porcelain](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain) - Architecture pattern we follow
 
 ---
 
 ## License
 
-MIT
+MIT © John Henry
+
+---
+
+## Acknowledgments
+
+Built on the shoulders of:
+- [isomorphic-git](https://github.com/isomorphic-git/isomorphic-git) by William Hilton
+- [Jujutsu](https://github.com/martinvonz/jj) by Martin von Zweigbergk
+- The Git and JavaScript communities
+
+**Status**: v0.4.0 | **Tests**: 314 passing | **Ready for**: Experimentation and prototyping
