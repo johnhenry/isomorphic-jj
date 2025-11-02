@@ -27,13 +27,13 @@ This roadmap outlines the past milestones and future plans for isomorphic-jj. Ea
 - ✅ No staging area (working copy is the change)
 
 ### Success Criteria Met ✅
-- ✅ 90%+ test coverage (279 tests, 100% passing)
+- ✅ 90%+ test coverage (314 tests, 100% passing)
 - ✅ Works in Node.js and browsers
 - ✅ Repository with changes performs adequately
 - ✅ Complete undo/redo functionality
 
 ### Test Coverage ✅
-- 279 tests across 22 test suites
+- 314 tests across 22 test suites
 - Comprehensive unit and integration coverage
 - 100% pass rate
 
@@ -66,7 +66,7 @@ This roadmap outlines the past milestones and future plans for isomorphic-jj. Ea
 - ✅ All history editing operations implemented
 - ✅ Enhanced revset filtering functional
 - ✅ All operations reversible
-- ✅ Test coverage maintained (279 tests passing)
+- ✅ Test coverage maintained (314 tests passing)
 
 ---
 
@@ -142,7 +142,7 @@ This roadmap outlines the past milestones and future plans for isomorphic-jj. Ea
 - ✅ Clean separation between ChangeGraph and backends
 - ✅ Ready for alternative backends (libgit2, remote, etc.)
 - ✅ All JJ changes automatically sync to Git commits
-- ✅ 279 tests passing (increased from 265)
+- ✅ 314 tests passing (increased from 265)
 
 #### Bug Fixes ✅
 - ✅ Fixed `undo()` to restore filesystem from operation snapshots
@@ -407,7 +407,7 @@ All operations now return useful information:
 - ✅ Advanced revset functions (complete)
 - ✅ Event hooks system (complete)
 - ✅ Operation return values (complete)
-- 279 tests, 100% passing
+- 314 tests, 100% passing
 
 ---
 
@@ -442,7 +442,7 @@ All operations now return useful information:
 
 #### Changed
 - Updated documentation to reflect v0.4 features
-- Improved test coverage to 279 tests
+- Improved test coverage to 314 tests
 
 ### [0.3.0] - 2025-10-30
 

@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 **Status**: v0.4 Quick Wins Implemented ✅ (Shallow clones, Advanced revsets, Event hooks)
-**Test Coverage**: 279 tests, 100% passing
+**Test Coverage**: 314 tests, 100% passing
 **Ready for**: Production experimentation, prototyping, tool building with full Git interop
 
 A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers. Built on pluggable storage backends with isomorphic-git as the default.

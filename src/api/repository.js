@@ -64,16 +64,23 @@ export async function createJJ(options) {
   const worktrees = new WorktreeManager(storage, fs, dir);
   const userConfig = new UserConfig(storage);
 
-  // Helper to get user info for oplog operations
+  /**
+   * Helper to get user info for oplog operations
+   * @returns {Promise<import('../types').OperationUser>}
+   */
   const getUserOplogInfo = async () => {
     await userConfig.load();
     const user = userConfig.getUser();
     return { name: user.name, email: user.email, hostname: 'localhost' };
   };
 
-  // Helper to snapshot current filesystem state
-  // This is called BEFORE every operation to enable undo
+  /**
+   * Helper to snapshot current filesystem state
+   * This is called BEFORE every operation to enable undo
+   * @returns {Promise<Record<string, string>>}
+   */
   const snapshotFilesystem = async () => {
+    /** @type {Record<string, string>} */
     const fileSnapshot = {};
 
     try {
@@ -113,8 +120,15 @@ export async function createJJ(options) {
     return fileSnapshot;
   };
 
-  // Helper to dispatch events with async listener support and error handling
-  // Store listener errors in detail so we can check them after dispatch
+  /**
+   * Helper to dispatch events with async listener support and error handling
+   * Store listener errors in detail so we can check them after dispatch
+   * @param {EventTarget} eventTarget
+   * @param {string} eventName
+   * @param {any} detail
+   * @param {{ cancelable?: boolean }} [options]
+   * @returns {Promise<void>}
+   */
   const dispatchEventAsync = async (eventTarget, eventName, detail, options = {}) => {
     // Extend detail to track errors from listeners
     const enhancedDetail = {

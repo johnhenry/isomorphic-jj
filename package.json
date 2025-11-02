@@ -1,6 +1,6 @@
 {
   "name": "isomorphic-jj",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -19,7 +19,7 @@
   },
   "files": [
     "dist",
-    "src/types.d.ts",
+    "src",
     "README.md",
     "LICENSE"
   ],
@@ -48,7 +48,7 @@
     "undo",
     "revsets"
   ],
-  "author": "",
+  "author": "John Henry",
   "license": "MIT",
   "repository": {
     "type": "git",
