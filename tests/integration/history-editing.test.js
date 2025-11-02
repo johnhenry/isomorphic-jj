@@ -68,15 +68,15 @@ describe('History Editing Operations (v0.2)', () => {
     });
   });
 
-  describe('restore', () => {
-    it('should restore abandoned change', async () => {
+  describe('unabandon', () => {
+    it('should un-abandon an abandoned change', async () => {
       const change = await jj.new({ message: 'Feature' });
       await jj.abandon({ changeId: change.changeId });
 
       const abandoned = await jj.graph.getChange(change.changeId);
       expect(abandoned.abandoned).toBe(true);
 
-      await jj.restore({ changeId: change.changeId });
+      await jj.unabandon({ changeId: change.changeId });
 
       const restored = await jj.graph.getChange(change.changeId);
       expect(restored.abandoned).toBe(false);

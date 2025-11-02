@@ -27,7 +27,7 @@ This roadmap outlines feature development organized by functional area, showing 
 - `split()`: Split a change into multiple changes
 - `move()`: Move changes to different parents (rebase)
 - `abandon()`: Mark changes as abandoned (hide from log)
-- `restore()`: Restore abandoned changes
+- `unabandon()`: Un-abandon changes (restore from abandoned state)
 - File operations: `write()`, `read()`, `move()`, `remove()`, `listFiles()`
 
 #### ✅ Git Backend Integration

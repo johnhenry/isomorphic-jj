@@ -374,7 +374,10 @@ export interface DescribeArgs {
  */
 export interface NewArgs {
   message?: string;
+  parents?: ChangeID | ChangeID[];
   from?: Revset;
+  insertAfter?: ChangeID;
+  insertBefore?: ChangeID;
 }
 
 /**
@@ -382,6 +385,15 @@ export interface NewArgs {
  */
 export interface AmendArgs {
   message?: string;
+}
+
+/**
+ * Commit change arguments (describe + new)
+ */
+export interface CommitArgs {
+  message?: string;
+  author?: User;
+  nextMessage?: string;
 }
 
 /**
@@ -395,8 +407,9 @@ export interface EditArgs {
  * Squash changes arguments
  */
 export interface SquashArgs {
-  source: ChangeID;
-  dest: ChangeID;
+  source?: ChangeID;
+  dest?: ChangeID;
+  into?: ChangeID;
 }
 
 /**
@@ -406,6 +419,7 @@ export interface SplitArgs {
   changeId: ChangeID;
   description1: string;
   description2: string;
+  paths?: string[];
 }
 
 /**
@@ -421,13 +435,13 @@ export interface MoveChangeArgs {
  * Abandon change arguments
  */
 export interface AbandonArgs {
-  changeId: ChangeID;
+  changeId?: ChangeID;
 }
 
 /**
- * Restore change arguments
+ * Un-abandon change arguments
  */
-export interface RestoreArgs {
+export interface UnabandonArgs {
   changeId: ChangeID;
 }
 
@@ -650,6 +664,7 @@ export interface JJ {
   describe(args?: DescribeArgs): Promise<Change>;
   new(args?: NewArgs): Promise<Change>;
   amend(args?: AmendArgs): Promise<Change>;
+  commit(args?: CommitArgs): Promise<Change>;
   edit(args: EditArgs): Promise<void>;
   status(): Promise<Status>;
   stats(): Promise<RepositoryStats>;
@@ -658,7 +673,7 @@ export interface JJ {
   squash(args: SquashArgs): Promise<void>;
   split(args: SplitArgs): Promise<SplitResult>;
   abandon(args: AbandonArgs): Promise<void>;
-  restore(args: RestoreArgs): Promise<void>;
+  unabandon(args: UnabandonArgs): Promise<void>;
 
   // Queries
   log(opts?: LogOptions): Promise<LogEntry[]>;

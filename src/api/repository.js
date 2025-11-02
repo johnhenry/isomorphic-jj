@@ -1139,10 +1139,14 @@ export async function createJJ(options) {
     },
     
     /**
-     * Create a new change on top of working copy
+     * Create a new change
      *
      * @param {Object} [args={}] - Arguments
      * @param {string} [args.message] - Initial description for the new change
+     * @param {string|string[]} [args.parents] - Parent change ID(s), supports merge commits
+     * @param {string} [args.from] - Single parent (backward compat)
+     * @param {string} [args.insertAfter] - Insert after this change
+     * @param {string} [args.insertBefore] - Insert before this change
      * @returns {Promise<Object>} The new change object including changeId, description, parents, author, and timestamp
      */
     async new(args = {}) {
@@ -1153,14 +1157,31 @@ export async function createJJ(options) {
       // Snapshot filesystem BEFORE operation (for undo)
       const fileSnapshot = await snapshotFilesystem();
 
-      const parentChangeId = workingCopy.getCurrentChangeId();
+      // Determine parents
+      let parents;
+      if (args.insertAfter) {
+        parents = [args.insertAfter];
+      } else if (args.insertBefore) {
+        const targetChange = await graph.getChange(args.insertBefore);
+        if (!targetChange) {
+          throw new JJError('CHANGE_NOT_FOUND', `Change ${args.insertBefore} not found`);
+        }
+        parents = targetChange.parents;
+      } else if (args.parents) {
+        parents = Array.isArray(args.parents) ? args.parents : [args.parents];
+      } else if (args.from) {
+        parents = [args.from];
+      } else {
+        parents = [workingCopy.getCurrentChangeId()];
+      }
+
       const newChangeId = generateChangeId();
       const user = userConfig.getUser();
 
       const newChange = {
         changeId: newChangeId,
         commitId: '0000000000000000000000000000000000000000', // Placeholder
-        parents: [parentChangeId],
+        parents: parents,
         tree: '0000000000000000000000000000000000000000', // Empty tree
         author: {
           name: user.name,
@@ -1180,13 +1201,21 @@ export async function createJJ(options) {
       await dispatchEventAsync(jj, 'change:creating', {
         operation: 'new',
         changeId: newChangeId,
-        parentChangeId,
+        parents: parents,
         change: newChange,
         message: args.message,
         timestamp: new Date().toISOString(),
       });
 
       await graph.addChange(newChange);  // Middleware will sync to Git
+
+      // Handle insertBefore: rebase target to have new change as parent
+      if (args.insertBefore) {
+        const targetChange = await graph.getChange(args.insertBefore);
+        targetChange.parents = [newChangeId];
+        await graph.updateChange(targetChange);
+      }
+
       await workingCopy.setCurrentChange(newChangeId);
 
       // Record operation with filesystem snapshot
@@ -1212,7 +1241,7 @@ export async function createJJ(options) {
       await dispatchEventAsync(jj, 'change:created', {
         operation: 'new',
         changeId: newChangeId,
-        parentChangeId,
+        parents: parents,
         change: newChange,
         timestamp: new Date().toISOString(),
       }, { cancelable: false });
@@ -1449,6 +1478,19 @@ export async function createJJ(options) {
     async amend(args = {}) {
       // Amend is essentially the same as describe in JJ
       return await this.describe(args);
+    },
+
+    /**
+     * Convenience: describe current change and create new one (jj commit)
+     *
+     * @param {Object} [args={}] - Arguments
+     * @param {string} [args.message] - Description for current change
+     * @param {Object} [args.author] - Author for current change
+     * @returns {Promise<Object>} The newly created change
+     */
+    async commit(args = {}) {
+      await this.describe({ message: args.message, author: args.author });
+      return await this.new({ message: args.nextMessage });
     },
 
     /**
@@ -1762,35 +1804,57 @@ export async function createJJ(options) {
     
     /**
      * Squash source change into destination change
-     * 
+     *
      * @param {Object} args - Arguments
-     * @param {string} args.source - Source change ID to squash
-     * @param {string} args.dest - Destination change ID
+     * @param {string} [args.source] - Source change ID to squash (defaults to @ - working copy)
+     * @param {string} [args.dest] - Destination change ID (if source is @, defaults to parent)
+     * @param {string} [args.into] - Alias for dest (matches JJ CLI)
      */
-    async squash(args) {
+    async squash(args = {}) {
       await graph.load();
       await workingCopy.load();
       await userConfig.load();
 
-      const sourceChange = await graph.getChange(args.source);
-      const destChange = await graph.getChange(args.dest);
+      // Support 'into' as alias for 'dest' (matches JJ CLI)
+      const dest = args.into || args.dest;
+
+      // Default source to @ (working copy) if not provided
+      const source = args.source || workingCopy.getCurrentChangeId();
+
+      // If no dest specified and source is @, default dest to parent of @
+      let destChangeId = dest;
+      if (!destChangeId && source === workingCopy.getCurrentChangeId()) {
+        const workingCopyChange = await graph.getChange(source);
+        if (workingCopyChange && workingCopyChange.parents && workingCopyChange.parents.length > 0) {
+          destChangeId = workingCopyChange.parents[0];
+        } else {
+          throw new JJError('INVALID_ARGUMENTS', 'Cannot squash working copy: no parent found');
+        }
+      }
+
+      if (!destChangeId) {
+        throw new JJError('INVALID_ARGUMENTS', 'Destination (dest or into) is required');
+      }
+
+      const sourceChange = await graph.getChange(source);
+      const destChange = await graph.getChange(destChangeId);
 
       if (!sourceChange) {
-        throw new JJError('CHANGE_NOT_FOUND', `Source change ${args.source} not found`);
+        throw new JJError('CHANGE_NOT_FOUND', `Source change ${source} not found`);
       }
 
       if (!destChange) {
-        throw new JJError('CHANGE_NOT_FOUND', `Destination change ${args.dest} not found`);
+        throw new JJError('CHANGE_NOT_FOUND', `Destination change ${destChangeId} not found`);
       }
 
       const currentWorkingCopyId = workingCopy.getCurrentChangeId();
-      const isSquashingWorkingCopy = args.source === currentWorkingCopyId;
+      const isSquashingWorkingCopy = source === currentWorkingCopyId;
 
       // Dispatch change:squashing event (preventable)
       await dispatchEventAsync(jj, 'change:squashing', {
         operation: 'squash',
-        sourceChangeId: args.source,
-        destChangeId: args.dest,
+        sourceChangeId: source,
+        destChangeId: destChangeId,
         sourceChange,
         destChange,
         timestamp: new Date().toISOString(),
@@ -1801,7 +1865,7 @@ export async function createJJ(options) {
       await graph.updateChange(sourceChange);
 
       // Update description of dest to indicate squash (middleware will sync to Git)
-      destChange.description += `\n\n(squashed from ${args.source.slice(0, 8)})`;
+      destChange.description += `\n\n(squashed from ${source.slice(0, 8)})`;
       await graph.updateChange(destChange);
 
       let newWorkingCopyId = currentWorkingCopyId;
@@ -1813,7 +1877,7 @@ export async function createJJ(options) {
         const newChange = {
           changeId: newChangeId,
           commitId: '0000000000000000000000000000000000000000',
-          parents: [args.dest],
+          parents: [destChangeId],
           tree: '0000000000000000000000000000000000000000',
           author: {
             name: user.name,
@@ -1839,12 +1903,12 @@ export async function createJJ(options) {
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: await getUserOplogInfo(),
-        description: `squash ${args.source.slice(0, 8)} into ${args.dest.slice(0, 8)}`,
+        description: `squash ${source.slice(0, 8)} into ${destChangeId.slice(0, 8)}`,
         parents: [],
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: [args.dest],
+          heads: [destChangeId],
           workingCopy: newWorkingCopyId,
         },
       });
@@ -1852,8 +1916,8 @@ export async function createJJ(options) {
       // Dispatch change:squashed event (informational)
       await dispatchEventAsync(jj, 'change:squashed', {
         operation: 'squash',
-        sourceChangeId: args.source,
-        destChangeId: args.dest,
+        sourceChangeId: source,
+        destChangeId: destChangeId,
         sourceChange,
         destChange,
         timestamp: new Date().toISOString(),
@@ -1865,25 +1929,29 @@ export async function createJJ(options) {
     /**
      * Abandon a change
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.changeId - Change ID to abandon
+     * @param {Object} [args] - Arguments
+     * @param {string} [args.changeId] - Change ID to abandon (defaults to @ - working copy)
      * @returns {Promise<Object>} The abandoned change object including changeId, description, and abandoned flag
      */
-    async abandon(args) {
+    async abandon(args = {}) {
       await graph.load();
+      await workingCopy.load();
       await userConfig.load();
 
-      const change = await graph.getChange(args.changeId);
+      // Default to @ (working copy) if changeId not provided
+      const changeId = args.changeId || workingCopy.getCurrentChangeId();
+
+      const change = await graph.getChange(changeId);
       const user = userConfig.getUser();
 
       if (!change) {
-        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
       }
 
       // Dispatch change:abandoning event (preventable)
       await dispatchEventAsync(jj, 'change:abandoning', {
         operation: 'abandon',
-        changeId: args.changeId,
+        changeId: changeId,
         change,
         timestamp: new Date().toISOString(),
       });
@@ -1895,7 +1963,7 @@ export async function createJJ(options) {
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: { name: user.name, email: user.email, hostname: 'localhost' },
-        description: `abandon change ${args.changeId.slice(0, 8)}`,
+        description: `abandon change ${changeId.slice(0, 8)}`,
         parents: [],
         view: {
           bookmarks: {},
@@ -1908,7 +1976,7 @@ export async function createJJ(options) {
       // Dispatch change:abandoned event (informational)
       await dispatchEventAsync(jj, 'change:abandoned', {
         operation: 'abandon',
-        changeId: args.changeId,
+        changeId: changeId,
         change,
         timestamp: new Date().toISOString(),
       }, { cancelable: false });
@@ -1917,13 +1985,13 @@ export async function createJJ(options) {
     },
     
     /**
-     * Restore an abandoned change
+     * Un-abandon a change (restore from abandoned state)
      *
      * @param {Object} args - Arguments
-     * @param {string} args.changeId - Change ID to restore
-     * @returns {Promise<Object>} The restored change object including changeId, description, and abandoned flag (now false)
+     * @param {string} args.changeId - Change ID to un-abandon
+     * @returns {Promise<Object>} The un-abandoned change object including changeId, description, and abandoned flag (now false)
      */
-    async restore(args) {
+    async unabandon(args) {
       await graph.load();
       await userConfig.load();
 
@@ -1934,9 +2002,9 @@ export async function createJJ(options) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
       }
 
-      // Dispatch change:restoring event (preventable)
-      await dispatchEventAsync(jj, 'change:restoring', {
-        operation: 'restore',
+      // Dispatch change:unabandoning event (preventable)
+      await dispatchEventAsync(jj, 'change:unabandoning', {
+        operation: 'unabandon',
         changeId: args.changeId,
         change,
         timestamp: new Date().toISOString(),
@@ -1949,7 +2017,7 @@ export async function createJJ(options) {
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: { name: user.name, email: user.email, hostname: 'localhost' },
-        description: `restore change ${args.changeId.slice(0, 8)}`,
+        description: `unabandon change ${args.changeId.slice(0, 8)}`,
         parents: [],
         view: {
           bookmarks: {},
@@ -1959,9 +2027,9 @@ export async function createJJ(options) {
         },
       });
 
-      // Dispatch change:restored event (informational)
-      await dispatchEventAsync(jj, 'change:restored', {
-        operation: 'restore',
+      // Dispatch change:unabandoned event (informational)
+      await dispatchEventAsync(jj, 'change:unabandoned', {
+        operation: 'unabandon',
         changeId: args.changeId,
         change,
         timestamp: new Date().toISOString(),
@@ -1972,11 +2040,12 @@ export async function createJJ(options) {
     
     /**
      * Split a change into multiple changes (simplified v0.2 implementation)
-     * 
+     *
      * @param {Object} args - Arguments
      * @param {string} args.changeId - Change ID to split
      * @param {string} args.description1 - Description for first part
      * @param {string} args.description2 - Description for second part
+     * @param {string[]} [args.paths] - Specific paths to include in first split (full implementation planned for future)
      */
     async split(args) {
       await graph.load();

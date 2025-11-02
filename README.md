@@ -211,7 +211,7 @@ await jj.split({
 await jj.abandon({ changeId: 'experimental' });
 
 // Restore abandoned changes
-await jj.restore({ changeId: 'experimental' });
+await jj.unabandon({ changeId: 'experimental' });
 
 // Move changes to different parent
 await jj.move({ from: 'feature', to: 'updated-main', paths: ['file.js'] });
@@ -644,8 +644,8 @@ const jj: JJ = await createJJ(options: CreateJJOptions);
 
 - **Repository**: `init()`, `status()`, `stats()`
 - **Files**: `write()`, `read()`, `cat()`, `move()`, `remove()`, `listFiles()`
-- **Changes**: `describe()`, `new()`, `amend()`, `edit()`, `show()`
-- **History**: `log()`, `obslog()`, `squash()`, `split()`, `abandon()`, `restore()`
+- **Changes**: `describe()`, `new()`, `amend()`, `commit()`, `edit()`, `show()`
+- **History**: `log()`, `obslog()`, `squash()`, `split()`, `abandon()`, `unabandon()`
 - **Operations**: `undo()`, `operations.list()`, `operations.at()`
 - **Bookmarks**: `bookmark.list()`, `bookmark.set()`, `bookmark.move()`, `bookmark.delete()`
 - **Git**: `git.init()`, `git.fetch()`, `git.push()`, `git.import()`, `git.export()`
@@ -745,7 +745,7 @@ repo/
 
 **Completed:**
 - ✅ v0.1: Core JJ experience (stable IDs, undo, bookmarks, revsets)
-- ✅ v0.2: History editing (squash, split, abandon, restore, move)
+- ✅ v0.2: History editing (squash, split, abandon, unabandon, move)
 - ✅ v0.3: Git backend, conflicts, workspaces, browser support
 - ✅ v0.4: Shallow clones, advanced revsets, event system
 - ✅ v0.5: Custom merge drivers, enhanced revsets (time-based, graph analytics), conflict resolution enhancements

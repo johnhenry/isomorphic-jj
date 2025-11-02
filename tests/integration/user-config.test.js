@@ -173,7 +173,7 @@ describe('User Configuration', () => {
     });
   });
 
-  describe('abandon() and restore() with user configuration', () => {
+  describe('abandon() and unabandon() with user configuration', () => {
     it('should use configured user for abandon operations', async () => {
       jj = await createJJ({
         fs,
@@ -199,7 +199,7 @@ describe('User Configuration', () => {
       expect(abandonOp.user.email).toBe('grace@example.com');
     });
 
-    it('should use configured user for restore operations', async () => {
+    it('should use configured user for unabandon operations', async () => {
       jj = await createJJ({
         fs,
         dir: '/test/repo',
@@ -217,13 +217,13 @@ describe('User Configuration', () => {
 
       await jj.new({ message: 'New' });
       await jj.abandon({ changeId });
-      await jj.restore({ changeId });
+      await jj.unabandon({ changeId });
 
       const ops = await jj.oplog.list();
-      const restoreOp = ops.find((op) => op.description.includes('restore'));
+      const unabandonOp = ops.find((op) => op.description.includes('unabandon'));
 
-      expect(restoreOp.user.name).toBe('Henry Ford');
-      expect(restoreOp.user.email).toBe('henry@motors.com');
+      expect(unabandonOp.user.name).toBe('Henry Ford');
+      expect(unabandonOp.user.email).toBe('henry@motors.com');
     });
   });
 
