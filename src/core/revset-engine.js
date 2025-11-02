@@ -34,6 +34,34 @@ export class RevsetEngine {
       return [this.workingCopy.getCurrentChangeId()];
     }
 
+    // @- operator (parent of working copy) - handles chaining like @-- for grandparents
+    const atParentsMatch = trimmed.match(/^@(-+)$/);
+    if (atParentsMatch) {
+      const depth = atParentsMatch[1].length; // Count number of '-' characters
+      const workingCopyId = this.workingCopy.getCurrentChangeId();
+
+      let currentSet = [workingCopyId];
+      for (let i = 0; i < depth; i++) {
+        currentSet = await this.getParentsOfSet(currentSet);
+        if (currentSet.length === 0) break; // Stop if we reach root
+      }
+      return currentSet;
+    }
+
+    // @+ operator (children of working copy)
+    const atChildrenMatch = trimmed.match(/^@(\++)$/);
+    if (atChildrenMatch) {
+      const depth = atChildrenMatch[1].length; // Count number of '+' characters
+      const workingCopyId = this.workingCopy.getCurrentChangeId();
+
+      let currentSet = [workingCopyId];
+      for (let i = 0; i < depth; i++) {
+        currentSet = await this.getChildrenOfSet(currentSet);
+        if (currentSet.length === 0) break; // Stop if we reach leaves
+      }
+      return currentSet;
+    }
+
     // all() - all changes
     if (trimmed === 'all()') {
       await this.graph.load();
@@ -192,6 +220,16 @@ export class RevsetEngine {
       return await this.filterTags(pattern);
     }
 
+    // v1.0: bookmark(name) - single bookmark by exact name
+    const bookmarkMatch = trimmed.match(/^bookmark\((.+?)\)$/);
+    if (bookmarkMatch) {
+      const name = bookmarkMatch[1].replace(/['"]/g, '');
+      if (!this.bookmarkStore) return [];
+      await this.bookmarkStore.load();
+      const target = await this.bookmarkStore.get(name);
+      return target ? [target] : [];
+    }
+
     // v0.4: bookmarks([pattern]) - bookmark targets
     const bookmarksMatch = trimmed.match(/^bookmarks\((?:(.+?))?\)$/);
     if (bookmarksMatch || trimmed === 'bookmarks()') {
@@ -313,7 +351,7 @@ export class RevsetEngine {
 
     throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
       expression,
-      suggestion: 'Use @, all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
+      suggestion: 'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
     });
   }
 

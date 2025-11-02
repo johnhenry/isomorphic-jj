@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-371%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-447%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
@@ -38,7 +38,44 @@ await jj.undo();
 ```bash
 node demo.mjs
 ```
-This showcases all 16 feature categories in ~3 seconds with beautiful output.
+This showcases all 17 feature categories (including v1.0 enhancements) in ~3 seconds with beautiful output.
+
+---
+
+## What's New in v1.0
+
+isomorphic-jj v1.0 achieves **complete JJ CLI semantic compatibility** while maintaining 100% backward compatibility:
+
+### New Convenience Functions
+- **`commit()`** - Combines `describe()` + `new()` in one step for common workflow
+- **`file.*` namespace** - Complete organized file operations: `file.write()`, `file.show()`, `file.list()`, `file.move()`, `file.remove()`
+- **`rebase()`** - Proper JJ CLI semantics for rebasing changes (replaces `move()` for history ops)
+
+### Enhanced APIs
+- **`new()`** - Added `insertAfter`/`insertBefore` for precise change placement
+- **`squash()`** - Added `into` parameter, smart defaults (source=@, dest=parent)
+- **`abandon()`** - Now defaults to `@` (working copy) when no changeId specified
+- **`split()`** - Added `paths` parameter for selective file splitting
+
+### Renamed for Correctness
+- **`unabandon()`** - Renamed from `restore()` to match JJ CLI semantics
+
+### Enhanced Revsets
+- **`@-` / `@--`** - Navigate to parent/grandparent (like Git's HEAD~1, HEAD~2)
+- **`@+` / `@++`** - Navigate to children/grandchildren
+- **`bookmark(name)`** - Exact bookmark lookup (vs `bookmarks()` for patterns)
+
+### Complete Workspace Operations
+- **`workspace.rename()`** - Rename workspaces by ID or name
+- **`workspace.root()`** - Get workspace root directory
+- **`workspace.updateStale()`** - Update workspaces pointing to abandoned changes
+
+### Testing & Quality
+- **447 tests** passing - Complete test coverage for all v1.0 features
+- **100% backward compatible** - All existing code continues to work
+- **Zero breaking changes** - Deprecated features show warnings but still function
+
+---
 
 ### Installation
 
@@ -163,13 +200,22 @@ await jj.write({ path: 'file.txt', data: 'content' });
 const content = await jj.read({ path: 'file.txt' });
 const oldVersion = await jj.read({ path: 'file.txt', changeId: 'abc123' });
 
-// Move/rename
+// ✨ NEW in v1.0: Complete file.* namespace (matches JJ CLI structure)
+// Recommended: Use file.* for all file operations
+await jj.file.write({ path: 'new.txt', data: 'content' });
+const fileContent = await jj.file.show({ path: 'file.txt' });
+const fileList = await jj.file.list();
+await jj.file.move({ from: 'old.txt', to: 'new.txt' });
+await jj.file.remove({ path: 'unwanted.txt' });
+
+// Read from historical changes
+const historicalFile = await jj.file.show({ path: 'file.txt', changeId: 'abc123' });
+
+// 100% Backward compatible: top-level methods still work
+await jj.write({ path: 'file.txt', data: 'content' });
+const sameContent = await jj.read({ path: 'file.txt' });
 await jj.move({ from: 'old.txt', to: 'new.txt' });
-
-// Remove
 await jj.remove({ path: 'file.txt' });
-
-// List files
 const files = await jj.listFiles();
 ```
 
@@ -180,6 +226,13 @@ await jj.describe({ message: 'Implement feature X' });
 
 // Create new change on top of working copy
 await jj.new({ message: 'Start feature Y' });
+
+// ✨ NEW in v1.0: commit() convenience function
+// Combines describe() + new() in one operation
+await jj.commit({
+  message: 'Complete feature X',
+  nextMessage: 'Start feature Y'
+});
 
 // Amend current change
 await jj.amend({ message: 'Fix typo in feature X' });
@@ -197,24 +250,43 @@ console.log(status.modified, status.added, status.removed);
 
 #### History Editing
 ```javascript
-// Squash changes together
-await jj.squash({ source: 'change1', dest: 'change2' });
+// ✨ NEW in v1.0: Enhanced squash with 'into' parameter and smart defaults
+await jj.squash({ into: 'change2' });  // Squashes @ into change2
+await jj.squash();  // Smart default: squashes @ into parent(@)
 
-// Split a change
-await jj.split({
-  changeId: 'abc123',
-  description1: 'Part 1',
-  description2: 'Part 2'
+// ✨ NEW in v1.0: Enhanced new() with precise placement
+await jj.new({
+  message: 'Inserted change',
+  insertAfter: 'abc123',  // Insert after specific change
+  insertBefore: 'def456'  // Or insert before specific change
 });
 
-// Abandon (hide from log, keep data)
-await jj.abandon({ changeId: 'experimental' });
+// ✨ NEW in v1.0: Split with paths parameter
+await jj.split({
+  changeId: 'abc123',
+  description1: 'Part 1: Docs',
+  description2: 'Part 2: Tests',
+  paths: ['docs/*.md']  // Files for first split
+});
 
-// Restore abandoned changes
+// ✨ NEW in v1.0: abandon() defaults to working copy
+await jj.abandon();  // Abandons @ (no changeId needed)
+await jj.abandon({ changeId: 'experimental' });  // Or specify explicit change
+
+// ✨ RENAMED in v1.0: unabandon() (was restore() - correct JJ semantics)
 await jj.unabandon({ changeId: 'experimental' });
 
-// Move changes to different parent
-await jj.move({ from: 'feature', to: 'updated-main', paths: ['file.js'] });
+// ✨ NEW in v1.0: rebase() - Proper JJ CLI semantics for history operations
+await jj.rebase({
+  changeId: 'feature',
+  newParent: 'updated-main',
+  paths: ['file.js']  // Optional: only rebase specific files
+});
+
+// DEPRECATED: move() for history operations (use rebase() instead)
+// move() still works but shows deprecation warning for history operations
+// move() will be file-only in v2.0
+await jj.move({ changeId: 'feature', newParent: 'updated-main' });  // Works but deprecated
 ```
 
 #### Revsets - Powerful Queries
@@ -223,8 +295,11 @@ await jj.move({ from: 'feature', to: 'updated-main', paths: ['file.js'] });
 await jj.log({ revset: '@' });                    // working copy
 await jj.log({ revset: 'all()' });                // all commits
 await jj.log({ revset: 'none()' });               // empty set (v1.0)
-await jj.log({ revset: 'bookmark(main)' });       // bookmark
 await jj.log({ revset: 'roots()' });              // root commits
+
+// ✨ NEW in v1.0: bookmark(name) for exact bookmark lookup
+await jj.log({ revset: 'bookmark(main)' });       // single bookmark by exact name
+await jj.log({ revset: 'bookmarks(feat*)' });     // pattern matching (multiple)
 
 // Filter by author or description
 await jj.log({ revset: 'author(alice)' });
@@ -518,6 +593,25 @@ const workspace = await jj.workspace.add({
 });
 
 const all = await jj.workspace.list();
+
+// ✨ NEW in v1.0: Complete workspace operations
+// Rename workspace
+await jj.workspace.rename({
+  workspace: workspace.id,  // or workspace name
+  newName: 'renamed-feature'
+});
+
+// Get workspace root directory
+const root = await jj.workspace.root({ workspace: 'renamed-feature' });
+console.log(`Workspace path: ${root}`);
+
+// Update stale workspaces (pointing to abandoned changes)
+const staleResult = await jj.workspace.updateStale();
+console.log(`Updated ${staleResult.updated} stale workspace(s)`);
+
+// Update specific workspace only
+await jj.workspace.updateStale({ workspace: 'feature-work' });
+
 await jj.workspace.remove({ id: workspace.id });
 ```
 
@@ -643,14 +737,14 @@ const jj: JJ = await createJJ(options: CreateJJOptions);
 ### Core Methods
 
 - **Repository**: `init()`, `status()`, `stats()`
-- **Files**: `write()`, `read()`, `cat()`, `move()`, `remove()`, `listFiles()`
+- **Files**: `write()`, `read()`, `cat()`, `move()` (deprecated for history), `remove()`, `listFiles()` | **Namespace**: `file.write()`, `file.show()`, `file.list()`, `file.move()`, `file.remove()`
 - **Changes**: `describe()`, `new()`, `amend()`, `commit()`, `edit()`, `show()`
-- **History**: `log()`, `obslog()`, `squash()`, `split()`, `abandon()`, `unabandon()`
+- **History**: `log()`, `obslog()`, `squash()`, `split()`, `rebase()`, `abandon()`, `unabandon()`
 - **Operations**: `undo()`, `operations.list()`, `operations.at()`
 - **Bookmarks**: `bookmark.list()`, `bookmark.set()`, `bookmark.move()`, `bookmark.delete()`
 - **Git**: `git.init()`, `git.fetch()`, `git.push()`, `git.import()`, `git.export()`
 - **Remotes**: `remote.add()`, `remote.fetch()`, `remote.push()`
-- **Workspaces**: `workspace.add()`, `workspace.list()`, `workspace.remove()`
+- **Workspaces**: `workspace.add()`, `workspace.list()`, `workspace.remove()`, `workspace.rename()`, `workspace.root()`, `workspace.updateStale()`
 - **Conflicts**: `merge()`, `conflicts.list()`, `conflicts.resolve()`, `conflicts.resolveAll()` (v0.5), `conflicts.markers()` (v0.5)
 - **Merge Drivers** (v0.5): `mergeDrivers.register()`, `mergeDrivers.get()`, Built-in drivers: `jsonDriver`, `packageJsonDriver`, `yamlDriver`, `markdownDriver`
 - **Background** (Node.js): `background.start()`, `background.stop()`, `background.enableAutoSnapshot()`

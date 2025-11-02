@@ -432,6 +432,15 @@ export interface MoveChangeArgs {
 }
 
 /**
+ * Rebase change arguments (matches `jj rebase`)
+ */
+export interface RebaseArgs {
+  changeId: ChangeID;
+  newParent: ChangeID;
+  paths?: string[];
+}
+
+/**
  * Abandon change arguments
  */
 export interface AbandonArgs {
@@ -672,6 +681,7 @@ export interface JJ {
   // History editing
   squash(args: SquashArgs): Promise<void>;
   split(args: SplitArgs): Promise<SplitResult>;
+  rebase(args: RebaseArgs): Promise<Change>;
   abandon(args: AbandonArgs): Promise<void>;
   unabandon(args: UnabandonArgs): Promise<void>;
 
@@ -714,12 +724,24 @@ export interface JJ {
     push(args?: RemotePushArgs): Promise<void>;
   };
 
+  // File operations (matches JJ CLI file commands)
+  file: {
+    show(args: ReadArgs): Promise<string | Uint8Array>;
+    list(args?: ListFilesArgs): Promise<string[]>;
+    write(args: WriteArgs): Promise<WriteResult>;
+    move(args: MoveFileArgs): Promise<MoveResult>;
+    remove(args: RemoveArgs): Promise<RemoveResult>;
+  };
+
   // Workspaces
   workspace: {
     add(args: WorkspaceAddArgs): Promise<Workspace>;
     list(): Promise<Workspace[]>;
     remove(args: WorkspaceRemoveArgs): Promise<void>;
     get(args: { id: string }): Promise<Workspace | null>;
+    rename(args: { workspace: string; newName: string }): Promise<Workspace>;
+    root(args?: { workspace?: string }): Promise<string>;
+    updateStale(args?: { workspace?: string }): Promise<{ updated: number; workspaces: Array<{ id: string; name: string }> }>;
   };
 
   // Background operations (only available in Node.js)

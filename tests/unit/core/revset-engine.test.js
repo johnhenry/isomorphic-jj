@@ -408,4 +408,129 @@ describe('RevsetEngine', () => {
       });
     });
   });
+
+  describe('@ operators (v1.0)', () => {
+    beforeEach(async () => {
+      // Create a chain: 1 <- 2 <- 3 <- 4(working copy)
+      await graph.addChange({
+        changeId: tid(1),
+        parents: [],
+        description: 'Root',
+      });
+      await graph.addChange({
+        changeId: tid(2),
+        parents: [tid(1)],
+        description: 'Child 1',
+      });
+      await graph.addChange({
+        changeId: tid(3),
+        parents: [tid(2)],
+        description: 'Child 2',
+      });
+      await graph.addChange({
+        changeId: tid(4),
+        parents: [tid(3)],
+        description: 'Working copy',
+      });
+      await workingCopy.setCurrentChange(tid(4));
+    });
+
+    describe('@- (parent operator)', () => {
+      it('should resolve @- to parent of working copy', async () => {
+        const result = await revset.evaluate('@-');
+        expect(result).toEqual([tid(3)]);
+      });
+
+      it('should resolve @-- to grandparent of working copy', async () => {
+        const result = await revset.evaluate('@--');
+        expect(result).toEqual([tid(2)]);
+      });
+
+      it('should resolve @--- to great-grandparent', async () => {
+        const result = await revset.evaluate('@---');
+        expect(result).toEqual([tid(1)]);
+      });
+
+      it('should return empty array when reaching root', async () => {
+        const result = await revset.evaluate('@----');
+        expect(result).toEqual([]);
+      });
+    });
+
+    describe('@+ (children operator)', () => {
+      beforeEach(async () => {
+        // Add children to working copy
+        await graph.addChange({
+          changeId: tid(5),
+          parents: [tid(4)],
+          description: 'Child of @',
+        });
+        await graph.addChange({
+          changeId: tid(6),
+          parents: [tid(5)],
+          description: 'Grandchild of @',
+        });
+      });
+
+      it('should resolve @+ to children of working copy', async () => {
+        const result = await revset.evaluate('@+');
+        expect(result).toEqual([tid(5)]);
+      });
+
+      it('should resolve @++ to grandchildren of working copy', async () => {
+        const result = await revset.evaluate('@++');
+        expect(result).toEqual([tid(6)]);
+      });
+
+      it('should return empty array when no children', async () => {
+        const result = await revset.evaluate('@+++');
+        expect(result).toEqual([]);
+      });
+    });
+  });
+
+  describe('bookmark(name) (v1.0)', () => {
+    let bookmarkStore;
+
+    beforeEach(async () => {
+      // Create mock bookmark store
+      const { BookmarkStore } = await import('../../../src/core/bookmark-store.js');
+      bookmarkStore = new BookmarkStore(storage);
+      await bookmarkStore.init();
+
+      // Add a test bookmark
+      await bookmarkStore.set('main', tid(5));
+      await bookmarkStore.set('feature', tid(10));
+
+      // Create revset engine with bookmark store
+      revset = new RevsetEngine(graph, workingCopy, null, bookmarkStore);
+    });
+
+    it('should resolve bookmark(name) to bookmark target', async () => {
+      const result = await revset.evaluate('bookmark(main)');
+      expect(result).toEqual([tid(5)]);
+    });
+
+    it('should resolve bookmark with different name', async () => {
+      const result = await revset.evaluate('bookmark(feature)');
+      expect(result).toEqual([tid(10)]);
+    });
+
+    it('should return empty array for non-existent bookmark', async () => {
+      const result = await revset.evaluate('bookmark(nonexistent)');
+      expect(result).toEqual([]);
+    });
+
+    it('should handle quoted bookmark names', async () => {
+      await bookmarkStore.set('with-dash', tid(15));
+      const result = await revset.evaluate('bookmark("with-dash")');
+      expect(result).toEqual([tid(15)]);
+    });
+
+    it('should return empty array when no bookmark store', async () => {
+      revset = new RevsetEngine(graph, workingCopy, null, null);
+      const result = await revset.evaluate('bookmark(main)');
+      expect(result).toEqual([]);
+    });
+  });
 });

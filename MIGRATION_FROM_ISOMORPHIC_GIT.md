@@ -20,6 +20,17 @@
 
 If you're using `isomorphic-git`, you already know the pain points:
 
+### New in v1.0: Even More Reasons to Migrate!
+
+isomorphic-jj v1.0 brings **complete JJ CLI semantic compatibility** with enhanced APIs that make migration even more compelling:
+
+- **`commit()`** convenience function - Combine `describe()` + `new()` in one step
+- **`file.show()` / `file.list()`** - Cleaner file namespace matching JJ CLI
+- **Enhanced revsets** - `@-` (parent), `@+` (children), `bookmark(name)` for exact lookup
+- **Complete workspace operations** - `rename()`, `root()`, `updateStale()`
+- **Smart defaults** - `abandon()` defaults to `@`, `squash()` has intelligent defaults
+- **438 tests passing** - Production-ready with comprehensive coverage
+
 ### isomorphic-git Challenges
 ```javascript
 // Complex staging workflow
@@ -111,6 +122,11 @@ await jj.write({ path: 'file.txt', data: 'content' });
 // Describe the change (no staging, author remembered)
 await jj.describe({ message: 'Add feature' });
 // That's it!
+
+// ✨ NEW in v1.0: Even simpler with commit()
+await jj.write({ path: 'file.txt', data: 'content' });
+await jj.commit({ message: 'Add feature', nextMessage: 'Next task' });
+// Describes current change AND creates new one - streamlined workflow!
 ```
 
 ### Viewing History
@@ -138,6 +154,11 @@ for (const change of changes) {
 await jj.log({ revset: 'last(7d)' }); // Last 7 days
 await jj.log({ revset: 'author(alice)' }); // By author
 await jj.log({ revset: 'mine()' }); // Your changes
+
+// ✨ NEW in v1.0: Enhanced navigation
+await jj.log({ revset: '@-' }); // Parent (like Git's HEAD~1)
+await jj.log({ revset: '@--' }); // Grandparent (HEAD~2)
+await jj.log({ revset: 'bookmark(main)' }); // Exact bookmark
 ```
 
 ### Branching

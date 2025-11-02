@@ -743,7 +743,7 @@ export async function createJJ(options) {
     async move(args) {
       if (!args || typeof args !== 'object') {
         throw new JJError('INVALID_ARGUMENT', 'Missing or invalid arguments', {
-          suggestion: 'Provide { from, to } for file operations or { changeId, newParent } for history operations',
+          suggestion: 'Use file.move({ from, to }) for files or rebase({ changeId, newParent }) for history',
         });
       }
 
@@ -1927,6 +1927,32 @@ export async function createJJ(options) {
     },
     
     /**
+     * Rebase a change to a new parent (matches `jj rebase`)
+     *
+     * This is the proper JJ CLI semantic for moving changes in history.
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.changeId - Change ID to rebase (or use `from` for compatibility)
+     * @param {string} args.newParent - New parent change ID (or use `to` for compatibility)
+     * @param {Array<string>} [args.paths] - Optional: only rebase changes to specific paths
+     * @returns {Promise<Object>} Updated change object
+     *
+     * @example
+     * // Rebase a feature change onto updated main
+     * await jj.rebase({ changeId: 'abc123', newParent: 'def456' });
+     *
+     * // Rebase only specific file changes
+     * await jj.rebase({
+     *   changeId: 'abc123',
+     *   newParent: 'def456',
+     *   paths: ['src/feature.js']
+     * });
+     */
+    async rebase(args) {
+      return await this._moveChange(args);
+    },
+
+    /**
      * Abandon a change
      *
      * @param {Object} [args] - Arguments
@@ -2607,6 +2633,75 @@ export async function createJJ(options) {
     },
 
     /**
+     * File operations namespace - Matches JJ CLI file commands
+     */
+    file: {
+      /**
+       * Show file content (matches `jj file show`)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.path - File path to read
+       * @param {string} [args.changeId] - Change ID (defaults to working copy)
+       * @param {string} [args.encoding='utf-8'] - Encoding ('utf-8' or 'binary')
+       * @returns {Promise<string|Uint8Array>} File contents
+       */
+      async show(args) {
+        return await jj.read(args);
+      },
+
+      /**
+       * List files (matches `jj file list`)
+       *
+       * @param {Object} [args={}] - Arguments
+       * @param {string} [args.changeId] - Change ID (defaults to working copy)
+       * @returns {Promise<Array<string>>} Array of file paths
+       */
+      async list(args = {}) {
+        return await jj.listFiles(args);
+      },
+
+      /**
+       * Write file content (organized file operation)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.path - File path to write
+       * @param {string|Uint8Array} args.data - File content
+       * @returns {Promise<Object>} Write result with file info
+       */
+      async write(args) {
+        return await jj.write(args);
+      },
+
+      /**
+       * Move/rename file (organized file operation)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.from - Source path
+       * @param {string} args.to - Destination path
+       * @returns {Promise<Object>} Move result
+       */
+      async move(args) {
+        return await jj.move(args);
+      },
+
+      /**
+       * Remove file (organized file operation)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.path - File path to remove
+       * @returns {Promise<Object>} Remove result with file info
+       */
+      async remove(args) {
+        return await jj.remove(args);
+      },
+
+      // Future extensions:
+      // async track(args) { ... }     // Track files
+      // async untrack(args) { ... }   // Untrack files
+      // async chmod(args) { ... }     // Set executable bit
+    },
+
+    /**
      * Workspace API - Multiple working copies
      */
     workspace: {
@@ -2726,6 +2821,148 @@ export async function createJJ(options) {
           throw new JJError('WORKSPACE_NOT_FOUND', `Workspace ${id} not found`);
         }
         return workspace;
+      },
+
+      /**
+       * Rename a workspace (matches `jj workspace rename`)
+       *
+       * @param {Object} args - Rename arguments
+       * @param {string} args.workspace - Current workspace name/id
+       * @param {string} args.newName - New name for the workspace
+       * @returns {Promise<Object>} Updated workspace
+       */
+      async rename(args) {
+        if (!args || !args.workspace || !args.newName) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing workspace or newName');
+        }
+
+        await workspaces.load();
+        const workspace = workspaces.get(args.workspace);
+        if (!workspace) {
+          throw new JJError('WORKSPACE_NOT_FOUND', `Workspace ${args.workspace} not found`);
+        }
+
+        workspace.name = args.newName;
+        await workspaces.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `rename workspace ${args.workspace} to ${args.newName}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return workspace;
+      },
+
+      /**
+       * Get workspace root directory (matches `jj workspace root`)
+       *
+       * @param {Object} [args={}] - Arguments
+       * @param {string} [args.workspace] - Workspace name/id (defaults to current)
+       * @returns {Promise<string>} Root directory path
+       */
+      async root(args = {}) {
+        // If no workspace specified, return current repository root
+        if (!args.workspace) {
+          return dir;
+        }
+
+        await workspaces.load();
+
+        // Try to get by ID first, then by name
+        let workspace = workspaces.get(args.workspace);
+        if (!workspace) {
+          // Search by name
+          const allWorkspaces = workspaces.list();
+          workspace = allWorkspaces.find((ws) => ws.name === args.workspace);
+        }
+
+        if (!workspace) {
+          throw new JJError('WORKSPACE_NOT_FOUND', `Workspace ${args.workspace} not found`);
+        }
+
+        return workspace.path;
+      },
+
+      /**
+       * Update stale workspaces (matches `jj workspace update-stale`)
+       *
+       * @param {Object} [args={}] - Arguments
+       * @param {string} [args.workspace] - Specific workspace to update (defaults to all stale)
+       * @returns {Promise<Object>} Update result
+       */
+      async updateStale(args = {}) {
+        await workspaces.load();
+        await graph.load();
+
+        const allWorkspaces = workspaces.list();
+        const staleWorkspaces = [];
+
+        for (const ws of allWorkspaces) {
+          // Skip workspaces without a changeId - they're fresh/uninitialized, not stale
+          if (!ws.changeId) {
+            continue;
+          }
+
+          // Check if workspace's change still exists and is not abandoned
+          const change = await graph.getChange(ws.changeId);
+          if (!change || change.abandoned) {
+            staleWorkspaces.push(ws);
+          }
+        }
+
+        // If specific workspace requested, only update that one
+        const toUpdate = args.workspace
+          ? staleWorkspaces.filter((ws) => ws.id === args.workspace || ws.name === args.workspace)
+          : staleWorkspaces;
+
+        if (args.workspace && toUpdate.length === 0) {
+          // Look up the workspace to get its name for a better error message
+          let workspace = workspaces.get(args.workspace);
+          if (!workspace) {
+            const allWorkspaces = workspaces.list();
+            workspace = allWorkspaces.find((ws) => ws.name === args.workspace);
+          }
+          const workspaceName = workspace ? workspace.name : args.workspace;
+          throw new JJError('WORKSPACE_NOT_STALE', `Workspace ${workspaceName} is not stale`);
+        }
+
+        // Update each stale workspace to a valid change (use current working copy)
+        const currentChangeId = workingCopy.getCurrentChangeId();
+        for (const ws of toUpdate) {
+          ws.changeId = currentChangeId;
+        }
+
+        if (toUpdate.length > 0) {
+          await workspaces.save();
+
+          // Record operation
+          await oplog.recordOperation({
+            timestamp: new Date().toISOString(),
+            user: await getUserOplogInfo(),
+            description: `update ${toUpdate.length} stale workspace(s)`,
+            parents: [],
+            view: {
+              bookmarks: {},
+              remoteBookmarks: {},
+              heads: [],
+              workingCopy: currentChangeId,
+            },
+          });
+        }
+
+        return {
+          updated: toUpdate.length,
+          workspaces: toUpdate.map((ws) => ({ id: ws.id, name: ws.name })),
+        };
       },
     },
 
