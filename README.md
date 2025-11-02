@@ -34,6 +34,12 @@ await jj.undo();
 
 **Coming from isomorphic-git?** Read the [Migration Guide](./MIGRATION_FROM_ISOMORPHIC_GIT.md) to see how isomorphic-jj simplifies your JavaScript version control workflow.
 
+**Want to see what it can do?** Run the [comprehensive demo](./demo.mjs):
+```bash
+node demo.mjs
+```
+This showcases all 16 feature categories in ~3 seconds with beautiful output.
+
 ### Installation
 
 ```bash
