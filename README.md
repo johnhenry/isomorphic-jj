@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-367%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-371%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
@@ -851,4 +851,4 @@ Built on the shoulders of:
 - [Jujutsu](https://github.com/martinvonz/jj) by Martin von Zweigbergk
 - The Git and JavaScript communities
 
-**Status**: v0.5.0 | **Tests**: 367 passing | **Ready for**: Experimentation and prototyping
+**Status**: v1.0.0 | **Tests**: 371 passing | **Ready for**: Production use
