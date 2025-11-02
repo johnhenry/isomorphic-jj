@@ -1,11 +1,11 @@
 /**
- * Integration tests for v0.4 event hooks
+ * Integration tests for EventTarget-based events
  */
 
 import { createJJ } from '../../src/index.js';
 import { MockFS } from '../fixtures/mock-fs.js';
 
-describe('Event Hooks Integration (v0.4)', () => {
+describe('EventTarget Integration', () => {
   let fs;
 
   beforeEach(() => {
@@ -16,85 +16,81 @@ describe('Event Hooks Integration (v0.4)', () => {
     fs.reset();
   });
 
-  describe('preCommit hook', () => {
-    it('should call preCommit before describe()', async () => {
-      const hookCalls = [];
+  describe('change:updating event', () => {
+    it('should emit change:updating before describe()', async () => {
+      const eventCalls = [];
 
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          preCommit: async (context) => {
-            hookCalls.push({
-              type: 'preCommit',
-              operation: context.operation,
-              changeId: context.changeId,
-              message: context.message,
-            });
-          },
-        },
+      });
+
+      jj.addEventListener('change:updating', (event) => {
+        eventCalls.push({
+          type: 'change:updating',
+          operation: event.detail.operation,
+          changeId: event.detail.changeId,
+          message: event.detail.message,
+        });
       });
 
       await jj.init();
       await jj.describe({ message: 'Test commit' });
 
-      expect(hookCalls).toHaveLength(1);
-      expect(hookCalls[0].type).toBe('preCommit');
-      expect(hookCalls[0].operation).toBe('describe');
-      expect(hookCalls[0].message).toBe('Test commit');
+      expect(eventCalls).toHaveLength(1);
+      expect(eventCalls[0].type).toBe('change:updating');
+      expect(eventCalls[0].operation).toBe('describe');
+      expect(eventCalls[0].message).toBe('Test commit');
     });
 
-    it('should receive change and changeId in context', async () => {
-      let hookContext = null;
+    it('should receive change and changeId in event detail', async () => {
+      let eventDetail = null;
 
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          preCommit: async (context) => {
-            hookContext = context;
-          },
-        },
+      });
+
+      jj.addEventListener('change:updating', (event) => {
+        eventDetail = event.detail;
       });
 
       await jj.init();
       await jj.describe({ message: 'Test' });
 
-      expect(hookContext).not.toBeNull();
-      expect(hookContext.changeId).toMatch(/^[0-9a-f]{32}$/);
-      expect(hookContext.change).toBeDefined();
-      expect(hookContext.change.changeId).toBe(hookContext.changeId);
+      expect(eventDetail).not.toBeNull();
+      expect(eventDetail.changeId).toMatch(/^[0-9a-f]{32}$/);
+      expect(eventDetail.change).toBeDefined();
+      expect(eventDetail.change.changeId).toBe(eventDetail.changeId);
     });
 
-    it('should allow hook to throw error and abort operation', async () => {
+    it('should allow event listener to prevent operation with preventDefault', async () => {
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          preCommit: async () => {
-            throw new Error('Linting failed!');
-          },
-        },
+      });
+
+      jj.addEventListener('change:updating', (event) => {
+        event.preventDefault(); // Cancel the operation
       });
 
       await jj.init();
 
-      await expect(jj.describe({ message: 'Test' })).rejects.toThrow('Linting failed!');
+      await expect(jj.describe({ message: 'Test' })).rejects.toThrow('Operation cancelled');
     });
 
-    it('should abort on hook failure without modifying repository', async () => {
+    it('should abort on preventDefault without modifying repository', async () => {
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          preCommit: async () => {
-            throw new Error('Hook failed');
-          },
-        },
+      });
+
+      jj.addEventListener('change:updating', (event) => {
+        event.preventDefault(); // Cancel the operation
       });
 
       await jj.init();
@@ -112,117 +108,113 @@ describe('Event Hooks Integration (v0.4)', () => {
     });
   });
 
-  describe('postCommit hook', () => {
-    it('should call postCommit after describe()', async () => {
-      const hookCalls = [];
+  describe('change:updated event', () => {
+    it('should emit change:updated after describe()', async () => {
+      const eventCalls = [];
 
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          postCommit: async (context) => {
-            hookCalls.push({
-              type: 'postCommit',
-              operation: context.operation,
-              changeId: context.changeId,
-            });
-          },
-        },
+      });
+
+      jj.addEventListener('change:updated', (event) => {
+        eventCalls.push({
+          type: 'change:updated',
+          operation: event.detail.operation,
+          changeId: event.detail.changeId,
+        });
       });
 
       await jj.init();
       await jj.describe({ message: 'Test commit' });
 
-      expect(hookCalls).toHaveLength(1);
-      expect(hookCalls[0].type).toBe('postCommit');
-      expect(hookCalls[0].operation).toBe('describe');
+      expect(eventCalls).toHaveLength(1);
+      expect(eventCalls[0].type).toBe('change:updated');
+      expect(eventCalls[0].operation).toBe('describe');
     });
 
-    it('should receive updated change in context', async () => {
-      let hookContext = null;
+    it('should receive updated change in event detail', async () => {
+      let eventDetail = null;
 
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          postCommit: async (context) => {
-            hookContext = context;
-          },
-        },
+      });
+
+      jj.addEventListener('change:updated', (event) => {
+        eventDetail = event.detail;
       });
 
       await jj.init();
       await jj.describe({ message: 'New message' });
 
-      expect(hookContext).not.toBeNull();
-      expect(hookContext.change.description).toBe('New message');
+      expect(eventDetail).not.toBeNull();
+      expect(eventDetail.change.description).toBe('New message');
     });
 
-    it('should run postCommit after repository is modified', async () => {
-      let descriptionInHook = null;
+    it('should emit change:updated after repository is modified', async () => {
+      let descriptionInEvent = null;
 
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          postCommit: async (context) => {
-            // Check that the change is already committed
-            const status = await jj.status();
-            descriptionInHook = status.workingCopy.description;
-          },
-        },
+      });
+
+      jj.addEventListener('change:updated', (event) => {
+        // Check that the change is already committed via event detail
+        descriptionInEvent = event.detail.change.description;
       });
 
       await jj.init();
       await jj.describe({ message: 'Updated description' });
 
-      expect(descriptionInHook).toBe('Updated description');
+      expect(descriptionInEvent).toBe('Updated description');
     });
   });
 
-  describe('hook ordering', () => {
-    it('should call preCommit before postCommit', async () => {
-      const hookOrder = [];
+  describe('event ordering', () => {
+    it('should emit change:updating before change:updated', async () => {
+      const eventOrder = [];
 
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          preCommit: async () => {
-            hookOrder.push('pre');
-          },
-          postCommit: async () => {
-            hookOrder.push('post');
-          },
-        },
+      });
+
+      jj.addEventListener('change:updating', () => {
+        eventOrder.push('updating');
+      });
+
+      jj.addEventListener('change:updated', () => {
+        eventOrder.push('updated');
       });
 
       await jj.init();
       await jj.describe({ message: 'Test' });
 
-      expect(hookOrder).toEqual(['pre', 'post']);
+      expect(eventOrder).toEqual(['updating', 'updated']);
     });
 
-    it('should not call postCommit if preCommit fails', async () => {
-      const hookCalls = [];
+    it('should not emit change:updated if operation is prevented', async () => {
+      const eventCalls = [];
 
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {
-          preCommit: async () => {
-            hookCalls.push('pre');
-            throw new Error('Pre-commit failed');
-          },
-          postCommit: async () => {
-            hookCalls.push('post');
-          },
-        },
+      });
+
+      jj.addEventListener('change:updating', (event) => {
+        eventCalls.push('updating');
+        event.preventDefault(); // Cancel the operation
+      });
+
+      jj.addEventListener('change:updated', () => {
+        eventCalls.push('updated');
       });
 
       await jj.init();
@@ -233,17 +225,16 @@ describe('Event Hooks Integration (v0.4)', () => {
         // Expected
       }
 
-      expect(hookCalls).toEqual(['pre']); // Only preCommit was called
+      expect(eventCalls).toEqual(['updating']); // Only change:updating was emitted
     });
   });
 
-  describe('no hooks configured', () => {
-    it('should work normally when no hooks provided', async () => {
+  describe('no event listeners configured', () => {
+    it('should work normally when no event listeners attached', async () => {
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        // No hooks
       });
 
       await jj.init();
@@ -252,18 +243,18 @@ describe('Event Hooks Integration (v0.4)', () => {
       expect(change.description).toBe('Test');
     });
 
-    it('should work with empty hooks object', async () => {
+    it('should have EventTarget methods available', async () => {
       const jj = await createJJ({
         fs,
         dir: '/test/repo',
         backend: 'mock',
-        hooks: {},
       });
 
       await jj.init();
-      const change = await jj.describe({ message: 'Test' });
 
-      expect(change.description).toBe('Test');
+      expect(typeof jj.addEventListener).toBe('function');
+      expect(typeof jj.removeEventListener).toBe('function');
+      expect(typeof jj.dispatchEvent).toBe('function');
     });
   });
 });

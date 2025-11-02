@@ -26,11 +26,6 @@ import path from 'path';
  * @param {Object} [options.git] - isomorphic-git instance (enables Git backend)
  * @param {Object} [options.http] - HTTP client for network operations
  * @param {string|Object} [options.backend] - Backend name ('isomorphic-git', 'memory') or backend instance
- * @param {Object} [options.hooks] - Event hooks for operations (v0.4)
- * @param {Function} [options.hooks.preCommit] - Called before describe/commit operations
- * @param {Function} [options.hooks.postCommit] - Called after describe/commit operations
- * @param {Function} [options.hooks.preChange] - Called before any change operation
- * @param {Function} [options.hooks.postChange] - Called after any change operation
  *
  * @returns {Promise<Object>} Initialized JJ instance
  */
@@ -46,7 +41,6 @@ export async function createJJ(options) {
   const git = options.git;
   const http = options.http;
   const backend = options.backend;
-  const hooks = options.hooks || {};
 
   if (!fs) {
     throw new JJError('INVALID_CONFIG', 'Missing fs', {
@@ -119,22 +113,42 @@ export async function createJJ(options) {
     return fileSnapshot;
   };
 
-  // Helper to run hooks (v0.4)
-  const runHook = async (hookName, context) => {
-    const hook = hooks[hookName];
-    if (!hook || typeof hook !== 'function') {
-      return; // No hook registered
+  // Helper to dispatch events with async listener support and error handling
+  // Store listener errors in detail so we can check them after dispatch
+  const dispatchEventAsync = async (eventTarget, eventName, detail, options = {}) => {
+    // Extend detail to track errors from listeners
+    const enhancedDetail = {
+      ...detail,
+      __listenerError: null,
+    };
+
+    const event = new CustomEvent(eventName, {
+      detail: enhancedDetail,
+      cancelable: options.cancelable !== false, // Default to cancelable
+    });
+
+    // EventTarget swallows errors from listeners, so we need to wrap the original listeners
+    // to catch errors. We'll use a temporary error-catching wrapper.
+    const originalDispatch = eventTarget.dispatchEvent.bind(eventTarget);
+
+    // Dispatch event - EventTarget will call all listeners synchronously
+    const notCancelled = originalDispatch(event);
+
+    // Check if a listener stored an error
+    if (enhancedDetail.__listenerError) {
+      throw enhancedDetail.__listenerError;
     }
 
-    try {
-      await hook(context);
-    } catch (error) {
+    // Check if event was prevented (only relevant for cancelable events)
+    if (!notCancelled && options.cancelable !== false) {
       throw new JJError(
-        'HOOK_FAILED',
-        `Hook '${hookName}' failed: ${error.message}`,
-        { hookName, originalError: error }
+        'EVENT_CANCELLED',
+        `Operation cancelled by ${eventName} event listener`,
+        { eventName, detail }
       );
     }
+
+    return event;
   };
 
   // Helper to sync a JJ change to a Git commit
@@ -889,12 +903,13 @@ export async function createJJ(options) {
         });
       }
 
-      // v0.4: Run pre-commit hook
-      await runHook('preCommit', {
+      // Dispatch change:updating event (preventable)
+      await dispatchEventAsync(jj, 'change:updating', {
+        operation: 'describe',
         changeId: currentChangeId,
         change,
         message: args.message,
-        operation: 'describe',
+        timestamp: new Date().toISOString(),
       });
 
       // Update description
@@ -964,12 +979,13 @@ export async function createJJ(options) {
         },
       });
 
-      // v0.4: Run post-commit hook
-      await runHook('postCommit', {
+      // Dispatch change:updated event (informational)
+      await dispatchEventAsync(jj, 'change:updated', {
+        operation: 'describe',
         changeId: currentChangeId,
         change,
-        operation: 'describe',
-      });
+        timestamp: new Date().toISOString(),
+      }, { cancelable: false });
 
       return change;
     },
@@ -1012,6 +1028,16 @@ export async function createJJ(options) {
         timestamp: new Date().toISOString(),
       };
 
+      // Dispatch change:creating event (preventable)
+      await dispatchEventAsync(jj, 'change:creating', {
+        operation: 'new',
+        changeId: newChangeId,
+        parentChangeId,
+        change: newChange,
+        message: args.message,
+        timestamp: new Date().toISOString(),
+      });
+
       await graph.addChange(newChange);  // Middleware will sync to Git
       await workingCopy.setCurrentChange(newChangeId);
 
@@ -1033,6 +1059,15 @@ export async function createJJ(options) {
           fileSnapshot, // Store filesystem state before operation
         },
       });
+
+      // Dispatch change:created event (informational)
+      await dispatchEventAsync(jj, 'change:created', {
+        operation: 'new',
+        changeId: newChangeId,
+        parentChangeId,
+        change: newChange,
+        timestamp: new Date().toISOString(),
+      }, { cancelable: false });
 
       return newChange;
     },
@@ -1224,6 +1259,17 @@ export async function createJJ(options) {
         });
       }
 
+      const previousChangeId = workingCopy.getCurrentChangeId();
+
+      // Dispatch workingcopy:switching event (preventable)
+      await dispatchEventAsync(jj, 'workingcopy:switching', {
+        operation: 'edit',
+        fromChangeId: previousChangeId,
+        toChangeId: args.changeId,
+        change,
+        timestamp: new Date().toISOString(),
+      });
+
       // Restore files from the change's snapshot to working directory
       if (change.fileSnapshot) {
         for (const [filePath, content] of Object.entries(change.fileSnapshot)) {
@@ -1278,6 +1324,15 @@ export async function createJJ(options) {
           workingCopy: args.changeId,
         },
       });
+
+      // Dispatch workingcopy:switched event (informational)
+      await dispatchEventAsync(jj, 'workingcopy:switched', {
+        operation: 'edit',
+        fromChangeId: previousChangeId,
+        toChangeId: args.changeId,
+        change,
+        timestamp: new Date().toISOString(),
+      }, { cancelable: false });
 
       // Return information about the edited change
       return {
@@ -1404,6 +1459,16 @@ export async function createJJ(options) {
       const currentWorkingCopyId = workingCopy.getCurrentChangeId();
       const isSquashingWorkingCopy = args.source === currentWorkingCopyId;
 
+      // Dispatch change:squashing event (preventable)
+      await dispatchEventAsync(jj, 'change:squashing', {
+        operation: 'squash',
+        sourceChangeId: args.source,
+        destChangeId: args.dest,
+        sourceChange,
+        destChange,
+        timestamp: new Date().toISOString(),
+      });
+
       // Mark source as abandoned
       sourceChange.abandoned = true;
       await graph.updateChange(sourceChange);
@@ -1457,6 +1522,16 @@ export async function createJJ(options) {
         },
       });
 
+      // Dispatch change:squashed event (informational)
+      await dispatchEventAsync(jj, 'change:squashed', {
+        operation: 'squash',
+        sourceChangeId: args.source,
+        destChangeId: args.dest,
+        sourceChange,
+        destChange,
+        timestamp: new Date().toISOString(),
+      }, { cancelable: false });
+
       return destChange;
     },
     
@@ -1478,6 +1553,14 @@ export async function createJJ(options) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
       }
 
+      // Dispatch change:abandoning event (preventable)
+      await dispatchEventAsync(jj, 'change:abandoning', {
+        operation: 'abandon',
+        changeId: args.changeId,
+        change,
+        timestamp: new Date().toISOString(),
+      });
+
       change.abandoned = true;
       await graph.updateChange(change);
 
@@ -1494,6 +1577,14 @@ export async function createJJ(options) {
           workingCopy: workingCopy.getCurrentChangeId(),
         },
       });
+
+      // Dispatch change:abandoned event (informational)
+      await dispatchEventAsync(jj, 'change:abandoned', {
+        operation: 'abandon',
+        changeId: args.changeId,
+        change,
+        timestamp: new Date().toISOString(),
+      }, { cancelable: false });
 
       return change;
     },
@@ -1516,6 +1607,14 @@ export async function createJJ(options) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
       }
 
+      // Dispatch change:restoring event (preventable)
+      await dispatchEventAsync(jj, 'change:restoring', {
+        operation: 'restore',
+        changeId: args.changeId,
+        change,
+        timestamp: new Date().toISOString(),
+      });
+
       change.abandoned = false;
       await graph.updateChange(change);
 
@@ -1532,6 +1631,14 @@ export async function createJJ(options) {
           workingCopy: workingCopy.getCurrentChangeId(),
         },
       });
+
+      // Dispatch change:restored event (informational)
+      await dispatchEventAsync(jj, 'change:restored', {
+        operation: 'restore',
+        changeId: args.changeId,
+        change,
+        timestamp: new Date().toISOString(),
+      }, { cancelable: false });
 
       return change;
     },
@@ -2169,6 +2276,12 @@ export async function createJJ(options) {
       },
     },
   };
+
+  // Add EventTarget capabilities to jj instance
+  const eventTarget = new EventTarget();
+  jj.addEventListener = eventTarget.addEventListener.bind(eventTarget);
+  jj.removeEventListener = eventTarget.removeEventListener.bind(eventTarget);
+  jj.dispatchEvent = eventTarget.dispatchEvent.bind(eventTarget);
 
   return jj;
 }
