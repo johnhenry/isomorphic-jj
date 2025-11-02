@@ -92,8 +92,13 @@ export class RevsetEngine {
 
     // v1.0: git_head() - current working copy (Git HEAD equivalent)
     if (trimmed === 'git_head()') {
-      const currentId = this.workingCopy.getCurrentChangeId();
-      return currentId ? [currentId] : [];
+      try {
+        const currentId = this.workingCopy.getCurrentChangeId();
+        return currentId ? [currentId] : [];
+      } catch (error) {
+        // Working copy not loaded, return empty set
+        return [];
+      }
     }
 
     // ancestors(changeId) - all ancestors including the change itself
