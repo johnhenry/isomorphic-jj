@@ -127,6 +127,8 @@ export class ConflictModel {
                   sides: { base: baseContent, left: leftContent, right: rightContent },
                   message: driverConflict.message || mergeResult.message || `Merge driver detected conflicts`,
                   driverResult: mergeResult,
+                  driverFailed: mergeResult.driverFailed,
+                  driverError: mergeResult.driverError,
                 });
                 conflicts.push(conflict);
               }
@@ -138,6 +140,8 @@ export class ConflictModel {
                 sides: { base: baseContent, left: leftContent, right: rightContent },
                 message: mergeResult.message || `Merge driver detected conflicts`,
                 driverResult: mergeResult,
+                driverFailed: mergeResult.driverFailed,
+                driverError: mergeResult.driverError,
               });
               conflicts.push(conflict);
             }
@@ -240,9 +244,9 @@ export class ConflictModel {
   /**
    * Create a conflict object
    */
-  _createConflict({ type, path, sides, message }) {
+  _createConflict({ type, path, sides, message, driverFailed, driverError }) {
     const conflictId = generateId('conflict');
-    return {
+    const conflict = {
       conflictId,
       type,
       path,
@@ -251,6 +255,16 @@ export class ConflictModel {
       resolved: false,
       timestamp: new Date().toISOString(),
     };
+
+    // Add driver failure metadata if present
+    if (driverFailed !== undefined) {
+      conflict.driverFailed = driverFailed;
+    }
+    if (driverError !== undefined) {
+      conflict.driverError = driverError;
+    }
+
+    return conflict;
   }
 
   /**
@@ -438,19 +452,16 @@ export class ConflictModel {
       return null; // No custom driver found
     }
 
-    // Execute driver
-    try {
-      const result = await this.mergeDriverRegistry.executeDriver(
-        driver,
-        { path, ...content, metadata },
-        isBinary
-      );
+    // Execute driver (errors are handled by wrapDriver)
+    // In non-strict mode: returns result with driverFailed metadata
+    // In strict mode: throws error
+    const result = await this.mergeDriverRegistry.executeDriver(
+      driver,
+      { path, ...content, metadata },
+      isBinary
+    );
 
-      return result;
-    } catch (error) {
-      console.warn(`Merge driver failed for ${path}: ${error.message}`);
-      return null; // Fall back to default conflict detection
-    }
+    return result;
   }
 
   /**

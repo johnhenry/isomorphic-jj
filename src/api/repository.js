@@ -2654,5 +2654,8 @@ export async function createJJ(options) {
   jj.removeEventListener = eventTarget.removeEventListener.bind(eventTarget);
   jj.dispatchEvent = eventTarget.dispatchEvent.bind(eventTarget);
 
+  // Set jj instance on merge drivers for event emission
+  mergeDrivers.jj = jj;
+
   return jj;
 }

@@ -99,10 +99,16 @@ async function defaultMergeDriver(context) {
  * Wrap a driver with timeout and error handling
  *
  * @param {Function} driver - Driver function
- * @param {number} timeout - Timeout in ms
+ * @param {Object} options - Wrapper options
+ * @param {number} [options.timeout=5000] - Timeout in ms
+ * @param {boolean} [options.strict=false] - Throw on error instead of falling back
+ * @param {Object} [options.jj] - JJ instance for event emission
+ * @param {string} [options.pattern] - Pattern that matched this driver
  * @returns {Function} Wrapped driver
  */
-function wrapDriver(driver, timeout = 5000) {
+function wrapDriver(driver, options = {}) {
+  const { timeout = 5000, strict = false, jj = null, pattern = null } = options;
+
   return async (context) => {
     let timeoutId;
     const timeoutPromise = new Promise((_, reject) => {
@@ -131,9 +137,31 @@ function wrapDriver(driver, timeout = 5000) {
     } catch (error) {
       // Clear timeout on error too
       clearTimeout(timeoutId);
-      console.warn(`Driver failed for ${context.path}: ${error.message}`);
-      // Fall back to default merge
-      return defaultMergeDriver(context);
+
+      // Emit driver:failed event if jj instance available
+      if (jj && jj.dispatchEvent) {
+        jj.dispatchEvent(new CustomEvent('driver:failed', {
+          detail: {
+            path: context.path,
+            pattern: pattern,
+            error: error.message,
+            timestamp: new Date().toISOString(),
+          },
+        }));
+      }
+
+      // In strict mode, throw the error
+      if (strict) {
+        throw error;
+      }
+
+      // Fall back to default merge with error metadata
+      const result = await defaultMergeDriver(context);
+      return {
+        ...result,
+        driverFailed: true,
+        driverError: error.message,
+      };
     }
   };
 }
@@ -142,9 +170,10 @@ function wrapDriver(driver, timeout = 5000) {
  * MergeDriverRegistry manages custom merge drivers
  */
 export class MergeDriverRegistry {
-  constructor() {
-    /** @type {Array<{pattern: string, driver: Function, accepts: Object}>} */
+  constructor(jj = null) {
+    /** @type {Array<{pattern: string, driver: Function, accepts: Object, strict: boolean}>} */
     this.drivers = [];
+    this.jj = jj; // JJ instance for event emission
   }
 
   /**
@@ -156,21 +185,24 @@ export class MergeDriverRegistry {
    * registry.register({
    *   'package.json': packageJsonDriver,
    *   '*.md': markdownDriver,
+   *   'critical.txt': { driver: myDriver, strict: true },
    * });
    */
   register(drivers) {
     for (const [pattern, driverOrConfig] of Object.entries(drivers)) {
-      // Driver can be function or { driver, accepts, timeout }
-      let driver, accepts, timeout;
+      // Driver can be function or { driver, accepts, timeout, strict }
+      let driver, accepts, timeout, strict;
 
       if (typeof driverOrConfig === 'function') {
         driver = driverOrConfig;
         accepts = { text: true, binary: false }; // Default: text only
         timeout = 5000;
+        strict = false;
       } else {
         driver = driverOrConfig.driver || driverOrConfig.merge;
         accepts = driverOrConfig.accepts || { text: true, binary: false };
         timeout = driverOrConfig.timeout || 5000;
+        strict = driverOrConfig.strict || false;
       }
 
       if (typeof driver !== 'function') {
@@ -182,9 +214,14 @@ export class MergeDriverRegistry {
       }
 
       // Wrap driver with error handling
-      const wrappedDriver = wrapDriver(driver, timeout);
+      const wrappedDriver = wrapDriver(driver, {
+        timeout,
+        strict,
+        jj: this.jj,
+        pattern,
+      });
 
-      this.drivers.push({ pattern, driver: wrappedDriver, accepts });
+      this.drivers.push({ pattern, driver: wrappedDriver, accepts, strict });
     }
   }
 
@@ -234,19 +271,28 @@ export class MergeDriverRegistry {
     // 1. Check custom drivers (highest priority)
     for (const [pattern, driverOrConfig] of Object.entries(customDrivers)) {
       if (matchesPattern(filePath, pattern)) {
-        let driver, accepts;
+        let driver, accepts, timeout, strict;
 
         if (typeof driverOrConfig === 'function') {
           driver = driverOrConfig;
           accepts = { text: true, binary: false };
+          timeout = 5000;
+          strict = false;
         } else {
           driver = driverOrConfig.driver || driverOrConfig.merge;
           accepts = driverOrConfig.accepts || { text: true, binary: false };
+          timeout = driverOrConfig.timeout || 5000;
+          strict = driverOrConfig.strict || false;
         }
 
         // Check if driver accepts this file type
         if ((isBinary && accepts.binary) || (!isBinary && accepts.text)) {
-          return wrapDriver(driver, driverOrConfig.timeout || 5000);
+          return wrapDriver(driver, {
+            timeout,
+            strict,
+            jj: this.jj,
+            pattern,
+          });
         }
       }
     }

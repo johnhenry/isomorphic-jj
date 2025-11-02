@@ -406,7 +406,7 @@ describe('Merge Drivers', () => {
   });
 
   describe('Error handling', () => {
-    it('should fall back to default merge if driver throws', async () => {
+    it('should fall back to default merge if driver throws (default behavior)', async () => {
       const jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
       await jj.init();
 
@@ -437,6 +437,159 @@ describe('Merge Drivers', () => {
 
       // Default merge creates conflict for this case
       expect(result.conflicts.length).toBeGreaterThan(0);
+    });
+
+    it('should include driver failure metadata in conflict object', async () => {
+      const jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+      await jj.init();
+
+      const failingDriver = async () => {
+        throw new Error('Custom driver error!');
+      };
+
+      jj.mergeDrivers.register({
+        'test.txt': failingDriver,
+      });
+
+      await jj.write({ path: 'test.txt', data: 'base' });
+      await jj.describe({ message: 'Base' });
+      const baseChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.new({ message: 'Feature' });
+      await jj.write({ path: 'test.txt', data: 'feature' });
+      await jj.describe({ message: 'Feature' });
+      const featureChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.edit({ changeId: baseChange });
+      await jj.new({ message: 'Main' });
+      await jj.write({ path: 'test.txt', data: 'main' });
+      await jj.describe({ message: 'Main' });
+
+      const result = await jj.merge({ source: featureChange });
+
+      // Should have conflict with driver failure metadata
+      expect(result.conflicts.length).toBeGreaterThan(0);
+      const conflict = result.conflicts.find(c => c.path === 'test.txt');
+      expect(conflict.driverFailed).toBe(true);
+      expect(conflict.driverError).toBe('Custom driver error!');
+    });
+
+    it('should emit driver:failed event when driver throws', async () => {
+      const jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+      await jj.init();
+
+      const failingDriver = async () => {
+        throw new Error('Driver boom!');
+      };
+
+      jj.mergeDrivers.register({
+        'test.txt': failingDriver,
+      });
+
+      await jj.write({ path: 'test.txt', data: 'base' });
+      await jj.describe({ message: 'Base' });
+      const baseChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.new({ message: 'Feature' });
+      await jj.write({ path: 'test.txt', data: 'feature' });
+      await jj.describe({ message: 'Feature' });
+      const featureChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.edit({ changeId: baseChange });
+      await jj.new({ message: 'Main' });
+      await jj.write({ path: 'test.txt', data: 'main' });
+      await jj.describe({ message: 'Main' });
+
+      // Listen for driver:failed event
+      const events = [];
+      jj.addEventListener('driver:failed', (e) => {
+        events.push(e.detail);
+      });
+
+      await jj.merge({ source: featureChange });
+
+      // Should have emitted event
+      expect(events.length).toBe(1);
+      expect(events[0].path).toBe('test.txt');
+      expect(events[0].error).toBe('Driver boom!');
+      expect(events[0].pattern).toBeDefined();
+    });
+
+    it('should throw error in strict mode when driver fails', async () => {
+      const jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+      await jj.init();
+
+      const failingDriver = async () => {
+        throw new Error('Strict mode failure!');
+      };
+
+      jj.mergeDrivers.register({
+        'test.txt': {
+          driver: failingDriver,
+          strict: true,
+        },
+      });
+
+      await jj.write({ path: 'test.txt', data: 'base' });
+      await jj.describe({ message: 'Base' });
+      const baseChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.new({ message: 'Feature' });
+      await jj.write({ path: 'test.txt', data: 'feature' });
+      await jj.describe({ message: 'Feature' });
+      const featureChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.edit({ changeId: baseChange });
+      await jj.new({ message: 'Main' });
+      await jj.write({ path: 'test.txt', data: 'main' });
+      await jj.describe({ message: 'Main' });
+
+      // Should throw in strict mode
+      await expect(jj.merge({ source: featureChange })).rejects.toThrow('Strict mode failure!');
+    });
+
+    it('should not emit event or add metadata when driver succeeds', async () => {
+      const jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+      await jj.init();
+
+      const successDriver = async (context) => {
+        return {
+          hasConflict: false,
+          content: 'merged successfully',
+        };
+      };
+
+      jj.mergeDrivers.register({
+        'test.txt': successDriver,
+      });
+
+      await jj.write({ path: 'test.txt', data: 'base' });
+      await jj.describe({ message: 'Base' });
+      const baseChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.new({ message: 'Feature' });
+      await jj.write({ path: 'test.txt', data: 'feature' });
+      await jj.describe({ message: 'Feature' });
+      const featureChange = jj.workingCopy.getCurrentChangeId();
+
+      await jj.edit({ changeId: baseChange });
+      await jj.new({ message: 'Main' });
+      await jj.write({ path: 'test.txt', data: 'main' });
+      await jj.describe({ message: 'Main' });
+
+      // Listen for driver:failed event
+      const events = [];
+      jj.addEventListener('driver:failed', (e) => {
+        events.push(e.detail);
+      });
+
+      const result = await jj.merge({ source: featureChange });
+
+      // Should not emit event
+      expect(events.length).toBe(0);
+
+      // Should not have conflicts (driver succeeded)
+      expect(result.conflicts.length).toBe(0);
     });
   });
 
