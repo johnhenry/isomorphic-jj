@@ -10,6 +10,7 @@
  * This matches JJ's philosophy: conflicts never block you.
  */
 
+import path from 'path';
 import { JJError } from '../utils/errors.js';
 import { generateId } from '../utils/id-generation.js';
 
@@ -28,9 +29,10 @@ export const ConflictType = {
  * ConflictModel manages conflict detection, storage, and resolution
  */
 export class ConflictModel {
-  constructor(storage, fs) {
+  constructor(storage, fs, mergeDriverRegistry = null) {
     this.storage = storage;
     this.fs = fs;
+    this.mergeDriverRegistry = mergeDriverRegistry; // v0.5: merge drivers
     this.conflicts = new Map(); // conflictId -> Conflict
     this.fileConflicts = new Map(); // path -> conflictId
   }
@@ -82,10 +84,12 @@ export class ConflictModel {
    * @param {Map} opts.baseFiles - Files in base
    * @param {Map} opts.leftFiles - Files in left
    * @param {Map} opts.rightFiles - Files in right
+   * @param {Object} opts.drivers - Custom merge drivers (v0.5)
+   * @param {string} opts.workingCopyDir - Working copy directory for file writes (v0.5)
    * @returns {Array<Conflict>} Detected conflicts
    */
   async detectConflicts(opts) {
-    const { baseFiles, leftFiles, rightFiles } = opts;
+    const { baseFiles, leftFiles, rightFiles, drivers = {}, workingCopyDir, baseChange, leftChange, rightChange } = opts;
     const conflicts = [];
 
     // Get all unique paths across all versions
@@ -100,6 +104,54 @@ export class ConflictModel {
       const leftContent = leftFiles.get(path);
       const rightContent = rightFiles.get(path);
 
+      // v0.5: Try merge driver first if available
+      if (this.mergeDriverRegistry) {
+        const mergeResult = await this._tryMergeDriver(
+          path,
+          {base: baseContent, ours: leftContent, theirs: rightContent},
+          drivers,
+          { baseChange, leftChange, rightChange }
+        );
+
+        if (mergeResult) {
+          // Driver handled it
+          if (mergeResult.hasConflict) {
+            // Driver produced a conflict (possibly partial merge)
+            // Use conflict info from driver result if available
+            if (mergeResult.conflicts && mergeResult.conflicts.length > 0) {
+              // Driver provided detailed conflict info
+              for (const driverConflict of mergeResult.conflicts) {
+                const conflict = this._createConflict({
+                  type: driverConflict.type || 'driver-conflict',
+                  path,
+                  sides: { base: baseContent, left: leftContent, right: rightContent },
+                  message: driverConflict.message || mergeResult.message || `Merge driver detected conflicts`,
+                  driverResult: mergeResult,
+                });
+                conflicts.push(conflict);
+              }
+            } else {
+              // Driver didn't provide detailed conflicts, create generic one
+              const conflict = this._createConflict({
+                type: 'driver-conflict',
+                path,
+                sides: { base: baseContent, left: leftContent, right: rightContent },
+                message: mergeResult.message || `Merge driver detected conflicts`,
+                driverResult: mergeResult,
+              });
+              conflicts.push(conflict);
+            }
+          } else {
+            // Driver successfully merged - write result to working copy
+            if (workingCopyDir && mergeResult.content !== null) {
+              await this._writeDriverResult(workingCopyDir, path, mergeResult);
+            }
+          }
+          continue; // Driver handled this file, skip default detection
+        }
+      }
+
+      // Fall back to default conflict detection
       const conflict = this._detectPathConflict(path, baseContent, leftContent, rightContent);
       if (conflict) {
         conflicts.push(conflict);
@@ -357,5 +409,86 @@ export class ConflictModel {
     this.conflicts.clear();
     this.fileConflicts.clear();
     await this.save();
+  }
+
+  /**
+   * Try to use a merge driver for a file (v0.5)
+   *
+   * @param {string} path - File path
+   * @param {Object} content - Content versions { base, ours, theirs }
+   * @param {Object} customDrivers - Per-merge custom drivers
+   * @param {Object} metadata - Merge metadata
+   * @returns {Promise<Object|null>} Merge result or null if no driver
+   */
+  async _tryMergeDriver(path, content, customDrivers, metadata) {
+    if (!this.mergeDriverRegistry) {
+      return null; // No registry available
+    }
+
+    // Check if file is binary
+    const isBinary = this.mergeDriverRegistry.isBinaryFile(
+      path,
+      content.ours || content.theirs || content.base
+    );
+
+    // Find appropriate driver
+    const driver = this.mergeDriverRegistry.findDriver(path, customDrivers, isBinary);
+
+    if (!driver || driver === this.mergeDriverRegistry.defaultDriver) {
+      return null; // No custom driver found
+    }
+
+    // Execute driver
+    try {
+      const result = await this.mergeDriverRegistry.executeDriver(
+        driver,
+        { path, ...content, metadata },
+        isBinary
+      );
+
+      return result;
+    } catch (error) {
+      console.warn(`Merge driver failed for ${path}: ${error.message}`);
+      return null; // Fall back to default conflict detection
+    }
+  }
+
+  /**
+   * Write merge driver result to working copy (v0.5)
+   *
+   * @param {string} workingCopyDir - Working copy directory
+   * @param {string} filePath - File path
+   * @param {Object} result - Merge result
+   */
+  async _writeDriverResult(workingCopyDir, filePath, result) {
+    const fullPath = path.join(workingCopyDir, filePath);
+
+    // Ensure directory exists
+    const dir = path.dirname(fullPath);
+    await this.fs.promises.mkdir(dir, { recursive: true });
+
+    // Write main file
+    if (result.content !== null && result.content !== undefined) {
+      if (Buffer.isBuffer(result.content)) {
+        await this.fs.promises.writeFile(fullPath, result.content);
+      } else {
+        await this.fs.promises.writeFile(fullPath, result.content, 'utf-8');
+      }
+    }
+
+    // Write additional files if driver provided them
+    if (result.additionalFiles) {
+      for (const [additionalPath, additionalContent] of Object.entries(result.additionalFiles)) {
+        const additionalFullPath = path.join(workingCopyDir, additionalPath);
+        const additionalDir = path.dirname(additionalFullPath);
+        await this.fs.promises.mkdir(additionalDir, { recursive: true });
+
+        if (Buffer.isBuffer(additionalContent)) {
+          await this.fs.promises.writeFile(additionalFullPath, additionalContent);
+        } else {
+          await this.fs.promises.writeFile(additionalFullPath, additionalContent, 'utf-8');
+        }
+      }
+    }
   }
 }

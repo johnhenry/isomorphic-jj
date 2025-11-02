@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-314%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-351%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
@@ -224,7 +224,27 @@ await jj.log({ revset: 'description(fix)' });
 await jj.log({ revset: 'file(*.js)' });           // commits touching JS files
 await jj.log({ revset: 'mine()' });               // my commits
 
-// Graph analysis
+// ✨ NEW in v0.5: Time-based queries
+await jj.log({ revset: 'last(5)' });              // last 5 commits
+await jj.log({ revset: 'last(7d)' });             // last 7 days
+await jj.log({ revset: 'last(24h)' });            // last 24 hours
+await jj.log({ revset: 'since(2025-01-01)' });    // since date
+await jj.log({ revset: 'between(2025-01-01, 2025-02-01)' }); // date range
+
+// ✨ NEW in v0.5: Graph analytics
+await jj.log({ revset: 'descendants(abc123)' });   // all descendants
+await jj.log({ revset: 'descendants(abc123, 2)' }); // max 2 levels deep
+await jj.log({ revset: 'common_ancestor(rev1, rev2)' }); // merge base
+await jj.log({ revset: 'range(base..tip)' });      // commits in range
+await jj.log({ revset: 'diverge_point(rev1, rev2)' }); // where branches split
+await jj.log({ revset: 'connected(rev1, rev2)' }); // check if path exists
+
+// ✨ NEW in v0.5: Set operations
+await jj.log({ revset: 'last(7d) & file(*.js)' }); // recent JS changes
+await jj.log({ revset: 'mine() | author(bob)' });  // mine or Bob's
+await jj.log({ revset: 'all() ~ mine()' });        // everything except mine
+
+// Traditional graph analysis
 await jj.log({ revset: 'roots(all())' });         // commits with no parents
 await jj.log({ revset: 'heads(all())' });         // commits with no children
 await jj.log({ revset: 'latest(mine(), 5)' });    // my 5 latest commits
@@ -306,6 +326,122 @@ for (const conflict of conflicts) {
 
 // Undo restores conflict state if needed
 await jj.undo();
+```
+
+#### Custom Merge Drivers (v0.5)
+
+Merge drivers enable smart merging of structured files like JSON, package.json, and YAML:
+
+```javascript
+import { jsonDriver, packageJsonDriver, yamlDriver, markdownDriver } from 'isomorphic-jj';
+
+// Register merge drivers for different file types
+jj.mergeDrivers.register({
+  'package.json': packageJsonDriver,  // Smart merge for package.json
+  '*.json': jsonDriver,                // Generic JSON merge
+  '*.yaml': yamlDriver,                // YAML merge
+  '*.md': markdownDriver,              // Markdown merge
+});
+
+// Merge with automatic driver resolution
+await jj.merge({ source: 'feature' });
+// Drivers automatically merge files when possible
+
+// Per-merge driver override
+await jj.merge({
+  source: 'feature',
+  drivers: {
+    'config.json': customDriver,
+  }
+});
+
+// Create custom merge driver
+const customDriver = {
+  name: 'my-custom-driver',
+  canMerge: (base, ours, theirs) => {
+    // Return true if driver can handle this merge
+    return true;
+  },
+  merge: (base, ours, theirs) => {
+    // Return merged content or null if conflict
+    return mergedContent;
+  }
+};
+
+// Built-in drivers:
+// - packageJsonDriver: Smart merge for package.json (union merge for dependencies)
+// - jsonDriver: Generic JSON merge (object-level merging)
+// - yamlDriver: YAML structure-aware merge
+// - markdownDriver: Section-aware merge for Markdown
+```
+
+#### Conflict Resolution Enhancements (v0.5)
+
+New conflict resolution capabilities make handling conflicts easier:
+
+```javascript
+// ✨ Dry-run merge preview
+const preview = await jj.merge({
+  source: 'feature',
+  dryRun: true  // Preview conflicts without applying
+});
+console.log(`Would create ${preview.conflicts.length} conflicts`);
+preview.conflicts.forEach(c => {
+  console.log(`  ${c.path}: ${c.type}`);
+});
+
+// ✨ Bulk resolution with strategies
+await jj.conflicts.resolveAll({
+  strategy: 'ours',  // Keep our version
+});
+
+await jj.conflicts.resolveAll({
+  strategy: 'theirs',  // Take their version
+});
+
+await jj.conflicts.resolveAll({
+  strategy: 'union',  // Combine both sides
+});
+
+// ✨ Filtered bulk resolution
+await jj.conflicts.resolveAll({
+  strategy: 'ours',
+  filter: { path: '*.json' }  // Only JSON files
+});
+
+await jj.conflicts.resolveAll({
+  strategy: 'theirs',
+  filter: { path: 'src/config/*' }  // Specific directory
+});
+
+// ✨ Resolve with merge driver
+await jj.conflicts.resolve({
+  conflictId: conflict.conflictId,
+  driver: 'package.json',  // Use registered driver
+});
+
+// ✨ Get Git-style conflict markers
+const markers = await jj.conflicts.markers({
+  conflictId: conflict.conflictId
+});
+console.log(markers);
+// <<<<<<< ours
+// our content
+// =======
+// their content
+// >>>>>>> theirs
+
+// Manual resolution
+await jj.conflicts.resolve({
+  conflictId: conflict.conflictId,
+  resolution: 'manually merged content',
+});
+
+// Strategy-based resolution
+await jj.conflicts.resolve({
+  conflictId: conflict.conflictId,
+  strategy: 'ours',  // or 'theirs', 'union'
+});
 ```
 
 ### Bookmarks (Not Branches)
@@ -494,7 +630,8 @@ const jj: JJ = await createJJ(options: CreateJJOptions);
 - **Git**: `git.init()`, `git.fetch()`, `git.push()`, `git.import()`, `git.export()`
 - **Remotes**: `remote.add()`, `remote.fetch()`, `remote.push()`
 - **Worktrees**: `worktree.add()`, `worktree.list()`, `worktree.remove()`
-- **Conflicts**: `merge()`, `conflicts.list()`, `conflicts.resolve()`
+- **Conflicts**: `merge()`, `conflicts.list()`, `conflicts.resolve()`, `conflicts.resolveAll()` (v0.5), `conflicts.markers()` (v0.5)
+- **Merge Drivers** (v0.5): `mergeDrivers.register()`, `mergeDrivers.get()`, Built-in drivers: `jsonDriver`, `packageJsonDriver`, `yamlDriver`, `markdownDriver`
 - **Background** (Node.js): `background.start()`, `background.stop()`, `background.enableAutoSnapshot()`
 
 See [complete API documentation](./src/types.d.ts) for detailed signatures and options.
@@ -581,8 +718,8 @@ repo/
 
 ## Project Status
 
-**Current Version**: v0.4.0
-**Test Coverage**: 314 tests, 100% passing
+**Current Version**: v0.5.0
+**Test Coverage**: 351 tests, 100% passing
 **Status**: Ready for experimentation and prototyping
 
 **Completed:**
@@ -590,11 +727,12 @@ repo/
 - ✅ v0.2: History editing (squash, split, abandon, restore, move)
 - ✅ v0.3: Git backend, conflicts, worktrees, browser support
 - ✅ v0.4: Shallow clones, advanced revsets, event system
+- ✅ v0.5: Custom merge drivers, enhanced revsets (time-based, graph analytics), conflict resolution enhancements
 
-**Coming Next (v0.5):**
+**Coming Next (v0.6):**
 - Repository analytics and debugging tools
 - Interactive workflows
-- Enhanced revset language
+- Performance optimizations
 
 See [ROADMAP.md](./ROADMAP.md) for detailed plans through v1.0.
 
@@ -698,4 +836,4 @@ Built on the shoulders of:
 - [Jujutsu](https://github.com/martinvonz/jj) by Martin von Zweigbergk
 - The Git and JavaScript communities
 
-**Status**: v0.4.0 | **Tests**: 314 passing | **Ready for**: Experimentation and prototyping
+**Status**: v0.5.0 | **Tests**: 351 passing | **Ready for**: Experimentation and prototyping

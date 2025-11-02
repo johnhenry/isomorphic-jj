@@ -9,6 +9,7 @@ import { OperationLog } from '../core/operation-log.js';
 import { BookmarkStore } from '../core/bookmark-store.js';
 import { RevsetEngine } from '../core/revset-engine.js';
 import { ConflictModel } from '../core/conflict-model.js';
+import { MergeDriverRegistry } from '../core/merge-driver-registry.js';
 import { WorktreeManager } from '../core/worktree-manager.js';
 import { BackgroundOps } from '../core/background-ops.js';
 import { UserConfig } from '../core/user-config.js';
@@ -60,7 +61,8 @@ export async function createJJ(options) {
   const workingCopy = new WorkingCopy(storage, fs, dir);
   const oplog = new OperationLog(storage);
   const bookmarks = new BookmarkStore(storage);
-  const conflicts = new ConflictModel(storage, fs);
+  const mergeDrivers = new MergeDriverRegistry(); // v0.5: merge drivers
+  const conflicts = new ConflictModel(storage, fs, mergeDrivers); // v0.5: pass registry
   const worktrees = new WorktreeManager(storage, fs, dir);
   const userConfig = new UserConfig(storage);
 
@@ -286,6 +288,33 @@ export async function createJJ(options) {
   // Create revset engine with the middleware-wrapped graph (v0.4: added bookmarkStore)
   const revset = new RevsetEngine(graph, workingCopy, userConfig, bookmarks);
 
+  /**
+   * Helper to resolve conflicts with different strategies (v0.5)
+   *
+   * @param {Object} conflict - Conflict object
+   * @param {string} strategy - Resolution strategy ('ours', 'theirs', 'union')
+   * @returns {string} Resolved content
+   */
+  function _resolveWithStrategy(conflict, strategy) {
+    const ours = conflict.sides.left || '';
+    const theirs = conflict.sides.right || '';
+
+    switch (strategy) {
+      case 'ours':
+        return ours;
+      case 'theirs':
+        return theirs;
+      case 'union':
+        // Simple union - combine both sides
+        return ours + theirs;
+      default:
+        throw new JJError('INVALID_STRATEGY', `Unknown resolution strategy: ${strategy}`, {
+          strategy,
+          suggestion: 'Use "ours", "theirs", or "union"',
+        });
+    }
+  }
+
   // Create JJ instance (backgroundOps will be initialized after jj object is created)
   const jj = {
     storage,
@@ -297,6 +326,7 @@ export async function createJJ(options) {
     conflicts,
     worktrees,
     userConfig,
+    mergeDrivers,  // v0.5: expose merge driver registry
     backgroundOps: null,  // Will be initialized below
     backend: gitBackend,  // Expose backend for advanced users
     
@@ -2171,12 +2201,29 @@ export async function createJJ(options) {
         }
       }
 
-      // Detect conflicts
+      // Detect conflicts (v0.5: pass custom drivers and working copy dir)
       const detectedConflicts = await conflicts.detectConflicts({
         baseFiles,
         leftFiles,
         rightFiles,
+        drivers: args.drivers || {},  // v0.5: custom merge drivers
+        workingCopyDir: args.dryRun ? null : dir,  // v0.5: skip file writes in dry-run
+        baseChange: baseChangeId,  // v0.5: metadata for drivers
+        leftChange: currentChangeId,
+        rightChange: args.source,
       });
+
+      // v0.5: Dry-run mode - return preview without applying changes
+      if (args.dryRun) {
+        return {
+          merged: false,
+          dryRun: true,
+          conflicts: detectedConflicts,
+          base: baseChangeId,
+          left: currentChangeId,
+          right: args.source,
+        };
+      }
 
       // Store detected conflicts
       for (const conflict of detectedConflicts) {
@@ -2225,7 +2272,13 @@ export async function createJJ(options) {
       },
 
       /**
-       * Resolve a conflict
+       * Resolve a conflict (v0.5 enhanced)
+       *
+       * @param {Object} args - Resolution arguments
+       * @param {string} args.conflictId - Conflict ID
+       * @param {string} [args.resolution] - Manual resolution content
+       * @param {string} [args.driver] - Merge driver to use
+       * @param {string} [args.strategy] - Resolution strategy ('ours', 'theirs', 'union')
        */
       async resolve(args) {
         if (!args || !args.conflictId) {
@@ -2233,10 +2286,135 @@ export async function createJJ(options) {
         }
 
         await conflicts.load();
-        await conflicts.resolveConflict(args.conflictId, args.resolution || 'manual');
+
+        // Get the conflict
+        const conflict = conflicts.getConflict(args.conflictId);
+        if (!conflict) {
+          throw new JJError('CONFLICT_NOT_FOUND', `Conflict ${args.conflictId} not found`);
+        }
+
+        let resolvedContent;
+
+        // v0.5: Support different resolution methods
+        if (args.resolution) {
+          // Manual resolution provided
+          resolvedContent = args.resolution;
+        } else if (args.driver) {
+          // Use merge driver
+          const driver = mergeDrivers.get(args.driver);
+          if (!driver) {
+            throw new JJError('DRIVER_NOT_FOUND', `Driver ${args.driver} not found`);
+          }
+
+          const driverResult = await mergeDrivers.executeDriver(
+            driver,
+            {
+              path: conflict.path,
+              base: conflict.sides.base,
+              ours: conflict.sides.left,
+              theirs: conflict.sides.right,
+            },
+            mergeDrivers.isBinaryFile(conflict.path, conflict.sides.left)
+          );
+
+          if (driverResult.hasConflict) {
+            throw new JJError('DRIVER_FAILED', `Driver could not resolve conflict`);
+          }
+
+          resolvedContent = driverResult.content;
+        } else if (args.strategy) {
+          // Use resolution strategy
+          resolvedContent = _resolveWithStrategy(conflict, args.strategy);
+        } else {
+          throw new JJError('INVALID_ARGUMENT', 'Must provide resolution, driver, or strategy');
+        }
+
+        // Write resolved content to file
+        await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf-8');
+
+        // Mark conflict as resolved
+        await conflicts.resolveConflict(args.conflictId, 'manual');
         await conflicts.save();
 
         return { resolved: true };
+      },
+
+      /**
+       * Resolve all conflicts (v0.5)
+       *
+       * @param {Object} args - Resolution arguments
+       * @param {string} args.strategy - Resolution strategy ('ours', 'theirs', 'union')
+       * @param {Object} [args.filter] - Optional filter
+       * @param {string} [args.filter.path] - Path pattern to filter
+       */
+      async resolveAll(args) {
+        if (!args || !args.strategy) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing strategy');
+        }
+
+        await conflicts.load();
+        const allConflicts = conflicts.listConflicts({ resolved: false });
+
+        // Filter conflicts if requested
+        let toResolve = allConflicts;
+        if (args.filter && args.filter.path) {
+          const pattern = args.filter.path;
+          toResolve = allConflicts.filter(c => {
+            // Simple pattern matching - exact match or glob
+            if (pattern.includes('*')) {
+              const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+              return regex.test(c.path);
+            }
+            return c.path === pattern;
+          });
+        }
+
+        // Resolve each conflict
+        let resolvedCount = 0;
+        for (const conflict of toResolve) {
+          try {
+            const resolvedContent = _resolveWithStrategy(conflict, args.strategy);
+
+            // Write resolved content
+            await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf-8');
+
+            // Mark as resolved
+            await conflicts.resolveConflict(conflict.conflictId, args.strategy);
+            resolvedCount++;
+          } catch (error) {
+            console.warn(`Failed to resolve ${conflict.path}: ${error.message}`);
+          }
+        }
+
+        await conflicts.save();
+
+        return { resolved: resolvedCount, total: toResolve.length };
+      },
+
+      /**
+       * Get conflict markers for a conflict (v0.5)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.conflictId - Conflict ID
+       * @returns {Promise<string>} Conflict markers in standard format
+       */
+      async markers(args) {
+        if (!args || !args.conflictId) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing conflictId');
+        }
+
+        await conflicts.load();
+        const conflict = conflicts.getConflict(args.conflictId);
+
+        if (!conflict) {
+          throw new JJError('CONFLICT_NOT_FOUND', `Conflict ${args.conflictId} not found`);
+        }
+
+        // Generate standard conflict markers
+        const ours = conflict.sides.left || '';
+        const theirs = conflict.sides.right || '';
+
+        return `<<<<<<< ours\n${ours}=======\n${theirs}>>>>>>> theirs`;
       },
 
       /**

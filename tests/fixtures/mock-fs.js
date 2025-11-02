@@ -32,7 +32,8 @@ export class MockFS {
       error.code = 'ENOENT';
       throw error;
     }
-    return encoding === 'utf8' ? file.content : Buffer.from(file.content);
+    // Handle both 'utf8' and 'utf-8' encoding
+    return (encoding === 'utf8' || encoding === 'utf-8') ? file.content : Buffer.from(file.content);
   }
 
   async rename(oldPath, newPath) {

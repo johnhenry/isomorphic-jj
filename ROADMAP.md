@@ -1,6 +1,6 @@
 # isomorphic-jj Roadmap
 
-**Current Version**: v0.4 Complete ✅
+**Current Version**: v0.5 Complete ✅
 **Last Updated**: 2025-11-02
 
 ---
@@ -33,7 +33,7 @@ This roadmap outlines the past milestones and future plans for isomorphic-jj. Ea
 - ✅ Complete undo/redo functionality
 
 ### Test Coverage ✅
-- 314 tests across 22 test suites
+- 351 tests across 27 test suites
 - Comprehensive unit and integration coverage
 - 100% pass rate
 
@@ -190,9 +190,44 @@ All operations now return useful information:
 
 ---
 
+## v0.5 - Merge Enhancements ✅ COMPLETE (Q4 2025)
+
+**Goal**: Smart merging and enhanced conflict resolution
+
+### Delivered Features ✅
+
+#### Custom Merge Drivers ✅
+- ✅ Merge driver registry for pluggable merge strategies
+- ✅ Built-in drivers: `jsonDriver`, `packageJsonDriver`, `yamlDriver`, `markdownDriver`
+- ✅ Opportunistic/hybrid approach (drivers used when available, fallback to conflict detection)
+- ✅ Per-merge driver overrides
+- ✅ Custom driver creation API
+
+#### Enhanced Revset Language ✅
+- ✅ Time-based queries: `last(N)`, `last(Nd)`, `last(Nh)`, `since(date)`, `between(start, end)`
+- ✅ Graph analytics: `descendants()`, `common_ancestor()`, `range()`, `diverge_point()`, `connected()`
+- ✅ Set operations: `&` (intersection), `|` (union), `~` (difference)
+- ✅ Combined queries for powerful filtering
+
+#### Conflict Resolution Enhancements ✅
+- ✅ Dry-run merge preview (`dryRun: true`)
+- ✅ Bulk conflict resolution with strategies (`ours`, `theirs`, `union`)
+- ✅ Path filtering for selective bulk resolution
+- ✅ Git-style conflict markers generation
+- ✅ Driver-based conflict resolution
+
+### Success Criteria Met ✅
+- ✅ All merge driver tests passing (12 new tests)
+- ✅ All revset enhancement tests passing (13 new tests)
+- ✅ All conflict resolution tests passing (10 new tests)
+- ✅ Test coverage: 351 tests, 100% passing
+- ✅ Complete documentation in README.md
+
+---
+
 ## Planned Versions
 
-## v0.5 - Developer Experience (Target: Q1 2026)
+## v0.6 - Developer Experience (Target: Q1 2026)
 
 **Goal**: Enhanced developer tools and workflow improvements
 
@@ -204,14 +239,6 @@ All operations now return useful information:
 - Author contribution metrics
 - File modification heatmaps
 - Performance metrics and insights
-
-#### Enhanced Revsets
-- `mine()`: Changes by current user (completed in v0.3.1)
-- `merge()`: Merge commits only (completed in v0.3.1)
-- `file(pattern)`: Changes touching specific files (completed in v0.3.1)
-- `conflict()`: Changes with conflicts
-- `reachable(from, to)`: Reachability queries
-- Set operations: union (`|`), intersection (`&`), difference (`~`)
 
 #### Interactive Workflows
 - Interactive status command with file selection
@@ -229,7 +256,7 @@ All operations now return useful information:
 
 ---
 
-## v0.6 - Performance & Scale (Target: Q2 2026)
+## v0.7 - Performance & Scale (Target: Q2 2026)
 
 **Goal**: Large repository support and performance optimizations
 
@@ -261,7 +288,7 @@ All operations now return useful information:
 
 ---
 
-## v0.7 - Enterprise Features (Target: Q3 2026)
+## v0.8 - Enterprise Features (Target: Q3 2026)
 
 **Goal**: Enterprise-grade features for team workflows
 
@@ -371,9 +398,10 @@ All operations now return useful information:
 2025 Q4: ████████ v0.2 Features ✅ COMPLETE
 2025 Q4: ████████ v0.3 Collaboration ✅ COMPLETE (8 weeks ahead of schedule!)
 2025 Q4: ████████ v0.4 Quick Wins ✅ COMPLETE
-2026 Q1: ░░░░░░░░ v0.5 Developer Experience (Planned)
-2026 Q2: ░░░░░░░░ v0.6 Performance & Scale (Planned)
-2026 Q3: ░░░░░░░░ v0.7 Enterprise Features (Planned)
+2025 Q4: ████████ v0.5 Merge Enhancements ✅ COMPLETE
+2026 Q1: ░░░░░░░░ v0.6 Developer Experience (Planned)
+2026 Q2: ░░░░░░░░ v0.7 Performance & Scale (Planned)
+2026 Q3: ░░░░░░░░ v0.8 Enterprise Features (Planned)
 2026 Q4: ░░░░░░░░ v1.0 Release (Planned)
 ```
 
@@ -409,9 +437,45 @@ All operations now return useful information:
 - ✅ Operation return values (complete)
 - 314 tests, 100% passing
 
+**✅ v0.5: COMPLETE**
+- ✅ Custom merge drivers (complete)
+- ✅ Enhanced revset language with time-based queries and graph analytics (complete)
+- ✅ Conflict resolution enhancements (dry-run, bulk resolution) (complete)
+- 351 tests, 100% passing
+
 ---
 
 ## Changelog
+
+### [0.5.0] - 2025-11-02
+
+#### Added
+- **Custom Merge Drivers**
+  - Merge driver registry for pluggable merge strategies
+  - Built-in drivers: `jsonDriver`, `packageJsonDriver`, `yamlDriver`, `markdownDriver`
+  - Opportunistic/hybrid approach for smart merging
+  - Per-merge driver overrides
+  - Custom driver creation API
+
+- **Enhanced Revset Language**
+  - Time-based queries: `last(N)`, `last(Nd)`, `last(Nh)`, `since(date)`, `between(start, end)`
+  - Graph analytics: `descendants()`, `common_ancestor()`, `range()`, `diverge_point()`, `connected()`
+  - Set operations: `&` (intersection), `|` (union), `~` (difference)
+  - Combined queries for powerful filtering
+
+- **Conflict Resolution Enhancements**
+  - Dry-run merge preview with `dryRun: true` parameter
+  - Bulk conflict resolution with `conflicts.resolveAll()`
+  - Resolution strategies: `ours`, `theirs`, `union`
+  - Path filtering for selective bulk resolution
+  - Git-style conflict markers with `conflicts.markers()`
+  - Driver-based conflict resolution
+
+#### Changed
+- Updated documentation to reflect v0.5 features
+- Improved test coverage to 351 tests
+- Added comprehensive merge driver examples
+- Enhanced conflict resolution documentation
 
 ### [0.4.0] - 2025-11-02
 

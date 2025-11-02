@@ -122,6 +122,83 @@ export class RevsetEngine {
       return await this.filterBookmarks(pattern);
     }
 
+    // v0.5: last(N) - last N commits
+    // v0.5: last(Nd) - commits in last N days
+    // v0.5: last(Nh) - commits in last N hours
+    const lastMatch = trimmed.match(/^last\((\d+)([dh])?\)$/);
+    if (lastMatch) {
+      const value = parseInt(lastMatch[1], 10);
+      const unit = lastMatch[2]; // 'd', 'h', or undefined
+
+      if (unit) {
+        // Time-based: last(Nd) or last(Nh)
+        return await this.filterByTimeRange(value, unit);
+      } else {
+        // Count-based: last(N)
+        return await this.filterLast(value);
+      }
+    }
+
+    // v0.5: since(date) - commits since date
+    const sinceMatch = trimmed.match(/^since\(([0-9-]+)\)$/);
+    if (sinceMatch) {
+      const date = sinceMatch[1];
+      return await this.filterSince(date);
+    }
+
+    // v0.5: between(start, end) - commits between dates
+    const betweenMatch = trimmed.match(/^between\(([0-9-]+),\s*([0-9-]+)\)$/);
+    if (betweenMatch) {
+      const startDate = betweenMatch[1];
+      const endDate = betweenMatch[2];
+      return await this.filterBetween(startDate, endDate);
+    }
+
+    // v0.5: descendants(changeId[, depth]) - all descendants
+    const descendantsMatch = trimmed.match(/^descendants\(([0-9a-f]{32})(?:,\s*(\d+))?\)$/);
+    if (descendantsMatch) {
+      const changeId = descendantsMatch[1];
+      const depth = descendantsMatch[2] ? parseInt(descendantsMatch[2], 10) : undefined;
+      return await this.getDescendants(changeId, depth);
+    }
+
+    // v0.5: common_ancestor(rev1, rev2) - common ancestor
+    const commonAncestorMatch = trimmed.match(/^common_ancestor\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/);
+    if (commonAncestorMatch) {
+      const rev1 = commonAncestorMatch[1];
+      const rev2 = commonAncestorMatch[2];
+      return await this.findCommonAncestor(rev1, rev2);
+    }
+
+    // v0.5: range(base..tip) - commits in range
+    const rangeMatch = trimmed.match(/^range\(([0-9a-f]{32})\.\.([0-9a-f]{32})\)$/);
+    if (rangeMatch) {
+      const base = rangeMatch[1];
+      const tip = rangeMatch[2];
+      return await this.getRange(base, tip);
+    }
+
+    // v0.5: diverge_point(rev1, rev2) - divergence point
+    const divergeMatch = trimmed.match(/^diverge_point\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/);
+    if (divergeMatch) {
+      const rev1 = divergeMatch[1];
+      const rev2 = divergeMatch[2];
+      return await this.findDivergePoint(rev1, rev2);
+    }
+
+    // v0.5: connected(rev1, rev2) - check if path exists
+    const connectedMatch = trimmed.match(/^connected\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/);
+    if (connectedMatch) {
+      const rev1 = connectedMatch[1];
+      const rev2 = connectedMatch[2];
+      return await this.checkConnected(rev1, rev2);
+    }
+
+    // v0.5: Set operations - intersection (&), union (|), difference (~)
+    if (trimmed.includes(' & ') || trimmed.includes(' | ') || trimmed.includes(' ~ ')) {
+      return await this.evaluateSetOperation(trimmed);
+    }
+
     // Direct changeId
     if (/^[0-9a-f]{32}$/.test(trimmed)) {
       await this.graph.load();
@@ -131,7 +208,7 @@ export class RevsetEngine {
 
     throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
       expression,
-      suggestion: 'Use @, all(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), or a direct change ID',
+      suggestion: 'Use @, all(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), set operations (& | ~), or a direct change ID',
     });
   }
 
@@ -419,5 +496,280 @@ export class RevsetEngine {
 
     // Return unique changeIds
     return [...new Set(result)];
+  }
+
+  /**
+   * Filter last N commits by timestamp (v0.5)
+   *
+   * @param {number} count - Number of commits to return
+   * @returns {Promise<Array<string>>} Most recent change IDs
+   */
+  async filterLast(count) {
+    await this.graph.load();
+    const all = this.graph.getAll();
+
+    // Sort by committer timestamp (most recent first)
+    const sorted = all.sort((a, b) => {
+      const timeA = a.committer?.timestamp || 0;
+      const timeB = b.committer?.timestamp || 0;
+      return timeB - timeA;
+    });
+
+    return sorted.slice(0, count).map(c => c.changeId);
+  }
+
+  /**
+   * Filter commits within time range (v0.5)
+   *
+   * @param {number} value - Time value
+   * @param {string} unit - Time unit ('d' for days, 'h' for hours)
+   * @returns {Promise<Array<string>>} Change IDs within time range
+   */
+  async filterByTimeRange(value, unit) {
+    await this.graph.load();
+    const all = this.graph.getAll();
+
+    const now = Date.now();
+    let milliseconds;
+
+    if (unit === 'd') {
+      milliseconds = value * 24 * 60 * 60 * 1000; // days to ms
+    } else if (unit === 'h') {
+      milliseconds = value * 60 * 60 * 1000; // hours to ms
+    } else {
+      throw new JJError('INVALID_TIME_UNIT', `Invalid time unit: ${unit}`, { unit });
+    }
+
+    const cutoffTime = now - milliseconds;
+
+    return all
+      .filter(c => {
+        const timestamp = c.committer?.timestamp || 0;
+        return timestamp >= cutoffTime;
+      })
+      .map(c => c.changeId);
+  }
+
+  /**
+   * Filter commits since a date (v0.5)
+   *
+   * @param {string} dateStr - ISO date string (YYYY-MM-DD)
+   * @returns {Promise<Array<string>>} Change IDs since date
+   */
+  async filterSince(dateStr) {
+    await this.graph.load();
+    const all = this.graph.getAll();
+
+    const sinceTime = new Date(dateStr).getTime();
+
+    return all
+      .filter(c => {
+        const timestamp = c.committer?.timestamp || 0;
+        return timestamp >= sinceTime;
+      })
+      .map(c => c.changeId);
+  }
+
+  /**
+   * Filter commits between two dates (v0.5)
+   *
+   * @param {string} startDateStr - ISO date string (YYYY-MM-DD)
+   * @param {string} endDateStr - ISO date string (YYYY-MM-DD)
+   * @returns {Promise<Array<string>>} Change IDs between dates
+   */
+  async filterBetween(startDateStr, endDateStr) {
+    await this.graph.load();
+    const all = this.graph.getAll();
+
+    const startTime = new Date(startDateStr).getTime();
+    const endTime = new Date(endDateStr).getTime();
+
+    return all
+      .filter(c => {
+        const timestamp = c.committer?.timestamp || 0;
+        return timestamp >= startTime && timestamp <= endTime;
+      })
+      .map(c => c.changeId);
+  }
+
+  /**
+   * Get all descendants of a change (v0.5)
+   *
+   * @param {string} changeId - Change ID
+   * @param {number} [depth] - Optional depth limit
+   * @returns {Promise<Array<string>>} Array of descendant change IDs
+   */
+  async getDescendants(changeId, depth = undefined) {
+    await this.graph.load();
+
+    const descendants = [];
+    const visited = new Set();
+    const queue = [{ id: changeId, level: 0 }];
+
+    while (queue.length > 0) {
+      const { id: current, level } = queue.shift();
+
+      if (visited.has(current)) {
+        continue;
+      }
+
+      visited.add(current);
+
+      // Don't include the starting change itself
+      if (current !== changeId) {
+        descendants.push(current);
+      }
+
+      // Check depth limit
+      if (depth !== undefined && level >= depth) {
+        continue;
+      }
+
+      const children = this.graph.getChildren(current);
+      for (const child of children) {
+        queue.push({ id: child, level: level + 1 });
+      }
+    }
+
+    return descendants;
+  }
+
+  /**
+   * Find common ancestor of two revisions (v0.5)
+   *
+   * @param {string} rev1 - First revision
+   * @param {string} rev2 - Second revision
+   * @returns {Promise<Array<string>>} Common ancestor (single element array or empty)
+   */
+  async findCommonAncestor(rev1, rev2) {
+    await this.graph.load();
+
+    // Get all ancestors of both revisions
+    const ancestors1 = new Set(await this.getAncestors(rev1));
+    const ancestors2 = await this.getAncestors(rev2);
+
+    // Find first common ancestor
+    for (const ancestor of ancestors2) {
+      if (ancestors1.has(ancestor)) {
+        return [ancestor];
+      }
+    }
+
+    return []; // No common ancestor
+  }
+
+  /**
+   * Get commits in range (base..tip) (v0.5)
+   *
+   * @param {string} base - Base revision
+   * @param {string} tip - Tip revision
+   * @returns {Promise<Array<string>>} Commits in range (excluding base)
+   */
+  async getRange(base, tip) {
+    await this.graph.load();
+
+    const tipAncestors = new Set(await this.getAncestors(tip));
+    const baseAncestors = new Set(await this.getAncestors(base));
+
+    // Commits in range are ancestors of tip but not ancestors of base
+    const range = [];
+    for (const ancestor of tipAncestors) {
+      if (!baseAncestors.has(ancestor)) {
+        range.push(ancestor);
+      }
+    }
+
+    return range;
+  }
+
+  /**
+   * Find divergence point of two revisions (v0.5)
+   *
+   * @param {string} rev1 - First revision
+   * @param {string} rev2 - Second revision
+   * @returns {Promise<Array<string>>} Divergence point (same as common ancestor)
+   */
+  async findDivergePoint(rev1, rev2) {
+    // Divergence point is the same as common ancestor
+    return await this.findCommonAncestor(rev1, rev2);
+  }
+
+  /**
+   * Check if two revisions are connected (v0.5)
+   *
+   * @param {string} rev1 - First revision
+   * @param {string} rev2 - Second revision
+   * @returns {Promise<Array<boolean>>} Single element array with boolean result
+   */
+  async checkConnected(rev1, rev2) {
+    await this.graph.load();
+
+    // Check if rev2 is reachable from rev1
+    const descendants = new Set(await this.getDescendants(rev1));
+    const isDescendant = descendants.has(rev2);
+
+    if (isDescendant) {
+      return [true];
+    }
+
+    // Check if rev1 is reachable from rev2
+    const ancestors = new Set(await this.getAncestors(rev2));
+    const isAncestor = ancestors.has(rev1);
+
+    return [isAncestor];
+  }
+
+  /**
+   * Evaluate set operations (v0.5)
+   *
+   * @param {string} expression - Expression with set operations
+   * @returns {Promise<Array<string>>} Result of set operation
+   */
+  async evaluateSetOperation(expression) {
+    // Parse set operations: & (intersection), | (union), ~ (difference)
+    // Simple implementation - split by operators and evaluate left to right
+
+    // Handle intersection (&)
+    if (expression.includes(' & ')) {
+      const parts = expression.split(' & ');
+      let result = new Set(await this.evaluate(parts[0]));
+
+      for (let i = 1; i < parts.length; i++) {
+        const partResult = new Set(await this.evaluate(parts[i]));
+        result = new Set([...result].filter(x => partResult.has(x)));
+      }
+
+      return Array.from(result);
+    }
+
+    // Handle union (|)
+    if (expression.includes(' | ')) {
+      const parts = expression.split(' | ');
+      const result = new Set();
+
+      for (const part of parts) {
+        const partResult = await this.evaluate(part);
+        partResult.forEach(id => result.add(id));
+      }
+
+      return Array.from(result);
+    }
+
+    // Handle difference (~)
+    if (expression.includes(' ~ ')) {
+      const parts = expression.split(' ~ ');
+      let result = new Set(await this.evaluate(parts[0]));
+
+      for (let i = 1; i < parts.length; i++) {
+        const partResult = new Set(await this.evaluate(parts[i]));
+        result = new Set([...result].filter(x => !partResult.has(x)));
+      }
+
+      return Array.from(result);
+    }
+
+    throw new JJError('INVALID_SET_OPERATION', `Invalid set operation: ${expression}`, {
+      expression,
+    });
   }
 }
