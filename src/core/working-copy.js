@@ -37,6 +37,7 @@ export class WorkingCopy {
       changeId,
       operation: operationId,
       fileStates: {},
+      sparsePatterns: [], // Empty array = full checkout
     };
 
     await this.save();
@@ -220,5 +221,94 @@ export class WorkingCopy {
 
     this.state.fileStates = {};
     await this.save();
+  }
+
+  /**
+   * Get sparse patterns
+   *
+   * @returns {string[]} Array of sparse patterns
+   */
+  getSparsePatterns() {
+    if (!this.state) {
+      throw new JJError('WORKING_COPY_NOT_LOADED', 'Working copy state not loaded', {
+        suggestion: 'Call load() or init() first',
+      });
+    }
+
+    // Return empty array if not set (full checkout)
+    return this.state.sparsePatterns || [];
+  }
+
+  /**
+   * Set sparse patterns
+   *
+   * @param {string[]} patterns - Array of sparse patterns
+   */
+  async setSparsePatterns(patterns) {
+    if (!this.state) {
+      await this.load();
+    }
+
+    this.state.sparsePatterns = patterns;
+    // Note: save() is called by the caller (repository API)
+  }
+
+  /**
+   * Check if a file path matches sparse patterns
+   *
+   * @param {string} filePath - File path to check
+   * @returns {boolean} True if file should be materialized
+   */
+  matchesSparsePatterns(filePath) {
+    const patterns = this.getSparsePatterns();
+
+    // Empty patterns = full checkout (all files match)
+    if (patterns.length === 0) {
+      return true;
+    }
+
+    // Check if file matches any pattern
+    for (const pattern of patterns) {
+      if (this._matchesPattern(filePath, pattern)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Simple glob pattern matching
+   *
+   * @private
+   * @param {string} path - File path
+   * @param {string} pattern - Glob pattern
+   * @returns {boolean} True if path matches pattern
+   */
+  _matchesPattern(path, pattern) {
+    // Exact match
+    if (path === pattern) {
+      return true;
+    }
+
+    // Directory match (pattern ending with /)
+    if (pattern.endsWith('/') && path.startsWith(pattern)) {
+      return true;
+    }
+
+    // Glob patterns
+    if (pattern.includes('*')) {
+      // Convert glob to regex
+      const regexPattern = pattern
+        .replace(/\./g, '\\.')
+        .replace(/\*\*/g, '___DOUBLESTAR___')
+        .replace(/\*/g, '[^/]*')
+        .replace(/___DOUBLESTAR___/g, '.*');
+
+      const regex = new RegExp(`^${regexPattern}$`);
+      return regex.test(path);
+    }
+
+    return false;
   }
 }

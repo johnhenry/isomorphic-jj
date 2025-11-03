@@ -51,9 +51,9 @@ describe('backout()', () => {
       });
 
       // The file should be removed in the backout change
-      await jj.edit({ change: result.changeId });
-      const files = await jj.list({ path: '.' });
-      expect(files.find((f) => f.name === 'added.txt')).toBeUndefined();
+      await jj.edit({ changeId: result.changeId });
+      const backoutChange = await jj.show({ change: result.changeId });
+      expect(backoutChange.fileSnapshot['added.txt']).toBeUndefined();
     });
 
     it('should create a change that reverses file deletions', async () => {
@@ -70,9 +70,9 @@ describe('backout()', () => {
       const result = await jj.backout({ revision: deletion.changeId });
 
       // The file should be restored in the backout change
-      await jj.edit({ change: result.changeId });
-      const files = await jj.list({ path: '.' });
-      expect(files.find((f) => f.name === 'file.txt')).toBeDefined();
+      await jj.edit({ changeId: result.changeId });
+      const backoutChange = await jj.show({ change: result.changeId });
+      expect(backoutChange.fileSnapshot['file.txt']).toBeDefined();
     });
 
     it('should create a change that reverses file modifications', async () => {
@@ -89,7 +89,7 @@ describe('backout()', () => {
       const result = await jj.backout({ revision: modification.changeId });
 
       // The file should be restored to original content
-      await jj.edit({ change: result.changeId });
+      await jj.edit({ changeId: result.changeId });
       const content = await jj.read({ path: 'file.txt' });
       expect(content).toBe('original');
     });
@@ -130,11 +130,11 @@ describe('backout()', () => {
       const result = await jj.backout({ revision: change.changeId });
 
       // All files should be removed
-      await jj.edit({ change: result.changeId });
-      const files = await jj.list({ path: '.' });
-      expect(files.find((f) => f.name === 'file1.txt')).toBeUndefined();
-      expect(files.find((f) => f.name === 'file2.txt')).toBeUndefined();
-      expect(files.find((f) => f.name === 'file3.txt')).toBeUndefined();
+      await jj.edit({ changeId: result.changeId });
+      const backoutChange = await jj.show({ change: result.changeId });
+      expect(backoutChange.fileSnapshot['file1.txt']).toBeUndefined();
+      expect(backoutChange.fileSnapshot['file2.txt']).toBeUndefined();
+      expect(backoutChange.fileSnapshot['file3.txt']).toBeUndefined();
     });
   });
 
@@ -191,7 +191,7 @@ describe('backout()', () => {
       const backout = await jj.backout({ revision: original.changeId });
 
       // Edit the backout change
-      await jj.edit({ change: backout.changeId });
+      await jj.edit({ changeId: backout.changeId });
       await jj.describe({ message: 'Edited backout description' });
 
       const updated = await jj.show({ change: backout.changeId });

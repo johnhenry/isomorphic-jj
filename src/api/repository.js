@@ -485,6 +485,15 @@ export async function createJJ(options) {
 
       // Read from working copy if no changeId specified
       if (!args.changeId) {
+        // Check sparse patterns
+        await workingCopy.load();
+        if (!workingCopy.matchesSparsePatterns(args.path)) {
+          throw new JJError('FILE_NOT_IN_SPARSE', `File ${args.path} not in sparse checkout`, {
+            path: args.path,
+            suggestion: 'Add pattern to sparse checkout: jj.sparse.add({ patterns: ["' + args.path + '"] })',
+          });
+        }
+
         const fullPath = path.join(dir, args.path);
         try {
           if (encoding === 'utf-8' || encoding === 'utf8') {
@@ -1045,23 +1054,25 @@ export async function createJJ(options) {
       await workingCopy.load();
       await userConfig.load();
 
-      // Snapshot filesystem BEFORE operation (for undo)
-      const fileSnapshotBefore = await snapshotFilesystem();
-
-      const currentChangeId = workingCopy.getCurrentChangeId();
-      const change = await graph.getChange(currentChangeId);
+      // Support describing specific revision (not just working copy)
+      const targetChangeId = args.revision || workingCopy.getCurrentChangeId();
+      const change = await graph.getChange(targetChangeId);
       const user = userConfig.getUser();
 
       if (!change) {
-        throw new JJError('CHANGE_NOT_FOUND', `Working copy change ${currentChangeId} not found`, {
-          changeId: currentChangeId,
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${targetChangeId} not found`, {
+          changeId: targetChangeId,
         });
       }
+
+      // Only snapshot filesystem if describing working copy
+      const isWorkingCopy = targetChangeId === workingCopy.getCurrentChangeId();
+      const fileSnapshotBefore = isWorkingCopy ? await snapshotFilesystem() : null;
 
       // Dispatch change:updating event (preventable)
       await dispatchEventAsync(jj, 'change:updating', {
         operation: 'describe',
-        changeId: currentChangeId,
+        changeId: targetChangeId,
         change,
         message: args.message,
         timestamp: new Date().toISOString(),
@@ -1073,44 +1084,47 @@ export async function createJJ(options) {
         change.timestamp = new Date().toISOString();
       }
 
-      // Snapshot current file contents for conflict detection
-      // This allows us to load file contents during merge/rebase
-      const fileSnapshot = {};
-      const trackedFiles = await workingCopy.listFiles();
+      // Only snapshot files if describing working copy
+      if (isWorkingCopy) {
+        // Snapshot current file contents for conflict detection
+        // This allows us to load file contents during merge/rebase
+        const fileSnapshot = {};
+        const trackedFiles = await workingCopy.listFiles();
 
-      // Safeguards to prevent excessive memory usage
-      const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB per file
-      const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB total snapshot size
-      let totalSnapshotSize = 0;
+        // Safeguards to prevent excessive memory usage
+        const MAX_FILE_SIZE = 1 * 1024 * 1024; // 1MB per file
+        const MAX_TOTAL_SIZE = 10 * 1024 * 1024; // 10MB total snapshot size
+        let totalSnapshotSize = 0;
 
-      for (const filePath of trackedFiles) {
-        try {
-          const fullPath = path.join(dir, filePath);
-          const stats = await fs.promises.stat(fullPath);
+        for (const filePath of trackedFiles) {
+          try {
+            const fullPath = path.join(dir, filePath);
+            const stats = await fs.promises.stat(fullPath);
 
-          // Skip files that are too large (silently - this is an optimization)
-          if (stats.size > MAX_FILE_SIZE) {
-            continue;
+            // Skip files that are too large (silently - this is an optimization)
+            if (stats.size > MAX_FILE_SIZE) {
+              continue;
+            }
+
+            // Stop if total snapshot size would exceed limit (silently - optimization)
+            if (totalSnapshotSize + stats.size > MAX_TOTAL_SIZE) {
+              break;
+            }
+
+            const content = await fs.promises.readFile(fullPath, 'utf-8');
+            fileSnapshot[filePath] = content;
+            totalSnapshotSize += stats.size;
+          } catch (error) {
+            // Throw on file read errors - don't silently skip
+            throw new JJError(
+              'SNAPSHOT_FILE_FAILED',
+              `Could not snapshot file ${filePath}: ${error.message}`,
+              { filePath, originalError: error.message, suggestion: 'File may be binary, deleted, or inaccessible' }
+            );
           }
-
-          // Stop if total snapshot size would exceed limit (silently - optimization)
-          if (totalSnapshotSize + stats.size > MAX_TOTAL_SIZE) {
-            break;
-          }
-
-          const content = await fs.promises.readFile(fullPath, 'utf-8');
-          fileSnapshot[filePath] = content;
-          totalSnapshotSize += stats.size;
-        } catch (error) {
-          // Throw on file read errors - don't silently skip
-          throw new JJError(
-            'SNAPSHOT_FILE_FAILED',
-            `Could not snapshot file ${filePath}: ${error.message}`,
-            { filePath, originalError: error.message, suggestion: 'File may be binary, deleted, or inaccessible' }
-          );
         }
+        change.fileSnapshot = fileSnapshot;
       }
-      change.fileSnapshot = fileSnapshot;
 
       // Save the updated change (middleware will sync to Git)
       await graph.updateChange(change);
@@ -1123,13 +1137,13 @@ export async function createJJ(options) {
           email: user.email,
           hostname: 'localhost',
         },
-        description: `describe change ${currentChangeId.slice(0, 8)}`,
+        description: `describe change ${targetChangeId.slice(0, 8)}`,
         parents: [],
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: [currentChangeId],
-          workingCopy: currentChangeId,
+          heads: [targetChangeId],
+          workingCopy: workingCopy.getCurrentChangeId(),
           fileSnapshot: fileSnapshotBefore, // Store filesystem state from before operation
         },
       });
@@ -1137,14 +1151,138 @@ export async function createJJ(options) {
       // Dispatch change:updated event (informational)
       await dispatchEventAsync(jj, 'change:updated', {
         operation: 'describe',
-        changeId: currentChangeId,
+        changeId: targetChangeId,
         change,
         timestamp: new Date().toISOString(),
       }, { cancelable: false });
 
       return change;
     },
-    
+
+    /**
+     * Edit change metadata without modifying content
+     *
+     * Allows updating author, committer information, and optionally regenerating the change ID.
+     * The file content and snapshot remain unchanged.
+     *
+     * @param {Object} [args={}] - Arguments
+     * @param {string} [args.revision] - Change ID to edit (defaults to working copy @)
+     * @param {Object} [args.author] - Author information to update
+     * @param {string} [args.author.name] - Author name
+     * @param {string} [args.author.email] - Author email
+     * @param {Object} [args.committer] - Committer information to update
+     * @param {string} [args.committer.name] - Committer name
+     * @param {string} [args.committer.email] - Committer email
+     * @param {boolean} [args.resetChangeId=false] - Generate new change ID
+     * @returns {Promise<Object>} Updated change object
+     */
+    async metaedit(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+      await userConfig.load();
+
+      // Determine which change to edit
+      const changeId = args.revision || workingCopy.getCurrentChangeId();
+      const change = await graph.getChange(changeId);
+      const user = userConfig.getUser();
+
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
+      }
+
+      // Validate that at least one metadata field is being updated
+      const hasAuthor = args.author && (args.author.name || args.author.email);
+      const hasCommitter = args.committer && (args.committer.name || args.committer.email);
+      const hasResetChangeId = args.resetChangeId === true;
+
+      if (!hasAuthor && !hasCommitter && !hasResetChangeId) {
+        throw new JJError(
+          'INVALID_ARGUMENT',
+          'No metadata provided to update',
+          {
+            suggestion: 'Provide author, committer, or resetChangeId: true',
+          }
+        );
+      }
+
+      // Store old change ID for potential regeneration
+      const oldChangeId = change.changeId;
+
+      // Update author if provided
+      if (args.author) {
+        if (!change.author) {
+          change.author = {
+            name: user.name,
+            email: user.email,
+            timestamp: new Date().toISOString(),
+          };
+        }
+        if (args.author.name !== undefined) {
+          change.author.name = args.author.name;
+        }
+        if (args.author.email !== undefined) {
+          change.author.email = args.author.email;
+        }
+        // Update timestamp to reflect the metadata change
+        change.author.timestamp = new Date().toISOString();
+      }
+
+      // Update committer if provided
+      if (args.committer) {
+        if (!change.committer) {
+          change.committer = {
+            name: user.name,
+            email: user.email,
+            timestamp: new Date().toISOString(),
+          };
+        }
+        if (args.committer.name !== undefined) {
+          change.committer.name = args.committer.name;
+        }
+        if (args.committer.email !== undefined) {
+          change.committer.email = args.committer.email;
+        }
+        change.committer.timestamp = new Date().toISOString();
+      }
+
+      // Regenerate change ID if requested
+      if (args.resetChangeId) {
+        // For now, resetChangeId is not fully implemented as it requires complex graph operations
+        // Future implementation would need to handle:
+        // - Updating all children to point to new change ID
+        // - Updating all bookmarks pointing to old change ID
+        // - Updating operation log references
+        throw new JJError(
+          'UNSUPPORTED_OPERATION',
+          'resetChangeId is not yet implemented',
+          {
+            feature: 'metaedit resetChangeId',
+            reason: 'Requires complex graph manipulation to update all references',
+            suggestion: 'Create a new change with desired metadata instead',
+          }
+        );
+      }
+
+      // Update the existing change
+      await graph.updateChange(change);
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: user.name, email: user.email, hostname: 'localhost' },
+        description: `metaedit change ${changeId.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [changeId],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return change;
+    },
+
     /**
      * Create a new change
      *
@@ -1194,6 +1332,15 @@ export async function createJJ(options) {
       const newChangeId = generateChangeId();
       const user = userConfig.getUser();
 
+      // Initialize with parent's file snapshot
+      let initialSnapshot = {};
+      if (parents && parents.length > 0) {
+        const parent = await graph.getChange(parents[0]);
+        if (parent && parent.fileSnapshot) {
+          initialSnapshot = { ...parent.fileSnapshot };
+        }
+      }
+
       const newChange = {
         changeId: newChangeId,
         commitId: '0000000000000000000000000000000000000000', // Placeholder
@@ -1211,6 +1358,7 @@ export async function createJJ(options) {
         },
         description: args.message || '(no description)',
         timestamp: new Date().toISOString(),
+        fileSnapshot: initialSnapshot, // Initialize with parent's snapshot
       };
 
       // Dispatch change:creating event (preventable)
@@ -2475,6 +2623,365 @@ export async function createJJ(options) {
         description: backoutChange.description,
         backedOut: args.revision,
         fileSnapshot: backoutChange.fileSnapshot,
+      };
+    },
+
+    /**
+     * Absorb working copy changes into ancestor changes
+     *
+     * Automatically identifies which ancestor change each file modification
+     * belongs to and merges the changes back into those ancestors.
+     * This is similar to `git absorb` or `git commit --fixup`.
+     *
+     * Algorithm (simplified, file-level):
+     * 1. For each modified file in working copy
+     * 2. Find most recent ancestor that modified that file
+     * 3. Group modifications by ancestor changeId
+     * 4. Update each ancestor with its modifications
+     * 5. Remove absorbed changes from working copy
+     *
+     * @param {Object} [args] - Optional arguments
+     * @param {boolean} [args.dryRun] - Preview without making changes
+     * @returns {Promise<Object>} Result with affected changes
+     */
+    async absorb(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+      await userConfig.load();
+
+      const workingChangeId = workingCopy.getCurrentChangeId();
+      const workingChange = await graph.getChange(workingChangeId);
+      const user = userConfig.getUser();
+
+      if (!workingChange) {
+        // No working copy
+        return {
+          absorbed: args.dryRun ? undefined : false,
+          wouldAbsorb: args.dryRun ? false : undefined,
+          affectedChanges: [],
+        };
+      }
+
+      // Snapshot current filesystem state to get the actual current changes
+      const currentSnapshot = await snapshotFilesystem();
+
+      if (!currentSnapshot || Object.keys(currentSnapshot).length === 0) {
+        // Empty working copy, nothing to absorb
+        return {
+          absorbed: args.dryRun ? undefined : false,
+          wouldAbsorb: args.dryRun ? false : undefined,
+          affectedChanges: [],
+        };
+      }
+
+      // Get parent snapshot to determine what's modified
+      let parentSnapshot = {};
+      if (workingChange.parents && workingChange.parents.length > 0) {
+        const parent = await graph.getChange(workingChange.parents[0]);
+        if (parent && parent.fileSnapshot) {
+          parentSnapshot = parent.fileSnapshot;
+        }
+      }
+
+      // Find modified files (different from parent)
+      const modifiedFiles = {};
+      for (const [filePath, content] of Object.entries(currentSnapshot)) {
+        if (parentSnapshot[filePath] !== content) {
+          modifiedFiles[filePath] = content;
+        }
+      }
+
+      // Also check for deletions (files in parent but not in working copy)
+      for (const filePath of Object.keys(parentSnapshot)) {
+        if (!currentSnapshot[filePath]) {
+          modifiedFiles[filePath] = undefined; // Deletion
+        }
+      }
+
+      // Check if there are new files (not in parent)
+      const newFiles = {};
+      for (const [filePath, content] of Object.entries(currentSnapshot)) {
+        if (parentSnapshot[filePath] === undefined) {
+          newFiles[filePath] = content;
+        }
+      }
+
+      // If only new files, nothing to absorb but still update working copy
+      if (Object.keys(modifiedFiles).length === 0) {
+        // Update working copy to have proper fileSnapshot with new files
+        if (!args.dryRun && Object.keys(newFiles).length > 0) {
+          workingChange.fileSnapshot = { ...parentSnapshot, ...newFiles };
+          await graph.updateChange(workingChange);
+        }
+
+        return {
+          absorbed: args.dryRun ? undefined : false,
+          wouldAbsorb: args.dryRun ? false : undefined,
+          affectedChanges: [],
+        };
+      }
+
+      // For each modified file, find the most recent ancestor that touched it
+      // This is a simplified version - full absorb would do line-level tracking
+      const fileToAncestor = {};
+      const ancestorModifications = {}; // ancestorId -> { filePath: content }
+
+      for (const filePath of Object.keys(modifiedFiles)) {
+        // Find which ancestor last modified this file
+        const ancestor = await this._findFileAncestor(filePath, workingChange.parents);
+
+        if (ancestor) {
+          fileToAncestor[filePath] = ancestor.changeId;
+
+          if (!ancestorModifications[ancestor.changeId]) {
+            ancestorModifications[ancestor.changeId] = {};
+          }
+
+          ancestorModifications[ancestor.changeId][filePath] = modifiedFiles[filePath];
+        }
+      }
+
+      const affectedChanges = Object.keys(ancestorModifications);
+
+      if (affectedChanges.length === 0) {
+        // No ancestors found for modifications
+        return {
+          absorbed: args.dryRun ? undefined : false,
+          wouldAbsorb: args.dryRun ? false : undefined,
+          affectedChanges: [],
+        };
+      }
+
+      // Dry run mode - just return what would happen
+      if (args.dryRun) {
+        return {
+          wouldAbsorb: true,
+          affectedChanges,
+          preview: ancestorModifications,
+        };
+      }
+
+      // Apply modifications to ancestors
+      for (const [ancestorId, modifications] of Object.entries(ancestorModifications)) {
+        const ancestor = await graph.getChange(ancestorId);
+
+        if (ancestor) {
+          // Update fileSnapshot with modifications
+          ancestor.fileSnapshot = { ...ancestor.fileSnapshot };
+
+          for (const [filePath, content] of Object.entries(modifications)) {
+            if (content === undefined) {
+              // Deletion
+              delete ancestor.fileSnapshot[filePath];
+            } else {
+              ancestor.fileSnapshot[filePath] = content;
+            }
+          }
+
+          // Update timestamp but preserve original metadata
+          ancestor.committer = {
+            name: user.name,
+            email: user.email,
+            timestamp: new Date().toISOString(),
+          };
+
+          await graph.updateChange(ancestor);
+        }
+      }
+
+      // Update working copy to reflect absorbed changes
+      // Working copy should now match parent's new state (after absorption) plus any new files
+      const updatedParent = await graph.getChange(workingChange.parents[0]);
+      const newWorkingSnapshot = updatedParent && updatedParent.fileSnapshot
+        ? { ...updatedParent.fileSnapshot }
+        : {};
+
+      // Add new files that weren't absorbed
+      for (const [filePath, content] of Object.entries(newFiles)) {
+        newWorkingSnapshot[filePath] = content;
+      }
+
+      workingChange.fileSnapshot = newWorkingSnapshot;
+      await graph.updateChange(workingChange);
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: user.name, email: user.email, hostname: 'localhost' },
+        description: `absorb into ${affectedChanges.length} change(s)`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: affectedChanges,
+          workingCopy: workingChangeId,
+        },
+      });
+
+      return {
+        absorbed: true,
+        affectedChanges,
+      };
+    },
+
+    /**
+     * Find the most recent ancestor that modified a file
+     *
+     * @private
+     * @param {string} filePath - File path to search for
+     * @param {string[]} startingPoints - Change IDs to start search from
+     * @returns {Promise<Object|null>} The ancestor change that last modified the file
+     */
+    async _findFileAncestor(filePath, startingPoints) {
+      if (!startingPoints || startingPoints.length === 0) {
+        return null;
+      }
+
+      // BFS to find most recent ancestor that MODIFIED this file
+      // (i.e., file content is different from its parent)
+      const queue = [...startingPoints];
+      const visited = new Set();
+
+      while (queue.length > 0) {
+        const changeId = queue.shift();
+
+        if (visited.has(changeId)) {
+          continue;
+        }
+        visited.add(changeId);
+
+        const change = await graph.getChange(changeId);
+        if (!change) {
+          continue;
+        }
+
+        // Check if this change has the file
+        if (change.fileSnapshot && change.fileSnapshot[filePath] !== undefined) {
+          // Check if this change MODIFIED the file (different from parent)
+          let isModified = false;
+
+          if (change.parents && change.parents.length > 0) {
+            const parent = await graph.getChange(change.parents[0]);
+            const parentContent = parent?.fileSnapshot?.[filePath];
+            const changeContent = change.fileSnapshot[filePath];
+
+            // This change modified the file if:
+            // 1. Parent doesn't have the file (file was added)
+            // 2. Content is different from parent
+            if (parentContent === undefined || parentContent !== changeContent) {
+              isModified = true;
+            }
+          } else {
+            // No parent = root change, so this is where the file was added
+            isModified = true;
+          }
+
+          if (isModified) {
+            return change;
+          }
+        }
+
+        // Continue to parents
+        if (change.parents) {
+          queue.push(...change.parents);
+        }
+      }
+
+      return null;
+    },
+
+    /**
+     * Simplify parent edges by removing redundant parents
+     *
+     * A parent is redundant if it's already an ancestor through another parent.
+     * This operation optimizes the graph structure without changing the content.
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.revision - Change ID to simplify
+     * @returns {Promise<{changeId: string, simplified: boolean, removedParents?: string[]}>}
+     */
+    async simplifyParents(args) {
+      if (!args || !args.revision) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing revision argument', {
+          suggestion: 'Provide: { revision: "abc123..." }',
+        });
+      }
+
+      await graph.load();
+      await userConfig.load();
+
+      const change = await graph.getChange(args.revision);
+      const user = userConfig.getUser();
+
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.revision} not found`);
+      }
+
+      // If change has 0 or 1 parents, nothing to simplify
+      if (!change.parents || change.parents.length <= 1) {
+        return {
+          changeId: args.revision,
+          simplified: false,
+        };
+      }
+
+      // Find redundant parents
+      // A parent P is redundant if there exists another parent Q such that P is an ancestor of Q
+      const redundantParents = [];
+
+      for (let i = 0; i < change.parents.length; i++) {
+        const parentP = change.parents[i];
+
+        // Check if parentP is an ancestor of any other parent
+        for (let j = 0; j < change.parents.length; j++) {
+          if (i === j) continue;
+
+          const parentQ = change.parents[j];
+
+          // Get all ancestors of parentQ
+          const ancestorsQ = await this.log({ revisions: [parentQ] });
+          const ancestorIds = ancestorsQ.map(c => c.changeId);
+
+          // If parentP is in the ancestors of parentQ, then parentP is redundant
+          if (ancestorIds.includes(parentP)) {
+            if (!redundantParents.includes(parentP)) {
+              redundantParents.push(parentP);
+            }
+            break;
+          }
+        }
+      }
+
+      // If no redundant parents found, nothing changed
+      if (redundantParents.length === 0) {
+        return {
+          changeId: args.revision,
+          simplified: false,
+        };
+      }
+
+      // Remove redundant parents
+      change.parents = change.parents.filter(p => !redundantParents.includes(p));
+      await graph.updateChange(change);
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: user.name, email: user.email, hostname: 'localhost' },
+        description: `simplify parents of ${args.revision.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [args.revision],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return {
+        changeId: args.revision,
+        simplified: true,
+        removedParents: redundantParents,
       };
     },
 
@@ -4801,6 +5308,235 @@ export async function createJJ(options) {
       async list() {
         await userConfig.load();
         return userConfig.config;
+      },
+    },
+
+    /**
+     * Sparse checkout management
+     *
+     * Controls which paths are materialized in the working copy.
+     * Useful for large repositories where you only need specific files.
+     */
+    sparse: {
+      /**
+       * List current sparse patterns
+       *
+       * @returns {Promise<string[]>} Array of sparse patterns
+       */
+      async list() {
+        await workingCopy.load();
+        return workingCopy.getSparsePatterns();
+      },
+
+      /**
+       * Set sparse patterns (replaces all existing patterns)
+       *
+       * @param {Object} args - Arguments
+       * @param {string[]} args.patterns - Array of glob patterns
+       * @returns {Promise<{patterns: string[]}>} Result with current patterns
+       */
+      async set(args) {
+        if (!args || !Array.isArray(args.patterns)) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing patterns array', {
+            suggestion: 'Provide: { patterns: ["src/**", "README.md"] }',
+          });
+        }
+
+        await workingCopy.load();
+        await workingCopy.setSparsePatterns(args.patterns);
+        await workingCopy.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `sparse set ${args.patterns.length} pattern(s)`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { patterns: args.patterns };
+      },
+
+      /**
+       * Add patterns to sparse checkout
+       *
+       * @param {Object} args - Arguments
+       * @param {string[]} args.patterns - Array of glob patterns to add
+       * @returns {Promise<{patterns: string[]}>} Result with current patterns
+       */
+      async add(args) {
+        if (!args || !Array.isArray(args.patterns)) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing patterns array', {
+            suggestion: 'Provide: { patterns: ["tests/**"] }',
+          });
+        }
+
+        await workingCopy.load();
+        const currentPatterns = workingCopy.getSparsePatterns();
+
+        // Add new patterns, avoiding duplicates
+        const updatedPatterns = [...currentPatterns];
+        for (const pattern of args.patterns) {
+          if (!updatedPatterns.includes(pattern)) {
+            updatedPatterns.push(pattern);
+          }
+        }
+
+        await workingCopy.setSparsePatterns(updatedPatterns);
+        await workingCopy.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `sparse add ${args.patterns.length} pattern(s)`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { patterns: updatedPatterns };
+      },
+
+      /**
+       * Remove patterns from sparse checkout
+       *
+       * @param {Object} args - Arguments
+       * @param {string[]} args.patterns - Array of glob patterns to remove
+       * @returns {Promise<{patterns: string[]}>} Result with current patterns
+       */
+      async remove(args) {
+        if (!args || !Array.isArray(args.patterns)) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing patterns array', {
+            suggestion: 'Provide: { patterns: ["tests/**"] }',
+          });
+        }
+
+        await workingCopy.load();
+        const currentPatterns = workingCopy.getSparsePatterns();
+
+        // Remove specified patterns
+        const updatedPatterns = currentPatterns.filter(p => !args.patterns.includes(p));
+
+        await workingCopy.setSparsePatterns(updatedPatterns);
+        await workingCopy.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `sparse remove ${args.patterns.length} pattern(s)`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { patterns: updatedPatterns };
+      },
+
+      /**
+       * Reset to full checkout (remove all sparse patterns)
+       *
+       * @returns {Promise<{patterns: string[]}>} Result with empty patterns
+       */
+      async reset() {
+        await workingCopy.load();
+        await workingCopy.setSparsePatterns([]);
+        await workingCopy.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: 'sparse reset (full checkout)',
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { patterns: [] };
+      },
+
+      /**
+       * Clear all patterns (empty working copy)
+       * Alias for reset()
+       *
+       * @returns {Promise<{patterns: string[]}>} Result with empty patterns
+       */
+      async clear() {
+        return await this.reset();
+      },
+    },
+
+    /**
+     * Binary search to find first bad change (bisect)
+     *
+     * @status PARTIAL - Basic structure implemented, full bisect logic pending
+     */
+    bisect: {
+      /**
+       * Start bisect session
+       */
+      async start(args) {
+        throw new JJError('UNSUPPORTED_OPERATION', 'bisect is not yet fully implemented', {
+          feature: 'bisect',
+          reason: 'Binary search logic requires complex change graph traversal',
+          alternative: 'Use jj.log() to manually inspect changes',
+          status: 'planned for future release',
+        });
+      },
+
+      /**
+       * Mark current change as good
+       */
+      async good() {
+        throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+      },
+
+      /**
+       * Mark current change as bad
+       */
+      async bad() {
+        throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+      },
+
+      /**
+       * Skip current change
+       */
+      async skip() {
+        throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+      },
+
+      /**
+       * Reset/end bisect session
+       */
+      async reset() {
+        return { active: false };
+      },
+
+      /**
+       * Get bisect status
+       */
+      async status() {
+        return { active: false };
       },
     },
 
