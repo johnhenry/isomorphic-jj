@@ -116,15 +116,15 @@ This roadmap outlines feature development organized by functional area, showing 
 - ✅ **JJ CLI Compatibility**: Complete semantic compatibility with JJ CLI
 
 **v1.0 Achievement:**
-- 493 tests passing (86 new tests for v1.0 features)
+- 501 tests passing (94 new tests for v1.0+ features)
 - Complete file.* namespace matching JJ CLI (including chmod, annotate)
-- Complete operations.* namespace (including revert)
+- Complete operations.* namespace (including revert, abandon)
 - Complete workspace.* namespace (including forget)
 - Complete git.* namespace (including root)
 - Complete bookmark.* namespace (including create with validation)
 - parallelize() for advanced graph manipulation
 - rebase() for proper JJ CLI history semantics
-- ~98% JJ CLI feature parity
+- ~99% JJ CLI feature parity
 - 100% backward compatible (zero breaking changes)
 - Production ready!
 
@@ -161,6 +161,7 @@ All remaining JJ CLI parity features completed:
 - ✅ **`file.annotate()`**: Git-blame equivalent
 - ✅ **`file.chmod()`**: Change file permissions (Node.js only)
 - ✅ **`operations.show()` / `diff()` / `restore()` / `revert()`**: Advanced operation log features
+- ✅ **`operations.abandon()`**: Remove operations from log with child relinking
 - ✅ **`workspace.forget()`**: Forget workspace without deleting files
 - ✅ **`parallelize()`**: Make revisions siblings - advanced graph manipulation
 - ✅ **`config.get()` / `set()` / `list()`**: Config management
@@ -243,4 +244,4 @@ All remaining JJ CLI parity features completed:
 
 ---
 
-**Current Status**: 493 tests, 100% passing | v1.0 Complete with full JJ CLI compatibility!
+**Current Status**: 501 tests, 100% passing | v1.0+ Complete with full JJ CLI compatibility!

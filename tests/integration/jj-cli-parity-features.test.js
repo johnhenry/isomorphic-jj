@@ -566,4 +566,255 @@ describe('JJ CLI Parity Features', () => {
       await expect(jj.operations.revert({})).rejects.toThrow('Missing operation ID');
     });
   });
+
+  // ========================================
+  // Operation Abandon
+  // ========================================
+
+  describe('operations.abandon()', () => {
+    it('should abandon an operation and relink children', async () => {
+      // Create several operations to have a chain
+      await jj.write({ path: 'file1.txt', data: 'content1' });
+      await jj.new({ message: 'Change 1' });
+      const ops1 = await jj.operations.list({ limit: 1 });
+      const op1 = ops1[0];
+
+      await jj.write({ path: 'file2.txt', data: 'content2' });
+      await jj.new({ message: 'Change 2' });
+      const ops2 = await jj.operations.list({ limit: 1 });
+      const op2 = ops2[0]; // Middle operation to abandon
+
+      await jj.write({ path: 'file3.txt', data: 'content3' });
+      await jj.new({ message: 'Change 3' });
+      const ops3 = await jj.operations.list({ limit: 1 });
+      const op3 = ops3[0]; // Child operation
+
+      // Get initial operation count
+      const allOpsBefore = await jj.operations.list();
+      const countBefore = allOpsBefore.length;
+
+      // Abandon op2 (middle operation)
+      const result = await jj.operations.abandon({ operation: op2.id });
+
+      expect(result.abandoned).toBe(op2.id);
+      expect(result.description).toBe(op2.description);
+      expect(result.relinkedChildren).toBeTruthy();
+
+      // Verify operation was removed
+      const allOpsAfter = await jj.operations.list();
+      expect(allOpsAfter.length).toBe(countBefore); // +1 for abandon operation, -1 for removed = same
+      expect(allOpsAfter.find(op => op.id === op2.id)).toBeUndefined();
+
+      // Verify child was relinked
+      const childOp = allOpsAfter.find(op => op.id === op3.id);
+      expect(childOp).toBeTruthy();
+      // Child should now point to op1 as parent (or its grandparent)
+      expect(childOp.parents).not.toContain(op2.id);
+    });
+
+    it('should abandon a leaf operation', async () => {
+      // Create an operation
+      await jj.write({ path: 'test.txt', data: 'test' });
+      await jj.new({ message: 'Test change' });
+      const ops = await jj.operations.list({ limit: 1 });
+      const leafOp = ops[0];
+
+      // Abandon it
+      const result = await jj.operations.abandon({ operation: leafOp.id });
+
+      expect(result.abandoned).toBe(leafOp.id);
+      expect(result.relinkedChildren.length).toBe(0); // No children
+
+      // Verify it's gone
+      const allOps = await jj.operations.list();
+      expect(allOps.find(op => op.id === leafOp.id)).toBeUndefined();
+    });
+
+    it('should update head when abandoning the head operation', async () => {
+      // Create some operations to ensure we have at least 2
+      await jj.write({ path: 'file1.txt', data: 'content1' });
+      await jj.new({ message: 'Change 1' });
+
+      await jj.write({ path: 'file2.txt', data: 'content2' });
+      await jj.new({ message: 'Change 2' });
+
+      // Get current head
+      const opsBefore = await jj.operations.list({ limit: 2 });
+      const headOp = opsBefore[0];
+      const previousOp = opsBefore[1];
+
+      // Abandon head
+      const result = await jj.operations.abandon({ operation: headOp.id });
+
+      expect(result.abandoned).toBe(headOp.id);
+      // New head should not be the abandoned operation
+      expect(result.newHead).not.toBe(headOp.id);
+    });
+
+    it('should relink multiple children to grandparent', async () => {
+      // Create a parent operation
+      await jj.write({ path: 'parent.txt', data: 'parent' });
+      await jj.new({ message: 'Parent' });
+      const parentOps = await jj.operations.list({ limit: 1 });
+      const parentOp = parentOps[0];
+
+      // Create middle operation to abandon
+      await jj.write({ path: 'middle.txt', data: 'middle' });
+      await jj.new({ message: 'Middle' });
+      const middleOps = await jj.operations.list({ limit: 1 });
+      const middleOp = middleOps[0];
+
+      // Create multiple children
+      await jj.write({ path: 'child1.txt', data: 'child1' });
+      await jj.new({ message: 'Child 1' });
+      const child1Ops = await jj.operations.list({ limit: 1 });
+      const child1Op = child1Ops[0];
+
+      await jj.write({ path: 'child2.txt', data: 'child2' });
+      await jj.new({ message: 'Child 2' });
+      const child2Ops = await jj.operations.list({ limit: 1 });
+      const child2Op = child2Ops[0];
+
+      // Abandon middle operation
+      const result = await jj.operations.abandon({ operation: middleOp.id });
+
+      expect(result.relinkedChildren.length).toBeGreaterThan(0);
+
+      // Verify children don't reference abandoned operation
+      const allOps = await jj.operations.list();
+      const updatedChild1 = allOps.find(op => op.id === child1Op.id);
+      const updatedChild2 = allOps.find(op => op.id === child2Op.id);
+
+      if (updatedChild1) {
+        expect(updatedChild1.parents).not.toContain(middleOp.id);
+      }
+      if (updatedChild2) {
+        expect(updatedChild2.parents).not.toContain(middleOp.id);
+      }
+    });
+
+    it('should throw error if operation not found', async () => {
+      await expect(
+        jj.operations.abandon({ operation: 'nonexistent-operation-id' })
+      ).rejects.toThrow('Operation nonexistent-operation-id not found');
+    });
+
+    it('should throw error if operation ID is missing', async () => {
+      await expect(jj.operations.abandon({})).rejects.toThrow('Missing operation ID');
+    });
+
+    it('should throw error when abandoning the only operation', async () => {
+      // Get all operations
+      const allOps = await jj.operations.list();
+
+      // Try to abandon operations until only one remains
+      // Start from oldest (last in array) and work backwards
+      for (let i = allOps.length - 1; i > 0; i--) {
+        await jj.operations.abandon({ operation: allOps[i].id });
+      }
+
+      // Now try to abandon the last remaining operation
+      const remainingOps = await jj.operations.list();
+      // Account for abandon operations that were created
+      const oldestOp = remainingOps[remainingOps.length - 1];
+
+      // This should fail
+      await expect(
+        jj.operations.abandon({ operation: oldestOp.id })
+      ).rejects.toThrow('Cannot abandon the only operation');
+    });
+
+    it('should record abandonment in operation log', async () => {
+      // Create an operation to abandon
+      await jj.write({ path: 'temp.txt', data: 'temp' });
+      await jj.new({ message: 'Temp' });
+      const ops = await jj.operations.list({ limit: 1 });
+      const opToAbandon = ops[0];
+
+      // Count operations before
+      const beforeCount = (await jj.operations.list()).length;
+
+      // Abandon it
+      await jj.operations.abandon({ operation: opToAbandon.id });
+
+      // Count operations after
+      const afterOps = await jj.operations.list();
+      const afterCount = afterOps.length;
+
+      // Should have one more operation (the abandon operation itself)
+      // minus the abandoned operation = same count
+      expect(afterCount).toBe(beforeCount);
+
+      // Check that latest operation is the abandon operation
+      const latestOp = afterOps[0];
+      expect(latestOp.description).toContain('abandon operation');
+    });
+  });
+
+  // ========================================
+  // Stub Methods (Out of Scope Features)
+  // ========================================
+
+  describe('Out-of-scope stub methods', () => {
+    describe('resolve()', () => {
+      it('should throw error explaining why resolve is not supported', async () => {
+        await expect(jj.resolve()).rejects.toThrow(
+          'Interactive conflict resolution (jj resolve) is not supported in JavaScript environments'
+        );
+      });
+
+      it('should throw UNSUPPORTED_OPERATION error code', async () => {
+        await expect(jj.resolve()).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION'
+        });
+      });
+
+      it('should provide helpful suggestions for alternatives', async () => {
+        const error = await jj.resolve().catch(e => e);
+        expect(error.suggestion).toContain('jj.conflicts.list()');
+        expect(error.suggestion).toContain('jj.conflicts.resolve');
+        expect(error.suggestion).toContain('programmatic conflict API');
+      });
+    });
+
+    describe('file.track()', () => {
+      it('should throw error explaining why track is not needed', async () => {
+        await expect(jj.file.track({ path: 'test.txt' })).rejects.toThrow(
+          'Explicit file tracking (jj file track) is not needed in JavaScript environments'
+        );
+      });
+
+      it('should throw UNSUPPORTED_OPERATION error code', async () => {
+        await expect(jj.file.track({ path: 'test.txt' })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION'
+        });
+      });
+
+      it('should provide helpful suggestions for alternatives', async () => {
+        const error = await jj.file.track({ path: 'test.txt' }).catch(e => e);
+        expect(error.suggestion).toContain('jj.file.write');
+        expect(error.suggestion).toContain('automatically tracked');
+      });
+    });
+
+    describe('file.untrack()', () => {
+      it('should throw error explaining why untrack is not needed', async () => {
+        await expect(jj.file.untrack({ path: 'test.txt' })).rejects.toThrow(
+          'Explicit file untracking (jj file untrack) is not needed in JavaScript environments'
+        );
+      });
+
+      it('should throw UNSUPPORTED_OPERATION error code', async () => {
+        await expect(jj.file.untrack({ path: 'test.txt' })).rejects.toMatchObject({
+          code: 'UNSUPPORTED_OPERATION'
+        });
+      });
+
+      it('should provide helpful suggestions for alternatives', async () => {
+        const error = await jj.file.untrack({ path: 'test.txt' }).catch(e => e);
+        expect(error.suggestion).toContain('jj.file.remove');
+        expect(error.suggestion).toContain('jj.remove');
+      });
+    });
+  });
 });

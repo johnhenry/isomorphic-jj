@@ -165,7 +165,7 @@ export class OperationLog {
 
   /**
    * Get operation by ID
-   * 
+   *
    * @param {string} operationId - Operation ID
    * @returns {Promise<Object|null>} Operation or null if not found
    */
@@ -175,5 +175,98 @@ export class OperationLog {
     }
 
     return this.operations.find(op => op.id === operationId) || null;
+  }
+
+  /**
+   * Abandon an operation (remove from log)
+   *
+   * This is an advanced operation that removes an operation from the log.
+   * Children of the abandoned operation are relinked to the abandoned operation's parent.
+   *
+   * @param {string} operationId - Operation ID to abandon
+   * @returns {Promise<Object>} Result with abandoned operation and relinked children
+   */
+  async abandon(operationId) {
+    if (this.operations.length === 0 && this.headOperationId === null) {
+      await this.load();
+    }
+
+    // Validate operationId
+    if (!operationId) {
+      throw new JJError('INVALID_ARGUMENT', 'Missing operation ID', {
+        suggestion: 'Provide an operation ID to abandon',
+      });
+    }
+
+    // Find the operation
+    const opIndex = this.operations.findIndex(op => op.id === operationId);
+    if (opIndex === -1) {
+      throw new JJError('OPERATION_NOT_FOUND', `Operation ${operationId} not found`, {
+        operationId,
+        suggestion: 'Use operations.list() to see available operations',
+      });
+    }
+
+    const operation = this.operations[opIndex];
+
+    // Cannot abandon the only operation
+    if (this.operations.length === 1) {
+      throw new JJError('CANNOT_ABANDON', 'Cannot abandon the only operation in the log', {
+        suggestion: 'The operation log must contain at least one operation',
+      });
+    }
+
+    // Find children (operations that reference this as a parent)
+    const children = this.operations.filter(op =>
+      op.parents && op.parents.includes(operationId)
+    );
+
+    // Get the parent of the operation being abandoned (may be undefined for root)
+    const grandparentId = operation.parents && operation.parents.length > 0
+      ? operation.parents[0]
+      : undefined;
+
+    // Relink children to grandparent
+    const relinkedChildren = [];
+    for (const child of children) {
+      // Replace references to abandoned operation with grandparent
+      const oldParents = [...child.parents];
+      child.parents = child.parents.map(p =>
+        p === operationId ? grandparentId : p
+      ).filter(Boolean); // Remove undefined if there was no grandparent
+
+      // If there was no grandparent, the child becomes a root operation
+      if (!grandparentId && child.parents.length === 0) {
+        child.parents = [];
+      }
+
+      relinkedChildren.push({
+        operationId: child.id,
+        oldParents,
+        newParents: child.parents,
+      });
+    }
+
+    // Remove from array
+    this.operations.splice(opIndex, 1);
+
+    // Update head if we abandoned the head operation
+    if (this.headOperationId === operationId) {
+      this.headOperationId = this.operations.length > 0
+        ? this.operations[this.operations.length - 1].id
+        : null;
+    }
+
+    // Rewrite JSONL file
+    const content = this.operations
+      .map(op => JSON.stringify(op))
+      .join('\n') + (this.operations.length > 0 ? '\n' : '');
+    await this.storage.write('repo/op_log/oplog.jsonl', content);
+
+    return {
+      abandoned: operation,
+      relinkedChildren,
+      newHead: this.headOperationId,
+    };
   }
 }

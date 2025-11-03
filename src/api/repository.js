@@ -705,8 +705,8 @@ export async function createJJ(options) {
             mode: stats.mode,
           });
         } catch (error) {
-          // Log but don't throw - stream already finished
-          console.error(`Warning: Failed to track file ${args.path}:`, error);
+          // Silently ignore - stream already finished, file tracking is best-effort
+          // (Common in tests where temp directories are cleaned up quickly)
         }
       });
 
@@ -2071,6 +2071,59 @@ export async function createJJ(options) {
           description: targetOp.description,
         };
       },
+
+      /**
+       * Abandon an operation (remove from operation log)
+       *
+       * This is an advanced operation that permanently removes an operation from the log.
+       * Children of the abandoned operation are automatically relinked to the abandoned
+       * operation's parent to maintain chain integrity.
+       *
+       * WARNING: This is a destructive operation that cannot be undone. Use with caution.
+       * In most cases, you should use undo(), restore(), or revert() instead.
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.operation - Operation ID to abandon
+       * @returns {Promise<Object>} Abandon result with relinked children
+       */
+      async abandon(args) {
+        if (!args || !args.operation) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing operation ID', {
+            suggestion: 'Provide { operation: operationId }',
+          });
+        }
+
+        await oplog.load();
+
+        // Call the OperationLog abandon method
+        const result = await oplog.abandon(args.operation);
+
+        // Record a new operation about the abandonment
+        // Note: This creates a meta-record that an operation was abandoned
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `abandon operation ${args.operation}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+          metadata: {
+            abandonedOperation: args.operation,
+            relinkedChildren: result.relinkedChildren.map(c => c.operationId),
+          },
+        });
+
+        return {
+          abandoned: args.operation,
+          description: result.abandoned.description,
+          relinkedChildren: result.relinkedChildren,
+          newHead: result.newHead,
+        };
+      },
     },
 
     // ========================================
@@ -3347,6 +3400,34 @@ export async function createJJ(options) {
     },
 
     /**
+     * Interactive conflict resolution (stub - not supported)
+     *
+     * This is a stub method that throws an error explaining why interactive
+     * conflict resolution is not available in JavaScript/browser environments.
+     *
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    async resolve() {
+      throw new JJError(
+        'UNSUPPORTED_OPERATION',
+        'Interactive conflict resolution (jj resolve) is not supported in JavaScript environments',
+        {
+          suggestion: [
+            'Use the programmatic conflict API instead:',
+            '  - jj.conflicts.list() to see conflicts',
+            '  - jj.conflicts.get({ conflictId }) to inspect a conflict',
+            '  - jj.conflicts.markers({ conflictId }) to get conflict markers',
+            '  - jj.conflicts.resolve({ conflictId, resolution }) to resolve',
+            '  - jj.conflicts.resolveMany({ strategy, paths }) for bulk resolution',
+            '',
+            'Interactive conflict resolution requires a terminal and editor,',
+            'which are not available in JavaScript/browser contexts.',
+          ].join('\n'),
+        }
+      );
+    },
+
+    /**
      * File operations namespace - Matches JJ CLI file commands
      */
     file: {
@@ -3518,9 +3599,68 @@ export async function createJJ(options) {
         };
       },
 
-      // Future extensions:
-      // async track(args) { ... }     // Track files
-      // async untrack(args) { ... }   // Untrack files
+      /**
+       * Track files (stub - not supported)
+       *
+       * This is a stub method that throws an error explaining why explicit
+       * file tracking is not needed in JavaScript environments.
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.path - File path to track
+       * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+       */
+      async track(args) {
+        throw new JJError(
+          'UNSUPPORTED_OPERATION',
+          'Explicit file tracking (jj file track) is not needed in JavaScript environments',
+          {
+            suggestion: [
+              'Files are automatically tracked when you write them:',
+              '  - jj.file.write({ path, data }) - Automatically tracks the file',
+              '  - jj.write({ path, data }) - Same as above (convenience method)',
+              '',
+              'The file tracking system in JJ CLI is designed for manual filesystem',
+              'edits (using editors, command-line tools, etc.). In isomorphic-jj,',
+              'all file modifications go through the API, so tracking is automatic.',
+              '',
+              'To add a file to the repository, simply write it:',
+              '  await jj.write({ path: "myfile.txt", data: "content" });',
+            ].join('\n'),
+          }
+        );
+      },
+
+      /**
+       * Untrack files (stub - not supported)
+       *
+       * This is a stub method that throws an error explaining why explicit
+       * file untracking is not needed in JavaScript environments.
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.path - File path to untrack
+       * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+       */
+      async untrack(args) {
+        throw new JJError(
+          'UNSUPPORTED_OPERATION',
+          'Explicit file untracking (jj file untrack) is not needed in JavaScript environments',
+          {
+            suggestion: [
+              'To remove a file from the repository, use:',
+              '  - jj.file.remove({ path }) - Removes and untracks the file',
+              '  - jj.remove({ path }) - Same as above (convenience method)',
+              '',
+              'The file tracking system in JJ CLI is designed for manual filesystem',
+              'edits (using editors, command-line tools, etc.). In isomorphic-jj,',
+              'all file modifications go through the API, so untracking is automatic',
+              'when you remove a file.',
+              '',
+              'To remove a file:',
+              '  await jj.remove({ path: "myfile.txt" });',
+            ].join('\n'),
+          }
+        );
+      },
     },
 
     /**

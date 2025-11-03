@@ -762,6 +762,20 @@ export interface FileChmodArgs {
 }
 
 /**
+ * File track arguments (stub - throws error)
+ */
+export interface FileTrackArgs {
+  path: string;
+}
+
+/**
+ * File untrack arguments (stub - throws error)
+ */
+export interface FileUntrackArgs {
+  path: string;
+}
+
+/**
  * Parallelize arguments (matches `jj parallelize`)
  */
 export interface ParallelizeArgs {
@@ -773,6 +787,13 @@ export interface ParallelizeArgs {
  * Operation revert arguments (matches `jj operation revert`)
  */
 export interface OperationRevertArgs {
+  operation: OperationID;
+}
+
+/**
+ * Operation abandon arguments (matches `jj operation abandon`)
+ */
+export interface OperationAbandonArgs {
   operation: OperationID;
 }
 
@@ -916,10 +937,31 @@ export interface JJ {
       };
       description: string;
     }>;
+    abandon(args: OperationAbandonArgs): Promise<{
+      abandoned: OperationID;
+      description: string;
+      relinkedChildren: Array<{
+        operationId: OperationID;
+        oldParents: OperationID[];
+        newParents: OperationID[];
+      }>;
+      newHead: OperationID | null;
+    }>;
   };
 
   // Conflicts
   merge(args: MergeArgs): Promise<MergeResult>;
+
+  /**
+   * Interactive conflict resolution (stub - throws error)
+   *
+   * This method always throws an error explaining that interactive
+   * conflict resolution is not supported in JavaScript environments.
+   * Use the programmatic conflicts API instead.
+   *
+   * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+   */
+  resolve(): Promise<never>;
 
   // Bookmarks
   bookmark: {
@@ -978,6 +1020,24 @@ export interface JJ {
       mode: number;
       modeOctal: string;
     }>;
+    /**
+     * Track files (stub - throws error)
+     *
+     * This method always throws an error explaining that explicit
+     * file tracking is not needed in JavaScript environments.
+     *
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    track(args: FileTrackArgs): Promise<never>;
+    /**
+     * Untrack files (stub - throws error)
+     *
+     * This method always throws an error explaining that explicit
+     * file untracking is not needed in JavaScript environments.
+     *
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    untrack(args: FileUntrackArgs): Promise<never>;
   };
 
   // Workspaces

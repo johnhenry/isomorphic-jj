@@ -99,13 +99,18 @@ describe('Streaming API', () => {
     it('should emit error for non-existent file', async () => {
       const stream = await jj.readStream({ path: 'nonexistent.txt' });
 
-      await expect(
-        new Promise((resolve, reject) => {
-          stream.on('error', reject);
-          stream.on('data', () => {});
-          stream.on('end', resolve);
-        })
-      ).rejects.toThrow(/ENOENT|no such file/i);
+      // Capture the error without letting it propagate to console
+      const error = await new Promise((resolve, reject) => {
+        stream.on('error', (err) => {
+          resolve(err); // Resolve with the error instead of rejecting
+        });
+        stream.on('data', () => {});
+        stream.on('end', () => {
+          reject(new Error('Stream should have emitted error'));
+        });
+      });
+
+      expect(error.message).toMatch(/ENOENT|no such file/i);
     });
 
     it('should throw error when path is missing', async () => {
