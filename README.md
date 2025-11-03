@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-447%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-460%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
@@ -70,8 +70,25 @@ isomorphic-jj v1.0 achieves **complete JJ CLI semantic compatibility** while mai
 - **`workspace.root()`** - Get workspace root directory
 - **`workspace.updateStale()`** - Update workspaces pointing to abandoned changes
 
+### Complete JJ CLI Parity (~95% coverage!)
+isomorphic-jj v1.0 now implements virtually all commonly-used JJ CLI commands:
+- **`git.clone()`** - Clone Git repositories with JJ metadata
+- **`git.remote.*`** - Complete remote management (list, add, remove, rename, setUrl)
+- **`bookmark.rename()`** - Rename bookmarks
+- **`bookmark.track/untrack/forget()`** - Remote bookmark management
+- **`config.*`** - Configuration management (get, set, list)
+- **`diff()`** - Show file differences between revisions
+- **`next()` / `prev()`** - Navigate between parent/child revisions
+- **`duplicate()`** - Create copies of changes
+- **`restore()`** - Restore files from another revision
+- **`file.annotate()`** - Git-blame equivalent (line-by-line history)
+- **`operations.show/diff/restore()`** - Advanced operation log features
+- **`remote.*`** - Convenience aliases for git operations (push, fetch, add)
+
+See [JJ_CLI_PARITY.md](./JJ_CLI_PARITY.md) for complete feature comparison.
+
 ### Testing & Quality
-- **447 tests** passing - Complete test coverage for all v1.0 features
+- **460 tests** passing - Complete test coverage for all v1.0 features
 - **100% backward compatible** - All existing code continues to work
 - **Zero breaking changes** - Deprecated features show warnings but still function
 

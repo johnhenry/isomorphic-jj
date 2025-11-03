@@ -232,7 +232,7 @@ export async function createJJ(options) {
       // Delegate all read operations directly to base graph
       load: () => baseGraph.load(),
       getChange: (changeId) => baseGraph.getChange(changeId),
-      getAllChanges: () => baseGraph.getAllChanges(),
+      getAllChanges: () => baseGraph.getAll(), // Alias for compatibility
       getAll: () => baseGraph.getAll(),  // Used by revset engine
       getAncestors: (changeId) => baseGraph.getAncestors(changeId),
       getDescendants: (changeId) => baseGraph.getDescendants(changeId),
@@ -1157,6 +1157,15 @@ export async function createJJ(options) {
       // Snapshot filesystem BEFORE operation (for undo)
       const fileSnapshot = await snapshotFilesystem();
 
+      // Update current working copy change with the file snapshot
+      // This ensures files written before jj.new() are captured
+      const currentChangeId = workingCopy.getCurrentChangeId();
+      const currentChange = await graph.getChange(currentChangeId);
+      if (currentChange && fileSnapshot) {
+        currentChange.fileSnapshot = fileSnapshot;
+        await graph.updateChange(currentChange);
+      }
+
       // Determine parents
       let parents;
       if (args.insertAfter) {
@@ -1796,6 +1805,167 @@ export async function createJJ(options) {
           // Other methods can be added as needed
         };
       },
+
+      /**
+       * Show changes in a specific operation (matches `jj operation show`)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.operation - Operation ID
+       * @returns {Promise<Object>} Operation details with changes made
+       */
+      async show(args) {
+        if (!args || !args.operation) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing operation ID', {
+            suggestion: 'Provide { operation: operationId }',
+          });
+        }
+
+        await oplog.load();
+        const ops = await oplog.list();
+        const op = ops.find(o => o.id === args.operation);
+
+        if (!op) {
+          throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
+        }
+
+        // Get changes introduced by this operation
+        await graph.load();
+        const changes = [];
+        if (op.view && op.view.heads) {
+          for (const changeId of op.view.heads) {
+            const change = await graph.getChange(changeId);
+            if (change) {
+              changes.push(change);
+            }
+          }
+        }
+
+        return {
+          id: op.id,
+          timestamp: op.timestamp,
+          user: op.user,
+          description: op.description,
+          view: op.view,
+          changes,
+        };
+      },
+
+      /**
+       * Compare repository state between two operations (matches `jj operation diff`)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.from - Source operation ID
+       * @param {string} args.to - Target operation ID
+       * @returns {Promise<Object>} Differences between operations
+       */
+      async diff(args) {
+        if (!args || !args.from || !args.to) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing from or to operation ID', {
+            suggestion: 'Provide both { from: opId1, to: opId2 }',
+          });
+        }
+
+        await oplog.load();
+        const ops = await oplog.list();
+        const fromOp = ops.find(o => o.id === args.from);
+        const toOp = ops.find(o => o.id === args.to);
+
+        if (!fromOp) {
+          throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.from} not found`);
+        }
+        if (!toOp) {
+          throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.to} not found`);
+        }
+
+        // Compare views
+        const fromHeads = new Set(fromOp.view?.heads || []);
+        const toHeads = new Set(toOp.view?.heads || []);
+
+        const addedHeads = [...toHeads].filter(h => !fromHeads.has(h));
+        const removedHeads = [...fromHeads].filter(h => !toHeads.has(h));
+
+        // Compare bookmarks
+        const fromBookmarks = fromOp.view?.bookmarks || {};
+        const toBookmarks = toOp.view?.bookmarks || {};
+
+        const bookmarkChanges = {};
+        for (const name of new Set([...Object.keys(fromBookmarks), ...Object.keys(toBookmarks)])) {
+          if (fromBookmarks[name] !== toBookmarks[name]) {
+            bookmarkChanges[name] = {
+              from: fromBookmarks[name],
+              to: toBookmarks[name],
+            };
+          }
+        }
+
+        return {
+          from: args.from,
+          to: args.to,
+          addedHeads,
+          removedHeads,
+          bookmarkChanges,
+          workingCopyChanged: fromOp.view?.workingCopy !== toOp.view?.workingCopy,
+        };
+      },
+
+      /**
+       * Restore repository to a specific operation (matches `jj operation restore`)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.operation - Operation ID to restore to
+       * @returns {Promise<Object>} Restore result
+       */
+      async restore(args) {
+        if (!args || !args.operation) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing operation ID', {
+            suggestion: 'Provide { operation: operationId }',
+          });
+        }
+
+        await oplog.load();
+        const ops = await oplog.list();
+        const targetOp = ops.find(o => o.id === args.operation);
+
+        if (!targetOp) {
+          throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
+        }
+
+        // Restore bookmarks from the target operation
+        if (targetOp.view && targetOp.view.bookmarks) {
+          await bookmarks.load();
+          // Clear current bookmarks
+          const currentBookmarks = await jj.bookmark.list();
+          for (const bookmark of currentBookmarks) {
+            await bookmarks.delete(bookmark.name);
+          }
+          // Restore bookmarks from target operation
+          for (const [name, changeId] of Object.entries(targetOp.view.bookmarks)) {
+            await bookmarks.set(name, changeId);
+          }
+          await bookmarks.save();
+        }
+
+        // Restore working copy if specified
+        if (targetOp.view && targetOp.view.workingCopy) {
+          await workingCopy.load();
+          await workingCopy.setCurrentChange(targetOp.view.workingCopy);
+        }
+
+        // Record this restoration as a new operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `restore to operation ${args.operation}`,
+          parents: [],
+          view: targetOp.view,
+        });
+
+        return {
+          restoredTo: args.operation,
+          timestamp: targetOp.timestamp,
+          description: targetOp.description,
+        };
+      },
     },
 
     // ========================================
@@ -2312,6 +2482,426 @@ export async function createJJ(options) {
 
         return result;
       },
+
+      /**
+       * Clone a Git repository (matches `jj git clone`)
+       *
+       * @param {Object} args - Clone arguments
+       * @param {string} args.url - Repository URL to clone from
+       * @param {string} [args.dir] - Directory to clone into (defaults to repo name from URL)
+       * @param {number} [args.depth] - Create shallow clone with history truncated to depth
+       * @param {boolean} [args.singleBranch] - Only clone single branch
+       * @param {boolean} [args.noTags] - Don't clone tags
+       * @param {string} [args.ref] - Specific ref/branch to clone
+       * @param {Function} [args.onProgress] - Progress callback
+       * @param {Function} [args.onAuth] - Authentication callback
+       * @returns {Promise<Object>} Clone result with directory path
+       */
+      async clone(args) {
+        if (!gitBackend) {
+          throw new JJError(
+            'BACKEND_NOT_AVAILABLE',
+            'Git backend not configured',
+            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+          );
+        }
+
+        if (!args || !args.url) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing url argument', {
+            suggestion: 'Provide a Git repository URL to clone from',
+          });
+        }
+
+        if (!http) {
+          throw new JJError('HTTP_NOT_AVAILABLE', 'HTTP client not provided', {
+            suggestion: 'Provide http option when creating JJ: createJJ({ fs, dir, git, http })',
+          });
+        }
+
+        // Determine clone directory
+        const git = (await import('isomorphic-git')).default;
+        const cloneDir = args.dir || args.url.split('/').pop().replace(/\.git$/, '');
+        const fullCloneDir = path.join(dir, cloneDir);
+
+        // Clone using isomorphic-git
+        await git.clone({
+          fs,
+          http,
+          dir: fullCloneDir,
+          url: args.url,
+          ref: args.ref,
+          depth: args.depth,
+          singleBranch: args.singleBranch,
+          noTags: args.noTags,
+          onProgress: args.onProgress,
+          onAuth: args.onAuth,
+        });
+
+        // Initialize JJ repository structure in cloned directory
+        const clonedBackend = new IsomorphicGitBackend({ fs, http, dir: fullCloneDir });
+        await clonedBackend._createJJRepoStructure();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `git clone from ${args.url}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return {
+          url: args.url,
+          directory: fullCloneDir,
+          ref: args.ref || 'HEAD',
+        };
+      },
+
+      /**
+       * Import Git refs into JJ bookmarks
+       *
+       * @returns {Promise<Object>} Import result
+       */
+      async import() {
+        if (!gitBackend) {
+          throw new JJError(
+            'BACKEND_NOT_AVAILABLE',
+            'Git backend not configured',
+            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+          );
+        }
+
+        await graph.load();
+        await bookmarks.load();
+
+        // Get all Git refs
+        const refs = await gitBackend.listRefs('refs/heads');
+        const importedBookmarks = [];
+
+        for (const ref of refs) {
+          const bookmarkName = ref.name.replace('refs/heads/', '');
+
+          // Find or create change for this commit
+          let change = await graph.findChangeByCommitId(ref.oid);
+          if (!change) {
+            // Create a new change for this commit
+            const changeId = generateChangeId();
+            const user = userConfig.getUser();
+            change = {
+              changeId,
+              commitId: ref.oid,
+              parents: [],
+              tree: ref.oid,
+              author: { name: user.name, email: user.email, timestamp: new Date().toISOString() },
+              committer: { name: user.name, email: user.email, timestamp: new Date().toISOString() },
+              description: `Imported from Git ref ${ref.name}`,
+              timestamp: new Date().toISOString(),
+            };
+            await graph.addChange(change);
+          }
+
+          // Create bookmark pointing to this change
+          await bookmarks.set(bookmarkName, change.changeId);
+          importedBookmarks.push(bookmarkName);
+        }
+
+        await bookmarks.save();
+        await graph.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `git import (${importedBookmarks.length} refs)`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { imported: importedBookmarks };
+      },
+
+      /**
+       * Export JJ bookmarks to Git refs
+       *
+       * @returns {Promise<Object>} Export result
+       */
+      async export() {
+        if (!gitBackend) {
+          throw new JJError(
+            'BACKEND_NOT_AVAILABLE',
+            'Git backend not configured',
+            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+          );
+        }
+
+        await graph.load();
+        await bookmarks.load();
+
+        const allBookmarks = bookmarks.list();
+        const exportedRefs = [];
+
+        for (const bookmark of allBookmarks) {
+          const change = await graph.getChange(bookmark.changeId);
+          if (!change || !change.commitId) {
+            continue;
+          }
+
+          // Update Git ref
+          const refName = `refs/heads/${bookmark.name}`;
+          await gitBackend.updateRef(refName, change.commitId);
+          exportedRefs.push(refName);
+        }
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `git export (${exportedRefs.length} refs)`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { exported: exportedRefs };
+      },
+
+      /**
+       * Git remote operations
+       */
+      remote: {
+        /**
+         * List Git remotes (matches `jj git remote list`)
+         *
+         * @returns {Promise<Array>} List of remotes with names and URLs
+         */
+        async list() {
+          if (!gitBackend) {
+            throw new JJError(
+              'BACKEND_NOT_AVAILABLE',
+              'Git backend not configured',
+              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+            );
+          }
+
+          const git = (await import('isomorphic-git')).default;
+          const remotes = await git.listRemotes({ fs, dir });
+          return remotes.map(r => ({ name: r.remote, url: r.url }));
+        },
+
+        /**
+         * Add a Git remote (matches `jj git remote add`)
+         *
+         * @param {Object} args - Remote arguments
+         * @param {string} args.name - Remote name
+         * @param {string} args.url - Remote URL
+         * @returns {Promise<Object>} Added remote info
+         */
+        async add(args) {
+          if (!gitBackend) {
+            throw new JJError(
+              'BACKEND_NOT_AVAILABLE',
+              'Git backend not configured',
+              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+            );
+          }
+
+          if (!args || !args.name || !args.url) {
+            throw new JJError('INVALID_ARGUMENT', 'Missing name or url', {
+              suggestion: 'Provide both name and url: { name: "origin", url: "https://..." }',
+            });
+          }
+
+          const git = (await import('isomorphic-git')).default;
+          await git.addRemote({
+            fs,
+            dir,
+            remote: args.name,
+            url: args.url,
+          });
+
+          // Record operation
+          await oplog.recordOperation({
+            timestamp: new Date().toISOString(),
+            user: await getUserOplogInfo(),
+            description: `git remote add ${args.name} ${args.url}`,
+            parents: [],
+            view: {
+              bookmarks: {},
+              remoteBookmarks: {},
+              heads: [],
+              workingCopy: workingCopy.getCurrentChangeId(),
+            },
+          });
+
+          return { name: args.name, url: args.url };
+        },
+
+        /**
+         * Remove a Git remote (matches `jj git remote remove`)
+         *
+         * @param {Object} args - Remote arguments
+         * @param {string} args.name - Remote name to remove
+         * @returns {Promise<Object>} Removal result
+         */
+        async remove(args) {
+          if (!gitBackend) {
+            throw new JJError(
+              'BACKEND_NOT_AVAILABLE',
+              'Git backend not configured',
+              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+            );
+          }
+
+          if (!args || !args.name) {
+            throw new JJError('INVALID_ARGUMENT', 'Missing remote name', {
+              suggestion: 'Provide remote name: { name: "origin" }',
+            });
+          }
+
+          const git = (await import('isomorphic-git')).default;
+          await git.deleteRemote({
+            fs,
+            dir,
+            remote: args.name,
+          });
+
+          // Record operation
+          await oplog.recordOperation({
+            timestamp: new Date().toISOString(),
+            user: await getUserOplogInfo(),
+            description: `git remote remove ${args.name}`,
+            parents: [],
+            view: {
+              bookmarks: {},
+              remoteBookmarks: {},
+              heads: [],
+              workingCopy: workingCopy.getCurrentChangeId(),
+            },
+          });
+
+          return { removed: args.name };
+        },
+
+        /**
+         * Rename a Git remote (matches `jj git remote rename`)
+         *
+         * @param {Object} args - Remote arguments
+         * @param {string} args.oldName - Current remote name
+         * @param {string} args.newName - New remote name
+         * @returns {Promise<Object>} Rename result
+         */
+        async rename(args) {
+          if (!gitBackend) {
+            throw new JJError(
+              'BACKEND_NOT_AVAILABLE',
+              'Git backend not configured',
+              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+            );
+          }
+
+          if (!args || !args.oldName || !args.newName) {
+            throw new JJError('INVALID_ARGUMENT', 'Missing oldName or newName', {
+              suggestion: 'Provide both names: { oldName: "origin", newName: "upstream" }',
+            });
+          }
+
+          const git = (await import('isomorphic-git')).default;
+
+          // Get current URL
+          const remotes = await git.listRemotes({ fs, dir });
+          const remote = remotes.find(r => r.remote === args.oldName);
+          if (!remote) {
+            throw new JJError('NOT_FOUND', `Remote ${args.oldName} not found`);
+          }
+
+          // Remove old and add new
+          await git.deleteRemote({ fs, dir, remote: args.oldName });
+          await git.addRemote({ fs, dir, remote: args.newName, url: remote.url });
+
+          // Record operation
+          await oplog.recordOperation({
+            timestamp: new Date().toISOString(),
+            user: await getUserOplogInfo(),
+            description: `git remote rename ${args.oldName} ${args.newName}`,
+            parents: [],
+            view: {
+              bookmarks: {},
+              remoteBookmarks: {},
+              heads: [],
+              workingCopy: workingCopy.getCurrentChangeId(),
+            },
+          });
+
+          return { oldName: args.oldName, newName: args.newName, url: remote.url };
+        },
+
+        /**
+         * Set URL for a Git remote (matches `jj git remote set-url`)
+         *
+         * @param {Object} args - Remote arguments
+         * @param {string} args.name - Remote name
+         * @param {string} args.url - New URL
+         * @returns {Promise<Object>} Updated remote info
+         */
+        async setUrl(args) {
+          if (!gitBackend) {
+            throw new JJError(
+              'BACKEND_NOT_AVAILABLE',
+              'Git backend not configured',
+              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
+            );
+          }
+
+          if (!args || !args.name || !args.url) {
+            throw new JJError('INVALID_ARGUMENT', 'Missing name or url', {
+              suggestion: 'Provide both: { name: "origin", url: "https://..." }',
+            });
+          }
+
+          const git = (await import('isomorphic-git')).default;
+
+          // Check if remote exists
+          const remotes = await git.listRemotes({ fs, dir });
+          const remote = remotes.find(r => r.remote === args.name);
+          if (!remote) {
+            throw new JJError('NOT_FOUND', `Remote ${args.name} not found`);
+          }
+
+          // Remove and re-add with new URL
+          await git.deleteRemote({ fs, dir, remote: args.name });
+          await git.addRemote({ fs, dir, remote: args.name, url: args.url });
+
+          // Record operation
+          await oplog.recordOperation({
+            timestamp: new Date().toISOString(),
+            user: await getUserOplogInfo(),
+            description: `git remote set-url ${args.name} ${args.url}`,
+            parents: [],
+            view: {
+              bookmarks: {},
+              remoteBookmarks: {},
+              heads: [],
+              workingCopy: workingCopy.getCurrentChangeId(),
+            },
+          });
+
+          return { name: args.name, url: args.url };
+        },
+      },
     },
 
     // ========================================
@@ -2695,6 +3285,69 @@ export async function createJJ(options) {
         return await jj.remove(args);
       },
 
+      /**
+       * Show which revision modified each line (matches `jj file annotate` / git blame)
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.path - File path to annotate
+       * @param {string} [args.changeId] - Change ID (defaults to working copy)
+       * @returns {Promise<Array>} Array of line annotations with changeId, author, timestamp, and content
+       */
+      async annotate(args) {
+        if (!args || !args.path) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing path argument', {
+            suggestion: 'Provide a file path to annotate',
+          });
+        }
+
+        await graph.load();
+
+        // Get the starting change (default to working copy)
+        const startChangeId = args.changeId || workingCopy.getCurrentChangeId();
+        const startChange = await graph.getChange(startChangeId);
+        if (!startChange) {
+          throw new JJError('CHANGE_NOT_FOUND', `Change ${startChangeId} not found`);
+        }
+
+        // Read current file content
+        const content = await jj.read({ path: args.path, changeId: startChangeId });
+        const lines = typeof content === 'string' ? content.split('\n') : [];
+
+        // For each line, find which change last modified it
+        const annotations = [];
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+
+          // Traverse history to find the change that introduced this line
+          let currentChangeId = startChangeId;
+          let foundChange = startChange;
+
+          while (currentChangeId) {
+            const change = await graph.getChange(currentChangeId);
+            if (!change) break;
+
+            // Check if this change modified the file
+            if (change.fileSnapshot && change.fileSnapshot[args.path]) {
+              foundChange = change;
+              break;
+            }
+
+            // Move to parent (simplified - takes first parent)
+            currentChangeId = change.parents && change.parents.length > 0 ? change.parents[0] : null;
+          }
+
+          annotations.push({
+            lineNumber: i + 1,
+            changeId: foundChange.changeId,
+            author: foundChange.author,
+            timestamp: foundChange.timestamp,
+            content: line,
+          });
+        }
+
+        return annotations;
+      },
+
       // Future extensions:
       // async track(args) { ... }     // Track files
       // async untrack(args) { ... }   // Untrack files
@@ -3055,6 +3708,688 @@ export async function createJJ(options) {
         }
         await jj.backgroundOps.unwatch(watcherId);
       },
+    },
+
+    /**
+     * Bookmark operations (branch management)
+     */
+    bookmark: {
+      /**
+       * List all bookmarks
+       *
+       * @returns {Promise<Array>} Array of bookmarks with name and changeId
+       */
+      async list() {
+        await bookmarks.load();
+        return bookmarks.list();
+      },
+
+      /**
+       * Set/create a bookmark (matches `jj bookmark set`)
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.name - Bookmark name
+       * @param {string} args.changeId - Change ID to point to
+       * @returns {Promise<Object>} Bookmark info
+       */
+      async set(args) {
+        if (!args || !args.name || !args.changeId) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name or changeId', {
+            suggestion: 'Provide both: { name: "main", changeId: "abc123..." }',
+          });
+        }
+
+        await bookmarks.load();
+        await bookmarks.set(args.name, args.changeId);
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark set ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: { [args.name]: args.changeId },
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, changeId: args.changeId };
+      },
+
+      /**
+       * Move a bookmark to a different change (matches `jj bookmark move`)
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.name - Bookmark name
+       * @param {string} args.to - Target change ID
+       * @returns {Promise<Object>} Move result
+       */
+      async move(args) {
+        if (!args || !args.name || !args.to) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name or to', {
+            suggestion: 'Provide both: { name: "main", to: "abc123..." }',
+          });
+        }
+
+        await bookmarks.load();
+        const bookmarkChangeId = await bookmarks.get(args.name);
+        if (!bookmarkChangeId) {
+          throw new JJError('NOT_FOUND', `Bookmark ${args.name} not found`);
+        }
+
+        await bookmarks.set(args.name, args.to);
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark move ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: { [args.name]: args.to },
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, from: bookmarkChangeId, to: args.to };
+      },
+
+      /**
+       * Delete a bookmark (matches `jj bookmark delete`)
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.name - Bookmark name to delete
+       * @returns {Promise<Object>} Deletion result
+       */
+      async delete(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name', {
+            suggestion: 'Provide bookmark name: { name: "feature" }',
+          });
+        }
+
+        await bookmarks.load();
+        const bookmark = bookmarks.get(args.name);
+        if (!bookmark) {
+          throw new JJError('NOT_FOUND', `Bookmark ${args.name} not found`);
+        }
+
+        await bookmarks.delete(args.name);
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark delete ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { deleted: args.name };
+      },
+
+      /**
+       * Rename a bookmark (matches `jj bookmark rename`)
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.oldName - Current bookmark name
+       * @param {string} args.newName - New bookmark name
+       * @returns {Promise<Object>} Rename result
+       */
+      async rename(args) {
+        if (!args || !args.oldName || !args.newName) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing oldName or newName', {
+            suggestion: 'Provide both: { oldName: "feature", newName: "feature-v2" }',
+          });
+        }
+
+        await bookmarks.load();
+        const bookmarkChangeId = await bookmarks.get(args.oldName);
+        if (!bookmarkChangeId) {
+          throw new JJError('NOT_FOUND', `Bookmark ${args.oldName} not found`);
+        }
+
+        // Create new bookmark with same changeId, delete old
+        await bookmarks.set(args.newName, bookmarkChangeId);
+        await bookmarks.delete(args.oldName);
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark rename ${args.oldName} to ${args.newName}`,
+          parents: [],
+          view: {
+            bookmarks: { [args.newName]: bookmarkChangeId },
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { oldName: args.oldName, newName: args.newName, changeId: bookmarkChangeId };
+      },
+
+      /**
+       * Track a remote bookmark (matches `jj bookmark track`)
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.name - Bookmark name to track
+       * @param {string} [args.remote='origin'] - Remote name
+       * @returns {Promise<Object>} Track result
+       */
+      async track(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing bookmark name', {
+            suggestion: 'Provide bookmark name: { name: "main", remote: "origin" }',
+          });
+        }
+
+        const remote = args.remote || 'origin';
+        const remoteBookmarkName = `${remote}/${args.name}`;
+
+        // Store tracking info in bookmarks metadata
+        await bookmarks.load();
+        const tracking = bookmarks.tracking || {};
+        tracking[args.name] = { remote, remoteName: args.name };
+        bookmarks.tracking = tracking;
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark track ${args.name} from ${remote}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: { [remoteBookmarkName]: true },
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, remote, tracking: true };
+      },
+
+      /**
+       * Untrack a remote bookmark (matches `jj bookmark untrack`)
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.name - Bookmark name to untrack
+       * @returns {Promise<Object>} Untrack result
+       */
+      async untrack(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing bookmark name', {
+            suggestion: 'Provide bookmark name: { name: "main" }',
+          });
+        }
+
+        // Remove tracking info
+        await bookmarks.load();
+        const tracking = bookmarks.tracking || {};
+        const wasTracking = tracking[args.name];
+        delete tracking[args.name];
+        bookmarks.tracking = tracking;
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark untrack ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, tracking: false, wasTracking: !!wasTracking };
+      },
+
+      /**
+       * Forget a remote bookmark (matches `jj bookmark forget`)
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.name - Bookmark name to forget
+       * @param {string} [args.remote='origin'] - Remote name
+       * @returns {Promise<Object>} Forget result
+       */
+      async forget(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing bookmark name', {
+            suggestion: 'Provide bookmark name: { name: "feature", remote: "origin" }',
+          });
+        }
+
+        const remote = args.remote || 'origin';
+
+        // Untrack and remove local reference
+        await bookmarks.load();
+        const tracking = bookmarks.tracking || {};
+        delete tracking[args.name];
+        bookmarks.tracking = tracking;
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark forget ${args.name} from ${remote}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, remote, forgotten: true };
+      },
+    },
+
+    /**
+     * Remote operations (high-level, namespaced alternatives to git.fetch/push)
+     */
+    remote: {
+      /**
+       * Fetch from remote (alias to jj.git.fetch for convenience)
+       *
+       * @param {Object} args - Fetch arguments
+       * @returns {Promise<Object>} Fetch result
+       */
+      async fetch(args) {
+        return await jj.git.fetch(args);
+      },
+
+      /**
+       * Push to remote (alias to jj.git.push for convenience)
+       *
+       * @param {Object} args - Push arguments
+       * @returns {Promise<Object>} Push result
+       */
+      async push(args) {
+        return await jj.git.push(args);
+      },
+
+      /**
+       * Add a remote (alias to jj.git.remote.add for convenience)
+       *
+       * @param {Object} args - Remote arguments
+       * @returns {Promise<Object>} Added remote info
+       */
+      async add(args) {
+        return await jj.git.remote.add(args);
+      },
+    },
+
+    /**
+     * Configuration management
+     */
+    config: {
+      /**
+       * Get a configuration value (matches `jj config get`)
+       *
+       * @param {Object} args - Config arguments
+       * @param {string} args.name - Config key (e.g., 'user.name')
+       * @returns {Promise<any>} Config value
+       */
+      async get(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing config name', {
+            suggestion: 'Provide config name: { name: "user.name" }',
+          });
+        }
+
+        await userConfig.load();
+
+        // Handle nested keys (e.g., 'user.name')
+        const parts = args.name.split('.');
+        let value = userConfig.config;
+
+        for (const part of parts) {
+          if (value && typeof value === 'object') {
+            value = value[part];
+          } else {
+            return null;
+          }
+        }
+
+        return value;
+      },
+
+      /**
+       * Set a configuration value (matches `jj config set`)
+       *
+       * @param {Object} args - Config arguments
+       * @param {string} args.name - Config key (e.g., 'user.name')
+       * @param {any} args.value - Config value
+       * @returns {Promise<Object>} Set result
+       */
+      async set(args) {
+        if (!args || !args.name || args.value === undefined) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name or value', {
+            suggestion: 'Provide both: { name: "user.name", value: "John Doe" }',
+          });
+        }
+
+        await userConfig.load();
+
+        // Handle nested keys (e.g., 'user.name')
+        const parts = args.name.split('.');
+        let obj = userConfig.config;
+
+        for (let i = 0; i < parts.length - 1; i++) {
+          if (!obj[parts[i]] || typeof obj[parts[i]] !== 'object') {
+            obj[parts[i]] = {};
+          }
+          obj = obj[parts[i]];
+        }
+
+        obj[parts[parts.length - 1]] = args.value;
+        await userConfig.save();
+
+        return { name: args.name, value: args.value };
+      },
+
+      /**
+       * List all configuration values (matches `jj config list`)
+       *
+       * @returns {Promise<Object>} All configuration values
+       */
+      async list() {
+        await userConfig.load();
+        return userConfig.config;
+      },
+    },
+
+    /**
+     * Show file differences between revisions (matches `jj diff`)
+     *
+     * @param {Object} [args={}] - Diff arguments
+     * @param {string} [args.from] - Source revision (defaults to parent of working copy)
+     * @param {string} [args.to] - Target revision (defaults to working copy)
+     * @param {string[]} [args.paths] - Specific paths to diff
+     * @returns {Promise<Object>} Diff result with changed files
+     */
+    async diff(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+
+      const toChangeId = args.to || workingCopy.getCurrentChangeId();
+      const toChange = await graph.getChange(toChangeId);
+      if (!toChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `Target change ${toChangeId} not found`);
+      }
+
+      // Default 'from' to parent of 'to'
+      let fromChangeId = args.from;
+      if (!fromChangeId) {
+        fromChangeId = toChange.parents && toChange.parents.length > 0 ? toChange.parents[0] : null;
+      }
+
+      const fromChange = fromChangeId ? await graph.getChange(fromChangeId) : null;
+
+      const fromFiles = fromChange?.fileSnapshot || {};
+      const toFiles = toChange.fileSnapshot || {};
+
+      // Find all paths that changed
+      const allPaths = new Set([...Object.keys(fromFiles), ...Object.keys(toFiles)]);
+      const diffs = [];
+
+      for (const filePath of allPaths) {
+        // Filter by paths if specified
+        if (args.paths && args.paths.length > 0) {
+          if (!args.paths.includes(filePath)) {
+            continue;
+          }
+        }
+
+        const fromContent = fromFiles[filePath] || '';
+        const toContent = toFiles[filePath] || '';
+
+        if (fromContent !== toContent) {
+          diffs.push({
+            path: filePath,
+            status: !fromContent ? 'added' : !toContent ? 'deleted' : 'modified',
+            fromContent,
+            toContent,
+          });
+        }
+      }
+
+      return {
+        from: fromChangeId,
+        to: toChangeId,
+        files: diffs,
+      };
+    },
+
+    /**
+     * Move working copy to next child revision (matches `jj next`)
+     *
+     * @param {Object} [args={}] - Next arguments
+     * @param {number} [args.offset=1] - Number of generations to move forward
+     * @returns {Promise<Object>} Updated working copy info
+     */
+    async next(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+
+      const offset = args.offset || 1;
+      const currentChangeId = workingCopy.getCurrentChangeId();
+      const currentChange = await graph.getChange(currentChangeId);
+
+      if (!currentChange) {
+        throw new JJError('CHANGE_NOT_FOUND', 'Current working copy change not found');
+      }
+
+      // Find children
+      await graph.load();
+      const allChanges = await graph.getAllChanges();
+      const children = allChanges.filter(c => c.parents && c.parents.includes(currentChangeId));
+
+      if (children.length === 0) {
+        throw new JJError('NO_CHILDREN', 'No child revisions found');
+      }
+
+      // Take first child for simplicity (could be enhanced to handle multiple children)
+      let targetChange = children[0];
+
+      // Move forward 'offset' times
+      for (let i = 1; i < offset; i++) {
+        const nextChildren = allChanges.filter(c => c.parents && c.parents.includes(targetChange.changeId));
+        if (nextChildren.length === 0) {
+          throw new JJError('INSUFFICIENT_CHILDREN', `Cannot move forward ${offset} generations`);
+        }
+        targetChange = nextChildren[0];
+      }
+
+      // Update working copy
+      await jj.edit({ changeId: targetChange.changeId });
+
+      return {
+        from: currentChangeId,
+        to: targetChange.changeId,
+        offset,
+      };
+    },
+
+    /**
+     * Move working copy to previous parent revision (matches `jj prev`)
+     *
+     * @param {Object} [args={}] - Prev arguments
+     * @param {number} [args.offset=1] - Number of generations to move backward
+     * @returns {Promise<Object>} Updated working copy info
+     */
+    async prev(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+
+      const offset = args.offset || 1;
+      let currentChangeId = workingCopy.getCurrentChangeId();
+
+      // Move backward 'offset' times
+      for (let i = 0; i < offset; i++) {
+        const currentChange = await graph.getChange(currentChangeId);
+        if (!currentChange) {
+          throw new JJError('CHANGE_NOT_FOUND', `Change ${currentChangeId} not found`);
+        }
+
+        if (!currentChange.parents || currentChange.parents.length === 0) {
+          throw new JJError('NO_PARENTS', 'No parent revisions found');
+        }
+
+        // Take first parent for simplicity
+        currentChangeId = currentChange.parents[0];
+      }
+
+      // Update working copy
+      await jj.edit({ changeId: currentChangeId });
+
+      return {
+        from: workingCopy.getCurrentChangeId(),
+        to: currentChangeId,
+        offset,
+      };
+    },
+
+    /**
+     * Create copies of changes (matches `jj duplicate`)
+     *
+     * @param {Object} [args={}] - Duplicate arguments
+     * @param {string[]} [args.changes] - Change IDs to duplicate (defaults to working copy)
+     * @param {string} [args.destination] - Where to place duplicates
+     * @returns {Promise<Object>} Duplication result with new change IDs
+     */
+    async duplicate(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+      await userConfig.load();
+
+      const changesToDup = args.changes || [workingCopy.getCurrentChangeId()];
+      const duplicatedChanges = [];
+
+      for (const changeId of changesToDup) {
+        const originalChange = await graph.getChange(changeId);
+        if (!originalChange) {
+          throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
+        }
+
+        // Create new change as a copy
+        const newChangeId = generateChangeId();
+        const user = userConfig.getUser();
+        const newChange = {
+          ...originalChange,
+          changeId: newChangeId,
+          commitId: null, // New change doesn't have a commit yet
+          description: originalChange.description + ' (duplicate)',
+          timestamp: new Date().toISOString(),
+        };
+
+        await graph.addChange(newChange);
+        duplicatedChanges.push({
+          original: changeId,
+          duplicate: newChangeId,
+        });
+      }
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: `duplicate ${changesToDup.length} change(s)`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: duplicatedChanges.map(d => d.duplicate),
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return { duplicated: duplicatedChanges };
+    },
+
+    /**
+     * Restore paths from another revision (matches `jj restore`)
+     *
+     * @param {Object} args - Restore arguments
+     * @param {string} [args.from] - Source revision to restore from
+     * @param {string} [args.to] - Target revision to restore to (defaults to working copy)
+     * @param {string[]} [args.paths] - Specific paths to restore (defaults to all)
+     * @returns {Promise<Object>} Restore result
+     */
+    async restore(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+
+      const toChangeId = args.to || workingCopy.getCurrentChangeId();
+      const toChange = await graph.getChange(toChangeId);
+      if (!toChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `Target change ${toChangeId} not found`);
+      }
+
+      // Default 'from' to parent
+      let fromChangeId = args.from;
+      if (!fromChangeId) {
+        fromChangeId = toChange.parents && toChange.parents.length > 0 ? toChange.parents[0] : null;
+      }
+
+      const fromChange = fromChangeId ? await graph.getChange(fromChangeId) : null;
+      if (!fromChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `Source change ${fromChangeId} not found`);
+      }
+
+      const restoredPaths = [];
+      const filesToRestore = args.paths || Object.keys(fromChange.fileSnapshot || {});
+
+      for (const filePath of filesToRestore) {
+        const content = fromChange.fileSnapshot[filePath];
+        if (content !== undefined) {
+          await jj.write({ path: filePath, data: content });
+          restoredPaths.push(filePath);
+        }
+      }
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: `restore ${restoredPaths.length} path(s) from ${fromChangeId}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [],
+          workingCopy: toChangeId,
+        },
+      });
+
+      return {
+        from: fromChangeId,
+        to: toChangeId,
+        restoredPaths,
+      };
     },
   };
 

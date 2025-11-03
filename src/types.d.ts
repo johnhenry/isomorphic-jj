@@ -526,9 +526,63 @@ export interface BookmarkDeleteArgs {
 }
 
 /**
+ * Bookmark rename arguments (matches `jj bookmark rename`)
+ */
+export interface BookmarkRenameArgs {
+  oldName: string;
+  newName: string;
+}
+
+/**
+ * Bookmark track arguments (matches `jj bookmark track`)
+ */
+export interface BookmarkTrackArgs {
+  name: string;
+  remote?: string;
+}
+
+/**
+ * Bookmark untrack arguments (matches `jj bookmark untrack`)
+ */
+export interface BookmarkUntrackArgs {
+  name: string;
+}
+
+/**
+ * Bookmark forget arguments (matches `jj bookmark forget`)
+ */
+export interface BookmarkForgetArgs {
+  name: string;
+  remote?: string;
+}
+
+/**
  * Remote add arguments
  */
 export interface RemoteAddArgs {
+  name: string;
+  url: string;
+}
+
+/**
+ * Remote remove arguments
+ */
+export interface RemoteRemoveArgs {
+  name: string;
+}
+
+/**
+ * Remote rename arguments
+ */
+export interface RemoteRenameArgs {
+  oldName: string;
+  newName: string;
+}
+
+/**
+ * Remote setUrl arguments
+ */
+export interface RemoteSetUrlArgs {
   name: string;
   url: string;
 }
@@ -559,6 +613,105 @@ export interface RemotePushArgs {
  */
 export interface GitExportArgs {
   bookmark?: string;
+}
+
+/**
+ * Git clone arguments (matches `jj git clone`)
+ */
+export interface GitCloneArgs {
+  url: string;
+  dir?: string;
+  depth?: number;
+  singleBranch?: boolean;
+  noTags?: boolean;
+  ref?: string;
+  onProgress?: (event: any) => void;
+  onAuth?: () => Promise<any>;
+}
+
+/**
+ * Diff arguments (matches `jj diff`)
+ */
+export interface DiffArgs {
+  from?: Revset;
+  to?: Revset;
+  paths?: string[];
+}
+
+/**
+ * Next arguments (matches `jj next`)
+ */
+export interface NextArgs {
+  offset?: number;
+}
+
+/**
+ * Prev arguments (matches `jj prev`)
+ */
+export interface PrevArgs {
+  offset?: number;
+}
+
+/**
+ * Duplicate arguments (matches `jj duplicate`)
+ */
+export interface DuplicateArgs {
+  changes?: ChangeID[];
+  destination?: Revset;
+}
+
+/**
+ * Restore arguments (matches `jj restore`)
+ */
+export interface RestoreArgs {
+  from?: Revset;
+  to?: Revset;
+  paths?: string[];
+}
+
+/**
+ * File annotate arguments (matches `jj file annotate`)
+ */
+export interface FileAnnotateArgs {
+  path: string;
+  changeId?: ChangeID;
+}
+
+/**
+ * Operation show arguments (matches `jj operation show`)
+ */
+export interface OperationShowArgs {
+  operation: OperationID;
+}
+
+/**
+ * Operation diff arguments (matches `jj operation diff`)
+ */
+export interface OperationDiffArgs {
+  from: OperationID;
+  to: OperationID;
+}
+
+/**
+ * Operation restore arguments (matches `jj operation restore`)
+ */
+export interface OperationRestoreArgs {
+  operation: OperationID;
+}
+
+/**
+ * Config get arguments (matches `jj config get`)
+ */
+export interface ConfigGetArgs {
+  name: string;
+}
+
+/**
+ * Config set arguments (matches `jj config set`)
+ */
+export interface ConfigSetArgs {
+  name: string;
+  value: any;
 }
 
 /**
@@ -695,6 +848,20 @@ export interface JJ {
   operations: {
     list(opts?: { limit?: number }): Promise<Operation[]>;
     at(args: { operation: OperationID }): Promise<JJ>;
+    show(args: OperationShowArgs): Promise<Operation & { changes: Change[] }>;
+    diff(args: OperationDiffArgs): Promise<{
+      from: OperationID;
+      to: OperationID;
+      addedHeads: ChangeID[];
+      removedHeads: ChangeID[];
+      bookmarkChanges: Record<string, { from?: ChangeID; to?: ChangeID }>;
+      workingCopyChanged: boolean;
+    }>;
+    restore(args: OperationRestoreArgs): Promise<{
+      restoredTo: OperationID;
+      timestamp: Date;
+      description: string;
+    }>;
   };
 
   // Conflicts
@@ -703,9 +870,13 @@ export interface JJ {
   // Bookmarks
   bookmark: {
     list(): Promise<Bookmark[]>;
-    set(args: BookmarkSetArgs): Promise<void>;
-    move(args: BookmarkMoveArgs): Promise<void>;
-    delete(args: BookmarkDeleteArgs): Promise<void>;
+    set(args: BookmarkSetArgs): Promise<{ name: string; changeId: ChangeID }>;
+    move(args: BookmarkMoveArgs): Promise<{ name: string; from: ChangeID; to: ChangeID }>;
+    delete(args: BookmarkDeleteArgs): Promise<{ deleted: string }>;
+    rename(args: BookmarkRenameArgs): Promise<{ oldName: string; newName: string; changeId: ChangeID }>;
+    track(args: BookmarkTrackArgs): Promise<{ name: string; remote: string; tracking: boolean }>;
+    untrack(args: BookmarkUntrackArgs): Promise<{ name: string; tracking: boolean; wasTracking: boolean }>;
+    forget(args: BookmarkForgetArgs): Promise<{ name: string; remote: string; forgotten: boolean }>;
   };
 
   // Git operations (only available with Git backend)
@@ -713,8 +884,16 @@ export interface JJ {
     init(opts?: InitOptions): Promise<void>;
     fetch(args?: RemoteFetchArgs): Promise<void>;
     push(args?: RemotePushArgs): Promise<void>;
-    import(): Promise<void>;
-    export(args?: GitExportArgs): Promise<void>;
+    import(): Promise<{ imported: string[] }>;
+    export(args?: GitExportArgs): Promise<{ exported: string[] }>;
+    clone(args: GitCloneArgs): Promise<{ url: string; directory: string; ref: string }>;
+    remote: {
+      list(): Promise<Array<{ name: string; url: string }>>;
+      add(args: RemoteAddArgs): Promise<{ name: string; url: string }>;
+      remove(args: RemoteRemoveArgs): Promise<{ removed: string }>;
+      rename(args: RemoteRenameArgs): Promise<{ oldName: string; newName: string; url: string }>;
+      setUrl(args: RemoteSetUrlArgs): Promise<{ name: string; url: string }>;
+    };
   };
 
   // Remote operations
@@ -731,6 +910,13 @@ export interface JJ {
     write(args: WriteArgs): Promise<WriteResult>;
     move(args: MoveFileArgs): Promise<MoveResult>;
     remove(args: RemoveArgs): Promise<RemoveResult>;
+    annotate(args: FileAnnotateArgs): Promise<Array<{
+      lineNumber: number;
+      changeId: ChangeID;
+      author: Author;
+      timestamp: Date;
+      content: string;
+    }>>;
   };
 
   // Workspaces
@@ -754,6 +940,39 @@ export interface JJ {
     watch(path: string, callback: (event: string, filename: string) => void): Promise<string>;
     unwatch(id: string): Promise<void>;
   };
+
+  // Configuration management
+  config: {
+    get(args: ConfigGetArgs): Promise<any>;
+    set(args: ConfigSetArgs): Promise<{ name: string; value: any }>;
+    list(): Promise<Record<string, any>>;
+  };
+
+  // Diff operation
+  diff(args?: DiffArgs): Promise<{
+    from: ChangeID | null;
+    to: ChangeID;
+    files: Array<{
+      path: string;
+      status: 'added' | 'modified' | 'deleted';
+      fromContent: string;
+      toContent: string;
+    }>;
+  }>;
+
+  // Navigation operations
+  next(args?: NextArgs): Promise<{ from: ChangeID; to: ChangeID; offset: number }>;
+  prev(args?: PrevArgs): Promise<{ from: ChangeID; to: ChangeID; offset: number }>;
+
+  // Advanced change operations
+  duplicate(args?: DuplicateArgs): Promise<{
+    duplicated: Array<{ original: ChangeID; duplicate: ChangeID }>;
+  }>;
+  restore(args?: RestoreArgs): Promise<{
+    from: ChangeID;
+    to: ChangeID;
+    restoredPaths: string[];
+  }>;
 }
 
 // ============================================================================

@@ -107,7 +107,7 @@ This roadmap outlines feature development organized by functional area, showing 
 
 **✅ COMPLETE - v1.0 Released!**
 
-- ✅ All core operations implemented and tested (447 tests, 100% passing)
+- ✅ All core operations implemented and tested (460 tests, 100% passing)
 - ✅ 95%+ test coverage achieved
 - ✅ **Revset Parity**: ~90% parity with JJ, all commonly-used functions implemented
 - ✅ **API Stability Review**: Public API finalized and fully documented
@@ -116,7 +116,7 @@ This roadmap outlines feature development organized by functional area, showing 
 - ✅ **JJ CLI Compatibility**: Complete semantic compatibility with JJ CLI
 
 **v1.0 Achievement:**
-- 447 tests passing (40 new tests for v1.0 features)
+- 460 tests passing (53 new tests for v1.0 features)
 - Complete file.* namespace matching JJ CLI
 - rebase() for proper JJ CLI history semantics
 - 100% backward compatible (zero breaking changes)
@@ -232,4 +232,4 @@ Based on JJ CLI parity analysis:
 
 ---
 
-**Current Status**: 447 tests, 100% passing | v1.0 Complete with full JJ CLI compatibility!
+**Current Status**: 460 tests, 100% passing | v1.0 Complete with full JJ CLI compatibility!
