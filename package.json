@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers",
   "type": "module",
+  "bin": {
+    "isojj": "./bin/isojj.js"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./src/types.d.ts",
@@ -18,6 +21,7 @@
     }
   },
   "files": [
+    "bin",
     "dist",
     "src",
     "README.md",
