@@ -7,6 +7,7 @@ import { ChangeGraph } from '../core/change-graph.js';
 import { WorkingCopy } from '../core/working-copy.js';
 import { OperationLog } from '../core/operation-log.js';
 import { BookmarkStore } from '../core/bookmark-store.js';
+import { TagStore } from '../core/tag-store.js';
 import { RevsetEngine } from '../core/revset-engine.js';
 import { ConflictModel } from '../core/conflict-model.js';
 import { MergeDriverRegistry } from '../core/merge-driver-registry.js';
@@ -61,6 +62,7 @@ export async function createJJ(options) {
   const workingCopy = new WorkingCopy(storage, fs, dir);
   const oplog = new OperationLog(storage);
   const bookmarks = new BookmarkStore(storage);
+  const tags = new TagStore(fs, `${dir}/.jj`);
   const mergeDrivers = new MergeDriverRegistry(); // v0.5: merge drivers
   const conflicts = new ConflictModel(storage, fs, mergeDrivers); // v0.5: pass registry
   const workspaces = new WorkspaceManager(storage, fs, dir);
@@ -2170,6 +2172,20 @@ export async function createJJ(options) {
      * @param {string} [args.into] - Alias for dest (matches JJ CLI)
      */
     async squash(args = {}) {
+      // Check for interactive mode (not supported)
+      if (args.interactive) {
+        throw new JJError(
+          'UNSUPPORTED_OPERATION',
+          'Interactive mode not supported in library API',
+          {
+            feature: 'squash --interactive',
+            reason: 'Interactive file/hunk selection requires terminal UI',
+            alternative: 'Specify paths explicitly: squash({ paths: [...] })',
+            suggestion: 'For interactive squashing, use JJ CLI',
+          }
+        );
+      }
+
       await graph.load();
       await workingCopy.load();
       await userConfig.load();
@@ -2368,7 +2384,100 @@ export async function createJJ(options) {
 
       return change;
     },
-    
+
+    /**
+     * Backout a change - create a new change that reverses the effect of the specified change
+     *
+     * Similar to `git revert`, this creates a new change that undoes the changes made
+     * by the specified revision without modifying the original change.
+     *
+     * @param {Object} args - Arguments
+     * @param {string} args.revision - Change ID to back out
+     * @param {string} [args.message] - Custom description for the backout change
+     * @returns {Promise<Object>} The new backout change including changeId, description, and backedOut field
+     */
+    async backout(args) {
+      if (!args || !args.revision) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing revision argument', {
+          suggestion: 'Provide the change ID to back out: { revision: "abc123..." }',
+        });
+      }
+
+      await graph.load();
+      await workingCopy.load();
+      await userConfig.load();
+
+      const originalChange = await graph.getChange(args.revision);
+      const user = userConfig.getUser();
+
+      if (!originalChange) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${args.revision} not found`);
+      }
+
+      // Get the parent's file snapshot (or empty if no parent)
+      let parentSnapshot = {};
+      if (originalChange.parents && originalChange.parents.length > 0) {
+        const parent = await graph.getChange(originalChange.parents[0]);
+        if (parent && parent.fileSnapshot) {
+          parentSnapshot = { ...parent.fileSnapshot };
+        }
+      }
+
+      // The backout change should have the parent's snapshot
+      // (effectively removing all changes made in the original change)
+      const backoutSnapshot = { ...parentSnapshot };
+
+      // Create description
+      const description =
+        args.message ||
+        `Backout change ${originalChange.changeId.slice(0, 8)}: ${originalChange.description || 'Untitled'}`;
+
+      // Create new change with the reversed snapshot
+      const backoutChangeId = generateChangeId();
+      const backoutChange = {
+        changeId: backoutChangeId,
+        commitId: '0000000000000000000000000000000000000000',
+        parents: [workingCopy.getCurrentChangeId()],
+        tree: '0000000000000000000000000000000000000000',
+        description,
+        fileSnapshot: backoutSnapshot,
+        author: {
+          name: user.name,
+          email: user.email,
+          timestamp: new Date().toISOString(),
+        },
+        committer: {
+          name: user.name,
+          email: user.email,
+          timestamp: new Date().toISOString(),
+        },
+        timestamp: new Date().toISOString(),
+      };
+
+      await graph.addChange(backoutChange);
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: { name: user.name, email: user.email, hostname: 'localhost' },
+        description: `backout ${args.revision.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [backoutChangeId],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return {
+        changeId: backoutChangeId,
+        description: backoutChange.description,
+        backedOut: args.revision,
+        fileSnapshot: backoutChange.fileSnapshot,
+      };
+    },
+
     /**
      * Un-abandon a change (restore from abandoned state)
      *
@@ -2433,6 +2542,20 @@ export async function createJJ(options) {
      * @param {string[]} [args.paths] - Specific paths to include in first split (full implementation planned for future)
      */
     async split(args) {
+      // Check for interactive mode (not supported)
+      if (args.interactive) {
+        throw new JJError(
+          'UNSUPPORTED_OPERATION',
+          'Interactive mode not supported in library API',
+          {
+            feature: 'split --interactive',
+            reason: 'Interactive file/hunk selection requires terminal UI',
+            alternative: 'Specify paths explicitly: split({ changeId, paths: [...] })',
+            suggestion: 'For interactive splitting, use JJ CLI',
+          }
+        );
+      }
+
       await graph.load();
       await workingCopy.load();
 
@@ -3443,7 +3566,21 @@ export async function createJJ(options) {
      *
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
-    async resolve() {
+    async resolve(args = {}) {
+      // Check for external merge tool usage
+      if (args.tool) {
+        throw new JJError(
+          'UNSUPPORTED_OPERATION',
+          'External merge tools not supported',
+          {
+            feature: 'resolve --tool',
+            reason: 'External merge tools require system integration not available in library API',
+            alternative: 'Use jj.conflicts.resolve() with programmatic resolution',
+            suggestion: 'For conflict resolution, use the programmatic API or resolve files manually',
+          }
+        );
+      }
+
       throw new JJError(
         'UNSUPPORTED_OPERATION',
         'Interactive conflict resolution (jj resolve) is not supported in JavaScript environments',
@@ -4437,6 +4574,116 @@ export async function createJJ(options) {
     },
 
     /**
+     * Branch operations (alias for bookmark.*)
+     *
+     * JJ CLI historically used "branch" terminology before standardizing on "bookmark".
+     * This namespace provides full compatibility with both naming conventions.
+     *
+     * All branch.* methods are aliases that call the corresponding bookmark.* methods.
+     */
+    get branch() {
+      // Return bookmark namespace as branch alias
+      return jj.bookmark;
+    },
+
+    /**
+     * Tag operations (immutable references)
+     */
+    tag: {
+      /**
+       * Create a new tag
+       *
+       * Tags are immutable references that cannot be moved once created.
+       * Unlike bookmarks, tags are permanent markers typically used for releases.
+       *
+       * @param {Object} args - Tag arguments
+       * @param {string} args.name - Tag name
+       * @param {string} [args.changeId] - Change ID to tag (default: working copy)
+       * @returns {Promise<{name: string, changeId: string}>} Created tag
+       * @throws {JJError} If tag already exists or name is invalid
+       */
+      async create(args) {
+        if (!args || args.name === undefined || args.name === null) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name argument', {
+            suggestion: 'Provide: { name: "v1.0.0", changeId: "abc123..." } or { name: "v1.0.0" } for working copy',
+          });
+        }
+
+        // Default to working copy if no changeId provided
+        let changeId = args.changeId;
+        if (!changeId) {
+          await workingCopy.load();
+          changeId = workingCopy.getCurrentChangeId();
+        }
+
+        // TagStore.create() will validate the name format
+        const result = await tags.create(args.name, changeId);
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `tag create ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return result;
+      },
+
+      /**
+       * List all tags
+       *
+       * @param {Object} [args] - Optional filter arguments
+       * @param {string} [args.pattern] - Optional glob pattern (e.g., "v1*")
+       * @returns {Promise<Array<{name: string, changeId: string}>>} List of tags
+       */
+      async list(args) {
+        const pattern = args?.pattern;
+        return await tags.list(pattern);
+      },
+
+      /**
+       * Delete a tag
+       *
+       * @param {Object} args - Tag arguments
+       * @param {string} args.name - Tag name to delete
+       * @returns {Promise<{deleted: string}>} Deletion result
+       * @throws {JJError} If tag doesn't exist
+       */
+      async delete(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name', {
+            suggestion: 'Provide tag name: { name: "v1.0.0" }',
+          });
+        }
+
+        await tags.delete(args.name);
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `tag delete ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { deleted: args.name };
+      },
+    },
+
+    /**
      * Remote operations (high-level, namespaced alternatives to git.fetch/push)
      */
     remote: {
@@ -4959,6 +5206,181 @@ export async function createJJ(options) {
         parallelized: parallelizedChanges,
         parent: parentId,
       };
+    },
+  };
+
+  // ============================================================================
+  // UNSUPPORTED FEATURE STUBS
+  // These features cannot/should not be implemented in a library API
+  // ============================================================================
+
+  /**
+   * diffedit - Touch up changes with diff editor (STUB)
+   *
+   * @status UNSUPPORTED - Requires interactive diff editor
+   * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+   */
+  jj.diffedit = async function (args) {
+    throw new JJError(
+      'UNSUPPORTED_OPERATION',
+      'diffedit requires interactive diff editor',
+      {
+        feature: 'diffedit',
+        reason: 'Interactive tools not supported in library API',
+        alternative: 'Use jj.diff() to view changes, then jj.edit() to modify the change',
+        suggestion: 'For programmatic editing, use jj.write() to update files and jj.describe() to update the description',
+      }
+    );
+  };
+
+  /**
+   * fix - Update files with formatting fixes (STUB)
+   *
+   * @status UNSUPPORTED - Requires external formatters
+   * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+   */
+  jj.fix = async function (args) {
+    throw new JJError(
+      'UNSUPPORTED_OPERATION',
+      'Automatic formatting requires external tools',
+      {
+        feature: 'fix',
+        reason: 'External formatters (prettier, eslint, etc.) must be integrated separately',
+        alternative: 'Run formatters separately, then use jj.write() to update files',
+        suggestion: 'Consider using pre-commit hooks to run formatters automatically',
+      }
+    );
+  };
+
+  /**
+   * sign - Cryptographically sign a revision (STUB)
+   *
+   * @status UNSUPPORTED - Cryptographic signing not implemented
+   * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+   */
+  jj.sign = async function (args) {
+    throw new JJError(
+      'UNSUPPORTED_OPERATION',
+      'Cryptographic signing not implemented',
+      {
+        feature: 'sign',
+        reason: 'GPG/SSH signing requires complex key management and security considerations',
+        alternative: 'Use Git\'s signing features with jj.git.push() for signed commits',
+        suggestion: 'Sign commits at the Git layer using git commit --gpg-sign',
+      }
+    );
+  };
+
+  /**
+   * unsign - Remove cryptographic signature (STUB)
+   *
+   * @status UNSUPPORTED - Cryptographic signing not implemented
+   * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+   */
+  jj.unsign = async function (args) {
+    throw new JJError(
+      'UNSUPPORTED_OPERATION',
+      'Cryptographic signing not implemented',
+      {
+        feature: 'unsign',
+        reason: 'Signing features not implemented in isomorphic-jj',
+        alternative: 'Modify commits using jj.metaedit() if you need to change metadata',
+      }
+    );
+  };
+
+  /**
+   * util - CLI utility commands (STUB namespace)
+   *
+   * @status UNSUPPORTED - CLI-specific utilities
+   */
+  jj.util = {
+    /**
+     * completion - Generate shell completions (STUB)
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    async completion() {
+      throw new JJError(
+        'UNSUPPORTED_OPERATION',
+        'Shell completion generation is CLI-specific',
+        {
+          feature: 'util.completion',
+          reason: 'Completions are for command-line shells, not library APIs',
+          alternative: 'Not applicable - use JJ CLI for shell completions',
+        }
+      );
+    },
+
+    /**
+     * gc - Garbage collection (STUB)
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    async gc() {
+      throw new JJError(
+        'UNSUPPORTED_OPERATION',
+        'Garbage collection is a CLI utility',
+        {
+          feature: 'util.gc',
+          reason: 'Storage management handled automatically by isomorphic-jj',
+          alternative: 'Repository cleanup happens automatically',
+        }
+      );
+    },
+
+    /**
+     * exec - Execute command with JJ environment (STUB)
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    async exec(args) {
+      throw new JJError(
+        'UNSUPPORTED_OPERATION',
+        'Command execution is a CLI utility',
+        {
+          feature: 'util.exec',
+          reason: 'Shell command execution not appropriate for library API',
+          alternative: 'Use Node.js child_process module directly if needed',
+        }
+      );
+    },
+
+    /**
+     * configSchema - Print config schema (STUB)
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    async configSchema() {
+      throw new JJError(
+        'UNSUPPORTED_OPERATION',
+        'Config schema output is a CLI utility',
+        {
+          feature: 'util.configSchema',
+          reason: 'Schema introspection not needed for programmatic usage',
+          alternative: 'See TypeScript types or API documentation for config structure',
+        }
+      );
+    },
+  };
+
+  /**
+   * gerrit - Gerrit Code Review integration (STUB namespace)
+   *
+   * @status UNSUPPORTED - Platform-specific integration
+   */
+  jj.gerrit = {
+    /**
+     * upload - Upload changes to Gerrit (STUB)
+     * @throws {JJError} Always throws UNSUPPORTED_OPERATION
+     */
+    async upload(args) {
+      throw new JJError(
+        'UNSUPPORTED_OPERATION',
+        'Gerrit integration not supported',
+        {
+          feature: 'gerrit.upload',
+          reason: 'Gerrit-specific features not implemented',
+          alternative: 'Use jj.git.push() with appropriate Gerrit remote configuration',
+          suggestion: 'Configure Gerrit remote and use standard Git push with refs/for/ syntax',
+        }
+      );
     },
   };
 
