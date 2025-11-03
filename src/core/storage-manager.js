@@ -93,6 +93,10 @@ export class Storage {
     const jsonData = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 
     try {
+      // Ensure parent directory exists
+      const dirPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
+      await this.fs.promises.mkdir(dirPath, { recursive: true });
+
       // Write to temp file
       await this.fs.promises.writeFile(tmpPath, jsonData, 'utf8');
 
@@ -108,7 +112,7 @@ export class Storage {
       try {
         await this.fs.promises.unlink(tmpPath);
       } catch {}
-      
+
       throw new JJError('STORAGE_WRITE_FAILED', `Failed to write ${path}: ${error.message}`, {
         path: fullPath,
         originalError: error,

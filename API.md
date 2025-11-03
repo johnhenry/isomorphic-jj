@@ -886,6 +886,162 @@ await jj.prev();
 
 ---
 
+### `jj.absorb(options?)`
+Automatically merge working copy changes into their ancestor changes based on line-level tracking.
+
+**CLI equivalent**: `jj absorb` / `git absorb`
+
+**Parameters**:
+```typescript
+{
+  dryRun?: boolean;  // Preview changes without applying (default: false)
+}
+```
+
+**Returns**: `Promise<{ absorbed: boolean, affectedChanges: string[], wouldAbsorb?: boolean }>`
+
+**Example**:
+```javascript
+// Create a change
+await jj.write({ path: 'file.txt', data: 'line 1\nline 2\nline 3' });
+await jj.describe({ message: 'Add file' });
+
+// Create new working copy and modify
+await jj.new({ message: 'Fixes' });
+await jj.write({ path: 'file.txt', data: 'line 1 fixed\nline 2\nline 3' });
+
+// Absorb automatically merges "line 1 fixed" back into ancestor
+const result = await jj.absorb();
+console.log(result.absorbed); // true
+console.log(result.affectedChanges); // ['ancestor-change-id']
+
+// Preview mode
+const preview = await jj.absorb({ dryRun: true });
+console.log(preview.wouldAbsorb); // true
+```
+
+**Use Cases**:
+- Fix typos in previous changes without manual rebasing
+- Automatically organize working copy modifications into ancestors
+- Streamline iterative development workflows
+
+**Algorithm**:
+1. For each modified line in working copy
+2. Find which ancestor change last modified that line
+3. Group modifications by ancestor
+4. Update each ancestor with its grouped modifications
+5. Rebuild descendants to inherit changes
+
+---
+
+### `jj.bisect.*`
+Binary search to find the first change that introduced a bug.
+
+**CLI equivalent**: `jj op log` (bisect functionality)
+
+#### `jj.bisect.start(options)`
+Start a bisect session.
+
+**Parameters**:
+```typescript
+{
+  good: string;  // Known good change ID
+  bad: string;   // Known bad change ID
+}
+```
+
+**Returns**: `Promise<{ active: boolean, good: string[], bad: string[], current: string, remaining: number }>`
+
+**Example**:
+```javascript
+const session = await jj.bisect.start({
+  good: 'change1-id', // Known working state
+  bad: 'change4-id'   // Known broken state
+});
+
+console.log(session.current); // Middle change to test
+console.log(session.remaining); // Estimated steps remaining (log2)
+```
+
+#### `jj.bisect.good()`, `jj.bisect.bad()`, `jj.bisect.skip()`
+Mark current change as good/bad or skip it.
+
+**Returns**: `Promise<{ active: boolean, good: string[], bad: string[], current: string, remaining: number, found?: boolean, firstBad?: string }>`
+
+**Example**:
+```javascript
+// Test current change
+const current = await jj.bisect.status();
+console.log(`Testing ${current.current}`);
+
+// Mark as good or bad
+await jj.bisect.good(); // If test passes
+// OR
+await jj.bisect.bad(); // If test fails
+// OR
+await jj.bisect.skip(); // If can't test this change
+
+// Continue until found
+let status = await jj.bisect.status();
+while (status.active && !status.found) {
+  // Run test on status.current
+  const testPassed = runTest();
+  await (testPassed ? jj.bisect.good() : jj.bisect.bad());
+  status = await jj.bisect.status();
+}
+
+if (status.found) {
+  console.log(`First bad change: ${status.firstBad}`);
+}
+```
+
+#### `jj.bisect.status()`
+Get current bisect session status.
+
+**Returns**: `Promise<{ active: boolean, good?: string[], bad?: string[], current?: string, remaining?: number, found?: boolean, firstBad?: string }>`
+
+#### `jj.bisect.reset()`
+End bisect session.
+
+**Returns**: `Promise<{ active: boolean }>`
+
+**Complete Example**:
+```javascript
+// Start bisect
+await jj.bisect.start({ good: goodChangeId, bad: badChangeId });
+
+// Bisect loop
+let status = await jj.bisect.status();
+while (status.active && !status.found) {
+  console.log(`Testing ${status.current} (${status.remaining} steps remaining)`);
+
+  // Get change content and test
+  await jj.edit({ changeId: status.current });
+  const testResult = await runYourTests();
+
+  // Mark result
+  if (testResult.passed) {
+    await jj.bisect.good();
+  } else {
+    await jj.bisect.bad();
+  }
+
+  status = await jj.bisect.status();
+}
+
+// Check result
+if (status.found) {
+  console.log(`Bug introduced in: ${status.firstBad}`);
+  const badChange = await jj.show({ change: status.firstBad });
+  console.log(`Description: ${badChange.description}`);
+}
+
+// Clean up
+await jj.bisect.reset();
+```
+
+---
+
 ## File Operations
 
 ### `jj.file.write(options)` / `jj.write(options)`
@@ -2075,6 +2231,9 @@ Revsets are powerful query expressions for selecting changes. All methods that a
 | `mine()` | Changes by current user | `mine()` |
 | `merge()` | Merge changes | `merge()` |
 | `file(pattern)` | Changes modifying files | `file("src/**/*.js")` |
+| `conflicted()` | Changes with conflicts | `conflicted()` |
+| `tracked()` | Changes with tracked files | `tracked()` |
+| `untracked()` | Changes with no tracked files | `untracked()` |
 
 ### Navigation
 
@@ -2094,6 +2253,7 @@ Revsets are powerful query expressions for selecting changes. All methods that a
 | `roots(set)` | Changes with no parents in set | `roots(all())` |
 | `heads(set)` | Changes with no children in set | `heads(all())` |
 | `latest(set, n)` | N most recent changes | `latest(all(), 5)` |
+| `reachable(heads)` | All changes reachable from heads | `reachable(heads(all()))` |
 
 ### Time-Based
 
@@ -2120,6 +2280,8 @@ Revsets are powerful query expressions for selecting changes. All methods that a
 | `bookmarks()` | All bookmarked changes | `bookmarks()` |
 | `bookmark(name)` | Specific bookmark | `bookmark("main")` |
 | `tags()` | All tagged changes | `tags()` |
+| `remote_branches()` | All remote branch targets | `remote_branches()` |
+| `remote_branches(pattern)` | Remote branches matching pattern | `remote_branches("origin/*")` |
 
 ### Advanced Graph Analytics
 
@@ -2156,6 +2318,26 @@ await jj.log({
 // Changes modifying JavaScript files in src/
 await jj.log({
   revset: 'file("src/**/*.js")'
+});
+
+// All changes with conflicts
+await jj.log({
+  revset: 'conflicted()'
+});
+
+// All changes reachable from heads
+await jj.log({
+  revset: 'reachable(heads(all()))'
+});
+
+// Remote branches from specific remote
+await jj.log({
+  revset: 'remote_branches("origin/*")'
+});
+
+// Non-empty changes that are tracked
+await jj.log({
+  revset: 'tracked() & ~empty()'
 });
 ```
 

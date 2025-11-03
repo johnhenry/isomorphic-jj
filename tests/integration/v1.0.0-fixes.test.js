@@ -1,5 +1,5 @@
 /**
- * Tests for v1.0.1 bug fixes
+ * Tests for v1.0.0 bug fixes
  *
  * This test suite validates fixes made during demo.mjs debugging:
  * 1. duplicate() - changeId parameter support and changeIds return field
@@ -17,7 +17,7 @@
 import { createJJ } from '../../src/index.js';
 import { MockFS } from '../fixtures/mock-fs.js';
 
-describe('v1.0.1 Bug Fixes', () => {
+describe('v1.0.0 Bug Fixes', () => {
   let fs;
   let jj;
 

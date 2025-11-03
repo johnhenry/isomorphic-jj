@@ -366,6 +366,94 @@ export class RevsetEngine {
       }
     }
 
+    // conflicted() - changes with conflicts
+    if (trimmed === 'conflicted()') {
+      await this.graph.load();
+      const all = this.graph.getAll();
+      return all
+        .filter(c => c.conflicts && Object.keys(c.conflicts).length > 0)
+        .map(c => c.changeId);
+    }
+
+    // reachable(heads) - all changes reachable from heads
+    // Use a more careful regex that handles nested expressions
+    if (trimmed.startsWith('reachable(')) {
+      const innerStart = 'reachable('.length;
+      let parenCount = 1;
+      let endIndex = innerStart;
+
+      // Find the matching closing parenthesis
+      while (endIndex < trimmed.length && parenCount > 0) {
+        if (trimmed[endIndex] === '(') parenCount++;
+        if (trimmed[endIndex] === ')') parenCount--;
+        endIndex++;
+      }
+
+      // Check if this is a complete reachable() expression (not part of a larger expression)
+      if (parenCount === 0 && endIndex === trimmed.length) {
+        const headsExpr = trimmed.substring(innerStart, endIndex - 1).trim();
+        const heads = await this.evaluate(headsExpr);
+
+        // Get all ancestors of all heads
+        const reachable = new Set();
+        for (const headId of heads) {
+          const ancestors = await this.getAncestors(headId);
+          for (const ancestorId of ancestors) {
+            reachable.add(ancestorId);
+          }
+        }
+
+        return Array.from(reachable);
+      }
+    }
+
+    // tracked() - changes with tracked files (all changes with files)
+    if (trimmed === 'tracked()') {
+      await this.graph.load();
+      const all = this.graph.getAll();
+      return all
+        .filter(c => c.fileSnapshot && Object.keys(c.fileSnapshot).length > 0)
+        .map(c => c.changeId);
+    }
+
+    // untracked() - changes with no tracked files (empty changes)
+    if (trimmed === 'untracked()') {
+      await this.graph.load();
+      const all = this.graph.getAll();
+      return all
+        .filter(c => !c.fileSnapshot || Object.keys(c.fileSnapshot).length === 0)
+        .map(c => c.changeId);
+    }
+
+    // remote_branches([pattern]) - remote branch targets
+    const remoteBranchesMatch = trimmed.match(/^remote_branches\((?:"([^"]+)")?\)$/);
+    if (remoteBranchesMatch || trimmed === 'remote_branches()') {
+      if (!this.bookmarkStore) return [];
+
+      await this.bookmarkStore.load();
+      const allBookmarks = await this.bookmarkStore.list();
+
+      // Filter for remote branches (bookmarks with '/' in the name)
+      let remoteBookmarks = allBookmarks.filter(bookmark => bookmark.name.includes('/'));
+
+      // If pattern provided, filter by pattern
+      if (remoteBranchesMatch && remoteBranchesMatch[1]) {
+        const pattern = remoteBranchesMatch[1];
+        const regex = new RegExp(pattern.replace(/\*/g, '.*'));
+        remoteBookmarks = remoteBookmarks.filter(bookmark => regex.test(bookmark.name));
+      }
+
+      // Get target change IDs
+      const targets = new Set();
+      for (const bookmark of remoteBookmarks) {
+        if (bookmark.changeId) {
+          targets.add(bookmark.changeId);
+        }
+      }
+
+      return Array.from(targets);
+    }
+
     // v0.5: Set operations - intersection (&), union (|), difference (~)
     if (trimmed.includes(' & ') || trimmed.includes(' | ') || trimmed.includes(' ~ ')) {
       return await this.evaluateSetOperation(trimmed);

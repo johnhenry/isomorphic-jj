@@ -23,7 +23,7 @@
 import { createJJ } from '../../src/index.js';
 import { MockFS } from '../fixtures/mock-fs.js';
 
-describe.skip('bisect (NOT IMPLEMENTED)', () => {
+describe('bisect', () => {
   let fs;
   let jj;
 

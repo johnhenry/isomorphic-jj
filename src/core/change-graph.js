@@ -235,4 +235,51 @@ export class ChangeGraph {
 
     return ancestors;
   }
+
+  /**
+   * Create a change with default values (helper for tests)
+   *
+   * @param {Object} params - Change parameters
+   * @param {string[]} [params.parents] - Parent change IDs
+   * @param {string} [params.description] - Change description
+   * @param {Object} [params.fileSnapshot] - File snapshot
+   * @param {Object} [params.conflicts] - Conflict markers
+   * @returns {Promise<Object>} Created change object
+   */
+  async createChange(params = {}) {
+    const crypto = await import('crypto');
+    const changeId = params.changeId || crypto.randomBytes(16).toString('hex');
+    const commitId = params.commitId || crypto.randomBytes(20).toString('hex');
+    const tree = params.tree || crypto.randomBytes(20).toString('hex');
+    const timestamp = params.timestamp || new Date().toISOString();
+
+    const change = {
+      changeId,
+      parents: params.parents || [],
+      description: params.description || '',
+      fileSnapshot: params.fileSnapshot || {},
+      commitId,
+      tree,
+      author: params.author || {
+        name: 'Test User',
+        email: 'test@example.com',
+        timestamp,
+      },
+      committer: params.committer || {
+        name: 'Test User',
+        email: 'test@example.com',
+        timestamp,
+      },
+      timestamp,
+    };
+
+    // Add conflicts if provided
+    if (params.conflicts) {
+      change.conflicts = params.conflicts;
+    }
+
+    await this.addChange(change);
+
+    return change;
+  }
 }

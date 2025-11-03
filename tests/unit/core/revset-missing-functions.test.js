@@ -18,7 +18,7 @@ import { BookmarkStore } from '../../../src/core/bookmark-store.js';
 import { Storage } from '../../../src/core/storage-manager.js';
 import { MockFS } from '../../fixtures/mock-fs.js';
 
-describe.skip('Missing Revset Functions (NOT IMPLEMENTED)', () => {
+describe('Missing Revset Functions', () => {
   let fs;
   let storage;
   let graph;
@@ -37,8 +37,9 @@ describe.skip('Missing Revset Functions (NOT IMPLEMENTED)', () => {
 
     await graph.init();
     await workingCopy.init('0'.repeat(32));
+    await bookmarks.init();
 
-    revset = new RevsetEngine(graph, workingCopy, bookmarks);
+    revset = new RevsetEngine(graph, workingCopy, null, bookmarks);
   });
 
   afterEach(() => {
@@ -46,8 +47,7 @@ describe.skip('Missing Revset Functions (NOT IMPLEMENTED)', () => {
   });
 
   describe('conflicted()', () => {
-    it.skip('should return empty set when no conflicts exist', async () => {
-      // SKIPPED: conflicted() revset function not yet implemented
+    it('should return empty set when no conflicts exist', async () => {
       // Create change without conflicts
       const change1 = {
         changeId: '1'.repeat(32),

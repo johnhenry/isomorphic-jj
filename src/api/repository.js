@@ -1698,6 +1698,19 @@ export async function createJJ(options) {
 
       const previousChangeId = workingCopy.getCurrentChangeId();
 
+      // Snapshot current filesystem into current change before switching
+      // This preserves any uncommitted modifications
+      if (previousChangeId !== args.changeId) {
+        const currentSnapshot = await snapshotFilesystem();
+        if (currentSnapshot && Object.keys(currentSnapshot).length > 0) {
+          const previousChange = await graph.getChange(previousChangeId);
+          if (previousChange) {
+            previousChange.fileSnapshot = currentSnapshot;
+            await graph.updateChange(previousChange);
+          }
+        }
+      }
+
       // Dispatch workingcopy:switching event (preventable)
       await dispatchEventAsync(jj, 'workingcopy:switching', {
         operation: 'edit',
@@ -2674,6 +2687,11 @@ export async function createJJ(options) {
         };
       }
 
+      // Update working copy's fileSnapshot with current state so show() returns accurate data
+      // This is safe even in dry-run mode since we're just syncing the graph with reality
+      workingChange.fileSnapshot = currentSnapshot;
+      await graph.updateChange(workingChange);
+
       // Get parent snapshot to determine what's modified
       let parentSnapshot = {};
       if (workingChange.parents && workingChange.parents.length > 0) {
@@ -2683,10 +2701,11 @@ export async function createJJ(options) {
         }
       }
 
-      // Find modified files (different from parent)
+      // Find modified files (existed in parent AND content is different)
       const modifiedFiles = {};
       for (const [filePath, content] of Object.entries(currentSnapshot)) {
-        if (parentSnapshot[filePath] !== content) {
+        // Only count as modified if file existed in parent (not a new file)
+        if (parentSnapshot[filePath] !== undefined && parentSnapshot[filePath] !== content) {
           modifiedFiles[filePath] = content;
         }
       }
@@ -2721,23 +2740,48 @@ export async function createJJ(options) {
         };
       }
 
-      // For each modified file, find the most recent ancestor that touched it
-      // This is a simplified version - full absorb would do line-level tracking
-      const fileToAncestor = {};
+      // For each modified file, use line-level tracking to find which ancestor
+      // modified each line, then group modifications by ancestor
       const ancestorModifications = {}; // ancestorId -> { filePath: content }
 
       for (const filePath of Object.keys(modifiedFiles)) {
-        // Find which ancestor last modified this file
-        const ancestor = await this._findFileAncestor(filePath, workingChange.parents);
+        const currentContent = modifiedFiles[filePath];
 
-        if (ancestor) {
-          fileToAncestor[filePath] = ancestor.changeId;
+        // Handle file deletion
+        if (currentContent === undefined) {
+          const ancestor = await this._findFileAncestor(filePath, workingChange.parents);
+          if (ancestor) {
+            if (!ancestorModifications[ancestor.changeId]) {
+              ancestorModifications[ancestor.changeId] = {};
+            }
+            ancestorModifications[ancestor.changeId][filePath] = undefined;
+          }
+          continue;
+        }
 
-          if (!ancestorModifications[ancestor.changeId]) {
-            ancestorModifications[ancestor.changeId] = {};
+        // For text files, use line-level tracking
+        const parentContent = parentSnapshot[filePath] || '';
+        const lineAncestors = await this._findLineAncestors(
+          filePath,
+          parentContent,
+          currentContent,
+          workingChange.parents
+        );
+
+        // Group line modifications by ancestor
+        // lineAncestors is a Map: ancestorId -> { lines: Map(lineNum -> lineContent), originalContent }
+        for (const [ancestorId, { lines, originalContent }] of lineAncestors.entries()) {
+          if (!ancestorModifications[ancestorId]) {
+            ancestorModifications[ancestorId] = {};
           }
 
-          ancestorModifications[ancestor.changeId][filePath] = modifiedFiles[filePath];
+          // Reconstruct file with modified lines
+          const originalLines = originalContent.split('\n');
+          for (const [lineNum, newContent] of lines.entries()) {
+            originalLines[lineNum] = newContent;
+          }
+
+          ancestorModifications[ancestorId][filePath] = originalLines.join('\n');
         }
       }
 
@@ -2759,6 +2803,17 @@ export async function createJJ(options) {
           affectedChanges,
           preview: ancestorModifications,
         };
+      }
+
+      // Capture original states of all changes BEFORE updating any ancestors
+      // This is needed to properly track descendant modifications when rebuilding
+      const allChanges = graph.getAll();
+      const originalStates = new Map();
+      for (const change of allChanges) {
+        originalStates.set(change.changeId, {
+          fileSnapshot: JSON.parse(JSON.stringify(change.fileSnapshot || {})),
+          parents: change.parents ? [...change.parents] : [],
+        });
       }
 
       // Apply modifications to ancestors
@@ -2787,6 +2842,28 @@ export async function createJJ(options) {
 
           await graph.updateChange(ancestor);
         }
+      }
+
+      // Rebuild all descendants ONCE after all ancestors are updated
+      // This includes changes that were directly updated by absorb
+      const allAffectedDescendants = new Set();
+      for (const ancestorId of affectedChanges) {
+        const descendants = await this._findDescendants(ancestorId, workingChangeId);
+        for (const desc of descendants) {
+          allAffectedDescendants.add(desc);
+        }
+      }
+
+      // Rebuild each affected descendant
+      // For changes that were directly modified by absorb, we use their CURRENT state (post-absorb)
+      // For changes that weren't directly modified, we use their original state
+      if (allAffectedDescendants.size > 0) {
+        await this._rebuildDescendantsWithStates(
+          Array.from(allAffectedDescendants),
+          originalStates,
+          workingChangeId,
+          new Set(affectedChanges) // Pass set of changes that were directly modified
+        );
       }
 
       // Update working copy to reflect absorbed changes
@@ -2888,6 +2965,458 @@ export async function createJJ(options) {
       }
 
       return null;
+    },
+
+    /**
+     * Find which ancestors last modified each line in a file
+     *
+     * @private
+     * @param {string} filePath - File path
+     * @param {string} parentContent - Content from parent change
+     * @param {string} currentContent - Current working copy content
+     * @param {string[]} startingPoints - Change IDs to start search from (parent changeIds)
+     * @returns {Promise<Map>} Map of ancestorId -> { lines: Map(lineNum -> content), originalContent }
+     */
+    async _findLineAncestors(filePath, parentContent, currentContent, startingPoints) {
+      if (!startingPoints || startingPoints.length === 0) {
+        return new Map();
+      }
+
+      // Split into lines and find which lines changed
+      const parentLines = parentContent.split('\n');
+      const currentLines = currentContent.split('\n');
+
+      // Find modified line numbers
+      const modifiedLineNums = [];
+      const maxLen = Math.max(parentLines.length, currentLines.length);
+
+      for (let i = 0; i < maxLen; i++) {
+        const parentLine = i < parentLines.length ? parentLines[i] : undefined;
+        const currentLine = i < currentLines.length ? currentLines[i] : undefined;
+
+        if (parentLine !== currentLine) {
+          modifiedLineNums.push(i);
+        }
+      }
+
+      // For each modified line, find which ancestor last modified it
+      const ancestorMap = new Map(); // ancestorId -> { lines: Map(lineNum -> content), originalContent }
+
+      for (const lineNum of modifiedLineNums) {
+        const newContent = lineNum < currentLines.length ? currentLines[lineNum] : undefined;
+
+        // Find which ancestor last modified this line
+        const ancestor = await this._findLineAncestor(
+          filePath,
+          lineNum,
+          parentLines[lineNum],
+          startingPoints
+        );
+
+        if (ancestor) {
+          if (!ancestorMap.has(ancestor.changeId)) {
+            ancestorMap.set(ancestor.changeId, {
+              lines: new Map(),
+              originalContent: ancestor.fileSnapshot[filePath] || '',
+            });
+          }
+
+          ancestorMap.get(ancestor.changeId).lines.set(lineNum, newContent);
+        }
+      }
+
+      return ancestorMap;
+    },
+
+    /**
+     * Find which ancestor last modified a specific line in a file
+     *
+     * @private
+     * @param {string} filePath - File path
+     * @param {number} lineNum - Line number (0-indexed)
+     * @param {string} parentLine - Line content from parent
+     * @param {string[]} startingPoints - Change IDs to start search from
+     * @returns {Promise<Object|null>} Ancestor change that last modified this line
+     */
+    async _findLineAncestor(filePath, lineNum, parentLine, startingPoints) {
+      if (!startingPoints || startingPoints.length === 0) {
+        return null;
+      }
+
+      // BFS to find most recent ancestor that MODIFIED this specific line
+      const queue = [...startingPoints];
+      const visited = new Set();
+
+      while (queue.length > 0) {
+        const changeId = queue.shift();
+
+        if (visited.has(changeId)) {
+          continue;
+        }
+        visited.add(changeId);
+
+        const change = await graph.getChange(changeId);
+        if (!change) {
+          continue;
+        }
+
+        // Check if this change has the file
+        if (change.fileSnapshot && change.fileSnapshot[filePath] !== undefined) {
+          const changeContent = change.fileSnapshot[filePath];
+          const changeLines = changeContent.split('\n');
+          const changeLine = lineNum < changeLines.length ? changeLines[lineNum] : undefined;
+
+          // Check if this change MODIFIED this specific line
+          let isModified = false;
+
+          if (change.parents && change.parents.length > 0) {
+            const parent = await graph.getChange(change.parents[0]);
+            if (parent && parent.fileSnapshot && parent.fileSnapshot[filePath] !== undefined) {
+              const parentContent = parent.fileSnapshot[filePath];
+              const parentLines = parentContent.split('\n');
+              const parentLine = lineNum < parentLines.length ? parentLines[lineNum] : undefined;
+
+              // This change modified this line if the content is different
+              if (changeLine !== parentLine) {
+                isModified = true;
+              }
+            } else {
+              // Parent doesn't have file, so this change added it (and this line)
+              isModified = true;
+            }
+          } else {
+            // No parent = root change, so this is where the line was added
+            isModified = true;
+          }
+
+          if (isModified) {
+            return change;
+          }
+        }
+
+        // Continue to parents
+        if (change.parents) {
+          queue.push(...change.parents);
+        }
+      }
+
+      return null;
+    },
+
+    /**
+     * Find all descendants of a change
+     *
+     * @private
+     * @param {string} changeId - The change to find descendants for
+     * @param {string} stopAtChangeId - Don't include this change
+     * @returns {Promise<string[]>} List of descendant change IDs
+     */
+    async _findDescendants(changeId, stopAtChangeId) {
+      const allChanges = graph.getAll();
+      const descendants = [];
+
+      // BFS to find all descendants
+      const queue = [changeId];
+      const visited = new Set([changeId]);
+
+      while (queue.length > 0) {
+        const currentId = queue.shift();
+
+        // Find children of current change
+        for (const change of allChanges) {
+          if (change.changeId === stopAtChangeId) {
+            // Don't include this change
+            continue;
+          }
+
+          if (change.parents && change.parents.includes(currentId) && !visited.has(change.changeId)) {
+            visited.add(change.changeId);
+            queue.push(change.changeId);
+            descendants.push(change.changeId);
+          }
+        }
+      }
+
+      return descendants;
+    },
+
+    /**
+     * Rebuild descendants with captured original states
+     *
+     * @private
+     * @param {string[]} descendantIds - List of descendant IDs to rebuild
+     * @param {Map} originalStates - Map of changeId -> original state before absorb
+     * @param {string} stopAtChangeId - Don't rebuild this change
+     * @param {Set} directlyModified - Set of changeIds that were directly modified by absorb
+     */
+    async _rebuildDescendantsWithStates(descendantIds, originalStates, stopAtChangeId, directlyModified = new Set()) {
+      // Sort descendants by depth (parents before children)
+      const sorted = await this._topologicalSort(descendantIds);
+
+      // Rebuild each descendant by reapplying its modifications on top of updated parent
+      for (const descendantId of sorted) {
+        if (descendantId === stopAtChangeId) {
+          continue;
+        }
+
+        const descendant = await graph.getChange(descendantId);
+        if (!descendant || !descendant.parents || descendant.parents.length === 0) {
+          continue;
+        }
+
+        // For changes that were directly modified by absorb, use their CURRENT state
+        // For other changes, use their original state
+        const useCurrentState = directlyModified.has(descendantId);
+        const originalDescendantState = useCurrentState
+          ? {
+              fileSnapshot: descendant.fileSnapshot,
+              parents: descendant.parents,
+            }
+          : originalStates.get(descendantId);
+
+        if (!originalDescendantState) {
+          continue;
+        }
+
+        // Get parent's CURRENT (updated) state
+        const parent = await graph.getChange(descendant.parents[0]);
+        if (!parent) {
+          continue;
+        }
+
+        // Get parent's ORIGINAL (before absorb) state
+        const originalParentState = originalStates.get(descendant.parents[0]);
+        if (!originalParentState) {
+          // No original state for parent, just use current parent
+          descendant.fileSnapshot = { ...parent.fileSnapshot };
+          await graph.updateChange(descendant);
+          continue;
+        }
+
+        // For each file, track which lines the descendant modified from original parent
+        // then reapply those modifications to the updated parent
+        const newSnapshot = {};
+
+        const allFiles = new Set([
+          ...Object.keys(originalDescendantState.fileSnapshot),
+          ...Object.keys(parent.fileSnapshot || {}),
+        ]);
+
+        for (const filePath of allFiles) {
+          const originalDescendantContent = originalDescendantState.fileSnapshot[filePath] || '';
+          const originalParentContent = originalParentState.fileSnapshot[filePath] || '';
+          const updatedParentContent = parent.fileSnapshot[filePath] || '';
+
+          // Find which lines descendant modified from original parent
+          const originalDescendantLines = originalDescendantContent.split('\n');
+          const originalParentLines = originalParentContent.split('\n');
+          const updatedParentLines = updatedParentContent.split('\n');
+
+          // Rebuild file: start with updated parent, apply descendant's modifications
+          const resultLines = [...updatedParentLines];
+
+          // Find lines that descendant modified
+          for (let i = 0; i < Math.max(originalDescendantLines.length, originalParentLines.length); i++) {
+            const originalDescendantLine = i < originalDescendantLines.length ? originalDescendantLines[i] : undefined;
+            const originalParentLine = i < originalParentLines.length ? originalParentLines[i] : undefined;
+
+            // If descendant modified this line from original parent, apply that modification
+            if (originalDescendantLine !== originalParentLine) {
+              // Extend resultLines if needed
+              while (resultLines.length <= i) {
+                resultLines.push('');
+              }
+              resultLines[i] = originalDescendantLine !== undefined ? originalDescendantLine : '';
+            }
+          }
+
+          newSnapshot[filePath] = resultLines.join('\n');
+        }
+
+        descendant.fileSnapshot = newSnapshot;
+        await graph.updateChange(descendant);
+      }
+    },
+
+    /**
+     * Rebuild descendants of a change to inherit updates
+     *
+     * Track descendant modifications and reapply them on top of updated parent.
+     *
+     * @private
+     * @param {string} ancestorId - The ancestor change that was updated
+     * @param {string} stopAtChangeId - Don't rebuild this change (usually working copy)
+     * @deprecated Use _rebuildDescendantsWithStates instead
+     */
+    async _rebuildDescendants(ancestorId, stopAtChangeId) {
+      // Find all descendants of ancestorId
+      const allChanges = graph.getAll();
+
+      // Store original parent states before any modifications
+      const originalParentStates = new Map();
+      for (const change of allChanges) {
+        if (change.parents && change.parents.length > 0) {
+          const parent = await graph.getChange(change.parents[0]);
+          if (parent) {
+            originalParentStates.set(change.changeId, {
+              parentId: change.parents[0],
+              parentSnapshot: JSON.parse(JSON.stringify(parent.fileSnapshot || {})),
+            });
+          }
+        }
+      }
+
+      const descendants = [];
+
+      // BFS to find all descendants
+      const queue = [ancestorId];
+      const visited = new Set([ancestorId]);
+
+      while (queue.length > 0) {
+        const currentId = queue.shift();
+
+        // Find children of current change
+        for (const change of allChanges) {
+          if (change.changeId === stopAtChangeId) {
+            // Don't rebuild the working copy itself
+            continue;
+          }
+
+          if (change.parents && change.parents.includes(currentId) && !visited.has(change.changeId)) {
+            visited.add(change.changeId);
+            queue.push(change.changeId);
+            descendants.push(change.changeId);
+          }
+        }
+      }
+
+      // Sort descendants by depth (parents before children)
+      // This ensures we update parents before their children
+      const sorted = await this._topologicalSort(descendants);
+
+      // Rebuild each descendant by reapplying its modifications on top of updated parent
+      for (const descendantId of sorted) {
+        const descendant = await graph.getChange(descendantId);
+        if (!descendant || !descendant.parents || descendant.parents.length === 0) {
+          continue;
+        }
+
+        // Get parent's CURRENT (updated) state
+        const parent = await graph.getChange(descendant.parents[0]);
+        if (!parent || !parent.fileSnapshot) {
+          continue;
+        }
+
+        // Get parent's ORIGINAL (before absorb) state
+        const originalState = originalParentStates.get(descendantId);
+        if (!originalState || originalState.parentId !== descendant.parents[0]) {
+          // Parent relationship changed or no original state, just use current parent
+          descendant.fileSnapshot = { ...parent.fileSnapshot };
+          await graph.updateChange(descendant);
+          continue;
+        }
+
+        const originalParentSnapshot = originalState.parentSnapshot;
+
+        // For each file, track which lines the descendant modified from original parent
+        // then reapply those modifications to the updated parent
+        const newSnapshot = {};
+
+        const allFiles = new Set([
+          ...Object.keys(descendant.fileSnapshot || {}),
+          ...Object.keys(parent.fileSnapshot || {}),
+        ]);
+
+        for (const filePath of allFiles) {
+          const descendantContent = descendant.fileSnapshot[filePath] || '';
+          const originalParentContent = originalParentSnapshot[filePath] || '';
+          const updatedParentContent = parent.fileSnapshot[filePath] || '';
+
+          // Find which lines descendant modified from original parent
+          const descendantLines = descendantContent.split('\n');
+          const originalParentLines = originalParentContent.split('\n');
+          const updatedParentLines = updatedParentContent.split('\n');
+
+          // Rebuild file: start with updated parent, apply descendant's modifications
+          const resultLines = [...updatedParentLines];
+
+          // Find lines that descendant modified
+          for (let i = 0; i < Math.max(descendantLines.length, originalParentLines.length); i++) {
+            const descendantLine = i < descendantLines.length ? descendantLines[i] : undefined;
+            const originalParentLine = i < originalParentLines.length ? originalParentLines[i] : undefined;
+
+            // If descendant modified this line from original parent, apply that modification
+            if (descendantLine !== originalParentLine) {
+              // Extend resultLines if needed
+              while (resultLines.length <= i) {
+                resultLines.push('');
+              }
+              resultLines[i] = descendantLine !== undefined ? descendantLine : '';
+            }
+          }
+
+          newSnapshot[filePath] = resultLines.join('\n');
+        }
+
+        descendant.fileSnapshot = newSnapshot;
+        await graph.updateChange(descendant);
+
+        // Update the original parent state for this descendant's children
+        originalParentStates.set(descendantId, {
+          parentId: descendantId,
+          parentSnapshot: JSON.parse(JSON.stringify(descendant.fileSnapshot)),
+        });
+      }
+    },
+
+    /**
+     * Topologically sort changes (parents before children)
+     *
+     * @private
+     * @param {string[]} changeIds - List of change IDs to sort
+     * @returns {Promise<string[]>} Sorted change IDs
+     */
+    async _topologicalSort(changeIds) {
+      const changes = await Promise.all(
+        changeIds.map(id => graph.getChange(id))
+      );
+
+      const sorted = [];
+      const visited = new Set();
+      const inProgress = new Set();
+
+      const visit = async (change) => {
+        if (!change || visited.has(change.changeId)) {
+          return;
+        }
+
+        if (inProgress.has(change.changeId)) {
+          // Cycle detected - shouldn't happen in a DAG
+          return;
+        }
+
+        inProgress.add(change.changeId);
+
+        // Visit parents first
+        if (change.parents) {
+          for (const parentId of change.parents) {
+            if (changeIds.includes(parentId)) {
+              const parent = await graph.getChange(parentId);
+              await visit(parent);
+            }
+          }
+        }
+
+        inProgress.delete(change.changeId);
+        visited.add(change.changeId);
+        sorted.push(change.changeId);
+      };
+
+      for (const change of changes) {
+        await visit(change);
+      }
+
+      return sorted;
     },
 
     /**
@@ -5494,49 +6023,272 @@ export async function createJJ(options) {
     bisect: {
       /**
        * Start bisect session
+       *
+       * @param {Object} args - Bisect arguments
+       * @param {string} args.good - Known good change ID
+       * @param {string} args.bad - Known bad change ID
+       * @returns {Promise<Object>} Bisect state
        */
       async start(args) {
-        throw new JJError('UNSUPPORTED_OPERATION', 'bisect is not yet fully implemented', {
-          feature: 'bisect',
-          reason: 'Binary search logic requires complex change graph traversal',
-          alternative: 'Use jj.log() to manually inspect changes',
-          status: 'planned for future release',
-        });
+        if (!args || !args.good || !args.bad) {
+          throw new JJError('INVALID_ARGUMENT', 'Both good and bad change IDs required', {
+            suggestion: 'Provide: { good: "changeId1", bad: "changeId2" }',
+          });
+        }
+
+        await graph.load();
+
+        // Check if bisect is already active
+        const existingState = await storage.read('bisect/state.json');
+        if (existingState && existingState.active) {
+          throw new JJError('BISECT_ALREADY_ACTIVE', 'Bisect session already in progress', {
+            suggestion: 'Use bisect.reset() to end current session first',
+          });
+        }
+
+        // Verify changes exist
+        const goodChange = await graph.getChange(args.good);
+        const badChange = await graph.getChange(args.bad);
+
+        if (!goodChange) {
+          throw new JJError('CHANGE_NOT_FOUND', `Good change ${args.good} not found`);
+        }
+        if (!badChange) {
+          throw new JJError('CHANGE_NOT_FOUND', `Bad change ${args.bad} not found`);
+        }
+
+        // Find all changes between good and bad
+        const candidates = await this._findBisectCandidates(args.good, args.bad);
+
+        // Pick the middle change
+        // If no candidates between good and bad, test bad itself
+        const current = candidates.length > 0
+          ? candidates[Math.floor(candidates.length / 2)]
+          : args.bad;
+
+        const bisectState = {
+          active: true,
+          good: [args.good],
+          bad: [args.bad],
+          candidates,
+          current,
+          remaining: candidates.length > 0 ? Math.ceil(Math.log2(candidates.length + 1)) : 0,
+          found: false,
+        };
+
+        await storage.write('bisect/state.json', bisectState);
+
+        return bisectState;
       },
 
       /**
        * Mark current change as good
+       *
+       * @returns {Promise<Object>} Updated bisect state
        */
       async good() {
-        throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+        const bisectState = await storage.read('bisect/state.json');
+
+        if (!bisectState || !bisectState.active) {
+          throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+        }
+
+        // Add current to good set
+        if (bisectState.current && !bisectState.good.includes(bisectState.current)) {
+          bisectState.good.push(bisectState.current);
+        }
+
+        // Update candidates and pick next
+        await this._updateBisectState(bisectState);
+
+        await storage.write('bisect/state.json', bisectState);
+
+        return bisectState;
       },
 
       /**
        * Mark current change as bad
+       *
+       * @returns {Promise<Object>} Updated bisect state
        */
       async bad() {
-        throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+        const bisectState = await storage.read('bisect/state.json');
+
+        if (!bisectState || !bisectState.active) {
+          throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+        }
+
+        // Add current to bad set
+        if (bisectState.current && !bisectState.bad.includes(bisectState.current)) {
+          bisectState.bad.push(bisectState.current);
+        }
+
+        // Update candidates and pick next
+        await this._updateBisectState(bisectState);
+
+        await storage.write('bisect/state.json', bisectState);
+
+        return bisectState;
       },
 
       /**
        * Skip current change
+       *
+       * @returns {Promise<Object>} Updated bisect state
        */
       async skip() {
-        throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+        const bisectState = await storage.read('bisect/state.json');
+
+        if (!bisectState || !bisectState.active) {
+          throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
+        }
+
+        // Remove current from candidates
+        if (bisectState.current) {
+          bisectState.candidates = bisectState.candidates.filter(c => c !== bisectState.current);
+        }
+
+        // Pick next candidate
+        await this._updateBisectState(bisectState);
+
+        await storage.write('bisect/state.json', bisectState);
+
+        return bisectState;
       },
 
       /**
        * Reset/end bisect session
+       *
+       * @returns {Promise<Object>} Final state
        */
       async reset() {
+        await storage.write('bisect/state.json', { active: false });
         return { active: false };
       },
 
       /**
        * Get bisect status
+       *
+       * @returns {Promise<Object>} Bisect state
        */
       async status() {
-        return { active: false };
+        const bisectState = await storage.read('bisect/state.json');
+        return bisectState || { active: false };
+      },
+
+      /**
+       * Find candidate changes between good and bad
+       *
+       * @private
+       * @param {string} goodId - Good change ID
+       * @param {string} badId - Bad change ID
+       * @returns {Promise<string[]>} List of candidate change IDs
+       */
+      async _findBisectCandidates(goodId, badId) {
+        await graph.load();
+
+        // Find all ancestors of bad that are descendants of good
+        const badAncestors = graph.getAncestors(badId);
+        const goodAncestors = graph.getAncestors(goodId);
+
+        // Candidates are changes that are:
+        // - Ancestors of bad (or bad itself)
+        // - Descendants of good (or good itself)
+        // - Not good or bad themselves
+        const candidates = [];
+
+        for (const changeId of badAncestors) {
+          if (changeId === goodId) {
+            continue; // Don't include good itself
+          }
+          if (changeId === badId) {
+            continue; // Don't include bad itself
+          }
+
+          // Check if this change is a descendant of good
+          const ancestors = graph.getAncestors(changeId);
+          if (ancestors.includes(goodId)) {
+            candidates.push(changeId);
+          }
+        }
+
+        return candidates;
+      },
+
+      /**
+       * Update bisect state after marking good/bad/skip
+       *
+       * @private
+       * @param {Object} bisectState - Current bisect state
+       */
+      async _updateBisectState(bisectState) {
+        await graph.load();
+
+        // Filter candidates: remove any that are now known to be good or bad
+        const newCandidates = [];
+
+        for (const candidateId of bisectState.candidates) {
+          // Skip if already marked as good or bad
+          if (bisectState.good.includes(candidateId) || bisectState.bad.includes(candidateId)) {
+            continue;
+          }
+
+          // Check if candidate is an ancestor of any good change (then it's good)
+          let isGood = false;
+          for (const goodId of bisectState.good) {
+            const goodAncestors = graph.getAncestors(goodId);
+            if (goodAncestors.includes(candidateId)) {
+              isGood = true;
+              break;
+            }
+          }
+
+          if (isGood) {
+            continue;
+          }
+
+          // Check if any bad change is an ancestor of candidate (then candidate is bad)
+          let isBad = false;
+          for (const badId of bisectState.bad) {
+            const candidateAncestors = graph.getAncestors(candidateId);
+            if (candidateAncestors.includes(badId)) {
+              isBad = true;
+              break;
+            }
+          }
+
+          if (isBad) {
+            continue;
+          }
+
+          newCandidates.push(candidateId);
+        }
+
+        bisectState.candidates = newCandidates;
+        bisectState.remaining = newCandidates.length > 0 ? Math.ceil(Math.log2(newCandidates.length + 1)) : 0;
+
+        // Pick the middle candidate
+        if (newCandidates.length > 0) {
+          bisectState.current = newCandidates[Math.floor(newCandidates.length / 2)];
+        } else {
+          // No more candidates - we found the first bad change
+          bisectState.found = true;
+          bisectState.current = null;
+
+          // The first bad change is the one in the bad set that has no bad ancestors
+          for (const badId of bisectState.bad) {
+            const badAncestors = graph.getAncestors(badId);
+            const hasChildBad = bisectState.bad.some(otherId => {
+              if (otherId === badId) return false;
+              return badAncestors.includes(otherId);
+            });
+
+            if (!hasChildBad) {
+              bisectState.firstBad = badId;
+              break;
+            }
+          }
+        }
       },
     },
 
