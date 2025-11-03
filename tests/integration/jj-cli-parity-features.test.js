@@ -44,6 +44,48 @@ describe('JJ CLI Parity Features', () => {
   // Bookmark Operations
   // ========================================
 
+  describe('bookmark.create()', () => {
+    it('should create a new bookmark', async () => {
+      const change = await jj.new({ message: 'Test change' });
+
+      const result = await jj.bookmark.create({
+        name: 'new-feature',
+        changeId: change.changeId
+      });
+
+      expect(result.name).toBe('new-feature');
+      expect(result.changeId).toBe(change.changeId);
+
+      const bookmarks = await jj.bookmark.list();
+      expect(bookmarks.some(b => b.name === 'new-feature')).toBe(true);
+    });
+
+    it('should fail if bookmark already exists', async () => {
+      const change = await jj.new({ message: 'Test change' });
+
+      // Create the bookmark first time
+      await jj.bookmark.create({ name: 'existing-feature', changeId: change.changeId });
+
+      // Try to create it again - should fail
+      await expect(
+        jj.bookmark.create({ name: 'existing-feature', changeId: change.changeId })
+      ).rejects.toThrow('Bookmark existing-feature already exists');
+    });
+
+    it('should throw error if name is missing', async () => {
+      const change = await jj.new({ message: 'Test' });
+      await expect(
+        jj.bookmark.create({ changeId: change.changeId })
+      ).rejects.toThrow('Missing name or changeId');
+    });
+
+    it('should throw error if changeId is missing', async () => {
+      await expect(
+        jj.bookmark.create({ name: 'test' })
+      ).rejects.toThrow('Missing name or changeId');
+    });
+  });
+
   describe('bookmark.rename()', () => {
     it('should rename a bookmark', async () => {
       const change = await jj.new({ message: 'Test change' });
@@ -321,6 +363,207 @@ describe('JJ CLI Parity Features', () => {
       await jj.remote.add({ name: 'origin', url: 'https://github.com/example/repo.git' });
       const remotes = await jj.git.remote.list();
       expect(remotes.some(r => r.name === 'origin')).toBe(true);
+    });
+  });
+
+  // ========================================
+  // Git Root Operation
+  // ========================================
+
+  describe('git.root()', () => {
+    it('should return Git repository root directory', async () => {
+      const result = await jj.git.root();
+
+      expect(result.root).toBe(tempDir);
+      expect(result.gitDir).toBe(path.join(tempDir, '.git'));
+    });
+
+    it('should throw error if not a Git repository', async () => {
+      const nonGitDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'non-git-'));
+
+      try {
+        const badJJ = await createJJ({ fs, dir: nonGitDir });
+        await expect(badJJ.git.root()).rejects.toThrow('Not a Git repository');
+      } finally {
+        await fs.promises.rm(nonGitDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ========================================
+  // Workspace Forget Operation
+  // ========================================
+
+  describe('workspace.forget()', () => {
+    it('should forget workspace without deleting files', async () => {
+      const workspacePath = path.join(tempDir, 'my-workspace');
+
+      // Add a workspace
+      const workspace = await jj.workspace.add({
+        path: workspacePath,
+        name: 'test-workspace',
+      });
+
+      // Create a file in the workspace
+      const testFile = path.join(workspacePath, 'test.txt');
+      await fs.promises.writeFile(testFile, 'test content');
+
+      // Forget the workspace
+      const result = await jj.workspace.forget({ id: workspace.id });
+      expect(result.forgotten).toBe(true);
+
+      // Verify workspace is removed from tracking
+      const workspaces = await jj.workspace.list();
+      expect(workspaces.find(w => w.id === workspace.id)).toBeUndefined();
+
+      // Verify files still exist
+      const fileExists = await fs.promises.access(testFile).then(() => true).catch(() => false);
+      expect(fileExists).toBe(true);
+
+      // Cleanup
+      await fs.promises.rm(workspacePath, { recursive: true, force: true });
+    });
+
+    it('should not forget default workspace', async () => {
+      await expect(jj.workspace.forget({ id: 'default' })).rejects.toThrow('Cannot forget default workspace');
+    });
+  });
+
+  // ========================================
+  // File Chmod Operation
+  // ========================================
+
+  describe('file.chmod()', () => {
+    it('should change file permissions', async () => {
+      await jj.write({ path: 'script.sh', data: '#!/bin/bash\necho "test"' });
+
+      const result = await jj.file.chmod({ path: 'script.sh', mode: 0o755 });
+
+      expect(result.path).toBe('script.sh');
+      expect(result.mode).toBeTruthy();
+      expect(result.modeOctal).toBe('755');
+    });
+
+    it('should accept string mode', async () => {
+      await jj.write({ path: 'file.txt', data: 'test' });
+
+      const result = await jj.file.chmod({ path: 'file.txt', mode: '644' });
+
+      expect(result.path).toBe('file.txt');
+      expect(result.modeOctal).toBe('644');
+    });
+
+    it('should throw error if path is missing', async () => {
+      await expect(jj.file.chmod({ mode: 0o755 })).rejects.toThrow('Missing path argument');
+    });
+
+    it('should throw error if mode is missing', async () => {
+      await expect(jj.file.chmod({ path: 'test.txt' })).rejects.toThrow('Missing mode argument');
+    });
+  });
+
+  // ========================================
+  // Parallelize Operation
+  // ========================================
+
+  describe('parallelize()', () => {
+    it('should make changes siblings', async () => {
+      // Create a linear chain of changes
+      await jj.write({ path: 'file1.txt', data: 'test1' });
+      const change1 = await jj.new({ message: 'Change 1' });
+
+      await jj.write({ path: 'file2.txt', data: 'test2' });
+      const change2 = await jj.new({ message: 'Change 2' });
+
+      await jj.write({ path: 'file3.txt', data: 'test3' });
+      const change3 = await jj.new({ message: 'Change 3' });
+
+      // Parallelize change2 and change3
+      const result = await jj.parallelize({
+        changes: [change2.changeId, change3.changeId]
+      });
+
+      expect(result.parallelized.length).toBe(2);
+      expect(result.parent).toBeTruthy();
+
+      // Both should now have the same parent
+      const updatedChange2 = await jj.show({ change: change2.changeId });
+      const updatedChange3 = await jj.show({ change: change3.changeId });
+
+      expect(updatedChange2.parents[0]).toBe(updatedChange3.parents[0]);
+    });
+
+    it('should use specified parent', async () => {
+      await jj.write({ path: 'base.txt', data: 'base' });
+      const base = await jj.new({ message: 'Base' });
+
+      await jj.write({ path: 'file1.txt', data: 'test1' });
+      const change1 = await jj.new({ message: 'Change 1' });
+
+      await jj.write({ path: 'file2.txt', data: 'test2' });
+      const change2 = await jj.new({ message: 'Change 2' });
+
+      const result = await jj.parallelize({
+        changes: [change1.changeId, change2.changeId],
+        parent: base.parents[0], // Use base's parent
+      });
+
+      expect(result.parent).toBe(base.parents[0]);
+    });
+
+    it('should throw error with less than 2 changes', async () => {
+      const change = await jj.new({ message: 'Single change' });
+
+      await expect(jj.parallelize({ changes: [change.changeId] })).rejects.toThrow('At least 2 changes are required');
+    });
+
+    it('should throw error if changes array is missing', async () => {
+      await expect(jj.parallelize({})).rejects.toThrow('Missing or invalid changes array');
+    });
+  });
+
+  // ========================================
+  // Operation Revert
+  // ========================================
+
+  describe('operations.revert()', () => {
+    it('should revert an operation', async () => {
+      // Get initial state
+      const ops1 = await jj.operations.list({ limit: 1 });
+      const op1 = ops1[0];
+
+      // Create a bookmark
+      const change = await jj.new({ message: 'Test' });
+      await jj.bookmark.set({ name: 'test-bookmark', changeId: change.changeId });
+
+      // Get the operation that created the bookmark
+      const ops2 = await jj.operations.list({ limit: 1 });
+      const op2 = ops2[0];
+
+      // Revert the bookmark creation
+      const result = await jj.operations.revert({ operation: op2.id });
+
+      expect(result.reverted).toBe(op2.id);
+      expect(result.inverseChanges).toBeTruthy();
+
+      // Verify bookmark was removed
+      const bookmarks = await jj.bookmark.list();
+      expect(bookmarks.find(b => b.name === 'test-bookmark')).toBeUndefined();
+    });
+
+    it('should not revert the first operation', async () => {
+      const ops = await jj.operations.list();
+      const firstOp = ops[ops.length - 1]; // First operation is at the end
+
+      await expect(jj.operations.revert({ operation: firstOp.id })).rejects.toThrow('Cannot revert the first operation');
+    });
+
+    it('should throw error if operation not found', async () => {
+      await expect(jj.operations.revert({ operation: 'nonexistent' })).rejects.toThrow('Operation nonexistent not found');
+    });
+
+    it('should throw error if operation ID is missing', async () => {
+      await expect(jj.operations.revert({})).rejects.toThrow('Missing operation ID');
     });
   });
 });

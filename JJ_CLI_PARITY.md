@@ -7,7 +7,7 @@
 
 This document analyzes the JJ CLI command surface and compares it with isomorphic-jj's current implementation. It identifies what we have, what's missing, and what should be prioritized for future releases.
 
-**Overall Status**: ~95% feature parity for commonly-used commands (v1.0 complete!)
+**Overall Status**: ~98% feature parity for commonly-used commands (v1.0 complete!)
 
 ---
 
@@ -52,13 +52,12 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 | `jj abandon` | ✅ | `jj.abandon()` | Mark changes as abandoned |
 | `jj restore` | ✅ | `jj.restore()` | Restore paths from another revision (v1.0) |
 | `jj duplicate` | ✅ | `jj.duplicate()` | Create copies of changes (v1.0) |
-| `jj parallelize` | ❌ | - | Make revisions siblings |
+| `jj parallelize` | ✅ | `jj.parallelize()` | Make revisions siblings (v1.0) |
 | `jj next` | ✅ | `jj.next()` | Move working copy to child (v1.0) |
 | `jj prev` | ✅ | `jj.prev()` | Move working copy to parent (v1.0) |
 
 ### Priority: Complete ✅
-- All common change operations now implemented
-- `parallelize` is advanced/rarely used
+- All change operations now fully implemented
 
 ---
 
@@ -72,13 +71,13 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 | **File rename (implicit)** | ✅ | `jj.file.move()`, `jj.move()` | Move/rename files (v1.0) |
 | **File deletion (implicit)** | ✅ | `jj.file.remove()`, `jj.remove()` | Remove files (v1.0) |
 | `jj file annotate` | ✅ | `jj.file.annotate()` | Show which revision modified each line (v1.0) |
-| `jj file chmod` | ❌ | - | Change file permissions |
-| `jj file track` | ❌ | - | Explicitly track file |
-| `jj file untrack` | ❌ | - | Explicitly untrack file |
+| `jj file chmod` | ✅ | `jj.file.chmod()` | Change file permissions (Node.js only, v1.0) |
+| `jj file track` | 🚫 | - | Out of scope: automatic tracking in JavaScript |
+| `jj file untrack` | 🚫 | - | Out of scope: automatic tracking in JavaScript |
 
 ### Priority: Complete ✅
 - All common file operations now implemented
-- `chmod`/`track`/`untrack` less relevant in JavaScript context
+- `track`/`untrack` not needed in JavaScript (automatic tracking)
 
 ---
 
@@ -88,9 +87,9 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 |---------|--------|-------------------|-------|
 | `jj bookmark list` | ✅ | `jj.bookmark.list()` | List all bookmarks |
 | `jj bookmark set` | ✅ | `jj.bookmark.set()` | Create/update bookmark |
+| `jj bookmark create` | ✅ | `jj.bookmark.create()` | Create new bookmark (fails if exists) (v1.0) |
 | `jj bookmark move` | ✅ | `jj.bookmark.move()` | Move bookmark to new target |
 | `jj bookmark delete` | ✅ | `jj.bookmark.delete()` | Delete bookmark |
-| `jj bookmark create` | ⚠️ | `jj.bookmark.set()` | Same as `set()` in practice |
 | `jj bookmark rename` | ✅ | `jj.bookmark.rename()` | Rename a bookmark (v1.0) |
 | `jj bookmark forget` | ✅ | `jj.bookmark.forget()` | Forget remote bookmark (v1.0) |
 | `jj bookmark track` | ✅ | `jj.bookmark.track()` | Track remote bookmark (v1.0) |
@@ -112,10 +111,10 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 | `jj workspace rename` | ✅ | `jj.workspace.rename()` | Rename workspace (v1.0) |
 | `jj workspace root` | ✅ | `jj.workspace.root()` | Get workspace path (v1.0) |
 | `jj workspace update-stale` | ✅ | `jj.workspace.updateStale()` | Update stale workspaces (v1.0) |
-| `jj workspace forget` | ❌ | - | Forget workspace without removing files |
+| `jj workspace forget` | ✅ | `jj.workspace.forget()` | Forget workspace without removing files (v1.0) |
 
-### Priority: Low
-- `forget` is useful but `remove()` covers most use cases
+### Priority: Complete ✅
+- All workspace operations now fully implemented
 
 ---
 
@@ -134,11 +133,10 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 | `jj git remote rename` | ✅ | `jj.git.remote.rename()` | Rename Git remote (v1.0) |
 | `jj git remote set-url` | ✅ | `jj.git.remote.setUrl()` | Change remote URL (v1.0) |
 | `jj git clone` | ✅ | `jj.git.clone()` | Clone Git repository (v1.0) |
-| `jj git root` | ❌ | - | Show Git repository root |
+| `jj git root` | ✅ | `jj.git.root()` | Show Git repository root (v1.0) |
 
 ### Priority: Complete ✅
-- All essential Git operations now implemented
-- `git.root()` is less critical (can use dir from config)
+- All Git operations now fully implemented
 
 ---
 
@@ -150,11 +148,11 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 | **Conflict detection** | ✅ | `jj.conflicts` API | Full conflict model with multiple types |
 | **Conflict resolution** | ✅ | `ConflictModel.resolve()` | Programmatic resolution (ours/theirs/union) |
 | **Custom merge drivers** | ✅ | `ConflictModel` | JSON, YAML, Markdown, package.json |
-| `jj resolve` | ❌ | - | Interactive conflict resolution with external tool |
+| `jj resolve` | 🚫 | - | Out of scope: interactive terminal feature |
 
-### Priority: Low
-- Interactive `resolve` is terminal-specific
-- Programmatic resolution API is more suitable for JavaScript
+### Priority: Complete ✅
+- All programmatic conflict features implemented
+- Interactive `resolve` not applicable for JavaScript/browser environments
 
 ---
 
@@ -165,15 +163,15 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 | `jj operation log` | ✅ | `jj.operations.list()` | List operation history |
 | `jj operation show` | ✅ | `jj.operations.show()` | Show changes in an operation (v1.0) |
 | `jj operation diff` | ✅ | `jj.operations.diff()` | Compare repo state between operations (v1.0) |
-| `jj operation undo` | ⚠️ | `jj.undo()` | Undo last operation |
+| `jj operation undo` | ✅ | `jj.undo()` | Undo last operation (top-level method) |
 | `jj operation restore` | ✅ | `jj.operations.restore()` | Restore to specific operation (v1.0) |
-| `jj operation revert` | ❌ | - | Revert a specific operation |
-| `jj operation abandon` | ❌ | - | Abandon operation history |
+| `jj operation revert` | ✅ | `jj.operations.revert()` | Revert a specific operation (v1.0) |
+| `jj operation abandon` | 🚫 | - | Out of scope: extremely rare, advanced operation |
 | `jj obslog` | ✅ | `jj.obslog()` | Show change evolution |
 
 ### Priority: Complete ✅
 - All common operation log operations now implemented
-- `revert` and `abandon` are advanced/rarely used
+- `abandon` intentionally not implemented (extremely rare use case)
 
 ---
 
@@ -214,26 +212,38 @@ This document analyzes the JJ CLI command surface and compares it with isomorphi
 ### ✅ Completed in v1.0
 All previously planned high and medium priority features are now implemented:
 1. ✅ **`jj.git.clone()`** - Clone from Git remote
-2. ✅ **`jj.bookmark.rename()`** - Rename bookmarks
-3. ✅ **`jj.git.remote.*`** - Complete remote management (list, remove, rename, setUrl)
-4. ✅ **`jj.diff()`** - Show file diffs between revisions
-5. ✅ **`jj.bookmark.track()` / `untrack()` / `forget()`** - Remote bookmark management
-6. ✅ **`jj.next()` / `prev()`** - Navigation helpers
-7. ✅ **`jj.duplicate()`** - Create copies of changes
-8. ✅ **`jj.restore()`** - Restore paths from another revision
-9. ✅ **`jj.file.annotate()`** - Git-blame equivalent
-10. ✅ **`jj.operations.show()` / `diff()` / `restore()`** - Advanced operation log features
-11. ✅ **`jj.config.*`** - Config management (get, set, list)
-12. ✅ **`jj.remote.*`** - Convenience aliases for git operations
+2. ✅ **`jj.bookmark.create()`** - Create new bookmark (fails if exists)
+3. ✅ **`jj.bookmark.rename()`** - Rename bookmarks
+4. ✅ **`jj.git.remote.*`** - Complete remote management (list, remove, rename, setUrl)
+5. ✅ **`jj.diff()`** - Show file diffs between revisions
+6. ✅ **`jj.bookmark.track()` / `untrack()` / `forget()`** - Remote bookmark management
+7. ✅ **`jj.next()` / `prev()`** - Navigation helpers
+8. ✅ **`jj.duplicate()`** - Create copies of changes
+9. ✅ **`jj.restore()`** - Restore paths from another revision
+10. ✅ **`jj.file.annotate()`** - Git-blame equivalent
+11. ✅ **`jj.operations.show()` / `diff()` / `restore()`** - Advanced operation log features
+12. ✅ **`jj.config.*`** - Config management (get, set, list)
+13. ✅ **`jj.remote.*`** - Convenience aliases for git operations
+14. ✅ **`jj.git.root()`** - Show Git repository root
+15. ✅ **`jj.workspace.forget()`** - Forget workspace without deleting files
+16. ✅ **`jj.file.chmod()`** - Change file permissions (Node.js only)
+17. ✅ **`jj.parallelize()`** - Make revisions siblings
+18. ✅ **`jj.operations.revert()`** - Revert a specific operation
 
 ### Future Considerations (Low Priority)
 Features not yet implemented are either advanced/rarely used or out of scope:
 
-### Out of Scope
-- **Interactive/Terminal UI features**: `jj resolve` (interactive), terminal pager options
-- **`jj parallelize()`** - Very advanced, rarely used
-- **`jj file.chmod()`** - Less relevant in JavaScript context
-- **`jj file.track()` / `untrack()`** - Implicit in isomorphic-jj
+### Out of Scope (🚫)
+These features are intentionally not implemented because they are not applicable to JavaScript/browser environments:
+
+- **`jj resolve` (interactive)** - Terminal-based interactive conflict resolution
+- **`jj file track` / `untrack`** - Explicit file tracking not needed (automatic in JavaScript)
+- **`jj operation abandon`** - Extremely rare, advanced operation for cleaning operation log
+
+### Partially Implemented (⚠️)
+These features have excellent coverage but are not 100% complete:
+
+- **Advanced revsets** (~90% parity) - All common revset functions implemented; some edge cases missing
 
 ---
 
@@ -241,15 +251,18 @@ Features not yet implemented are either advanced/rarely used or out of scope:
 
 isomorphic-jj v1.0 includes:
 
-✅ **460 tests, 100% passing**
-✅ **Complete `file.*` namespace** (write, show, list, move, remove)
+✅ **493 tests, 100% passing** (33 new tests for final features)
+✅ **Complete `file.*` namespace** (write, show, list, move, remove, annotate, chmod)
+✅ **Complete `operations.*` namespace** (list, show, diff, restore, revert)
+✅ **Complete `workspace.*` namespace** (add, list, remove, forget, rename, root, updateStale)
+✅ **Complete `git.*` namespace** (init, fetch, push, import, export, clone, root, remote.*)
 ✅ **`rebase()` method** for proper JJ CLI history semantics
-✅ **Enhanced workspace operations** (rename, root, updateStale)
+✅ **`parallelize()` method** for advanced graph manipulation
 ✅ **~90% revset parity** with JJ CLI
 ✅ **First-class conflicts** with custom merge drivers
 ✅ **Git backend integration** with shallow clone support
 ✅ **Multiple working copies** (workspaces)
-✅ **Operation log** with full undo/redo
+✅ **Operation log** with full undo/redo/revert
 ✅ **100% backward compatible** - zero breaking changes
 
 ---
@@ -259,8 +272,8 @@ isomorphic-jj v1.0 includes:
 - This analysis is based on JJ CLI version available on 2025-11-02
 - JJ CLI is actively developed; new features may be added
 - isomorphic-jj focuses on JavaScript/browser environments, so some CLI-specific features (interactive prompts, terminal UI) are intentionally out of scope
-- The ~75% parity covers all commonly-used workflows; missing features are primarily advanced operations or terminal-specific
+- The ~98% parity covers all commonly-used workflows; missing features are primarily terminal-specific or extremely rare operations
 
 ---
 
-**Conclusion**: isomorphic-jj v1.0 provides comprehensive JJ CLI parity with ~95% coverage of commonly-used commands. All essential operations are implemented and fully tested with 460 passing tests. The remaining unimplemented features are either advanced/rarely used (`parallelize`, `operation.revert`) or out of scope for JavaScript environments (`file.chmod`, interactive terminal features).
+**Conclusion**: isomorphic-jj v1.0 provides comprehensive JJ CLI parity with ~98% coverage of commonly-used commands. All essential operations are implemented and fully tested with 493 passing tests. The remaining unimplemented features are either extremely rare (`operation.abandon`) or out of scope for JavaScript environments (interactive terminal features, explicit file tracking). This represents feature-complete JJ CLI compatibility for JavaScript/browser use cases.

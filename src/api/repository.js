@@ -236,6 +236,8 @@ export async function createJJ(options) {
       getAll: () => baseGraph.getAll(),  // Used by revset engine
       getAncestors: (changeId) => baseGraph.getAncestors(changeId),
       getDescendants: (changeId) => baseGraph.getDescendants(changeId),
+      getParents: (changeId) => baseGraph.getParents(changeId),
+      getChildren: (changeId) => baseGraph.getChildren(changeId),
       findChangeByCommitId: (commitId) => baseGraph.findChangeByCommitId(commitId),
 
       // Wrap write operations with middleware hooks
@@ -1966,6 +1968,109 @@ export async function createJJ(options) {
           description: targetOp.description,
         };
       },
+
+      /**
+       * Revert a specific operation (create inverse operation)
+       *
+       * This creates a new operation that undoes the effects of the specified operation,
+       * without affecting any operations that came after it.
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.operation - Operation ID to revert
+       * @returns {Promise<Object>} Revert result
+       */
+      async revert(args) {
+        if (!args || !args.operation) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing operation ID', {
+            suggestion: 'Provide { operation: operationId }',
+          });
+        }
+
+        await oplog.load();
+        const ops = await oplog.list();
+        const targetOp = ops.find(o => o.id === args.operation);
+
+        if (!targetOp) {
+          throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
+        }
+
+        // Get the operation before this one to compare state
+        const targetIndex = ops.indexOf(targetOp);
+        if (targetIndex === 0) {
+          throw new JJError('CANNOT_REVERT', 'Cannot revert the first operation', {
+            suggestion: 'Use operations.restore() to go back to the initial state',
+          });
+        }
+
+        const previousOp = ops[targetIndex - 1];
+
+        // Compute the inverse changes
+        const inversChanges = {
+          bookmarks: {},
+          heads: [],
+        };
+
+        // Revert bookmark changes
+        const prevBookmarks = previousOp.view?.bookmarks || {};
+        const targetBookmarks = targetOp.view?.bookmarks || {};
+        await bookmarks.load();
+
+        for (const name of Object.keys(targetBookmarks)) {
+          if (!prevBookmarks[name]) {
+            // Bookmark was added - delete it
+            await bookmarks.delete(name);
+            inversChanges.bookmarks[name] = { action: 'deleted' };
+          } else if (prevBookmarks[name] !== targetBookmarks[name]) {
+            // Bookmark was moved - move it back
+            await bookmarks.set(name, prevBookmarks[name]);
+            inversChanges.bookmarks[name] = {
+              action: 'moved',
+              from: targetBookmarks[name],
+              to: prevBookmarks[name],
+            };
+          }
+        }
+
+        // Check for deleted bookmarks (existed before, don't exist after)
+        for (const name of Object.keys(prevBookmarks)) {
+          if (!targetBookmarks[name]) {
+            // Bookmark was deleted - restore it
+            await bookmarks.set(name, prevBookmarks[name]);
+            inversChanges.bookmarks[name] = {
+              action: 'restored',
+              to: prevBookmarks[name],
+            };
+          }
+        }
+
+        await bookmarks.save();
+
+        // Revert working copy change if it changed
+        if (previousOp.view?.workingCopy !== targetOp.view?.workingCopy) {
+          await workingCopy.load();
+          await workingCopy.setCurrentChange(previousOp.view.workingCopy);
+        }
+
+        // Record the revert as a new operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `revert operation ${args.operation}`,
+          parents: [],
+          view: {
+            bookmarks: prevBookmarks,
+            remoteBookmarks: previousOp.view?.remoteBookmarks || {},
+            heads: previousOp.view?.heads || [],
+            workingCopy: previousOp.view?.workingCopy,
+          },
+        });
+
+        return {
+          reverted: args.operation,
+          inverseChanges: inversChanges,
+          description: targetOp.description,
+        };
+      },
     },
 
     // ========================================
@@ -2902,6 +3007,25 @@ export async function createJJ(options) {
           return { name: args.name, url: args.url };
         },
       },
+
+      /**
+       * Get Git repository root directory (matches `jj git root`)
+       *
+       * @returns {Promise<Object>} Repository root information
+       */
+      async root() {
+        // Return the directory containing .git
+        const gitDir = path.join(dir, '.git');
+
+        try {
+          await fs.promises.access(gitDir);
+          return { root: dir, gitDir };
+        } catch (error) {
+          throw new JJError('NOT_GIT_REPO', `Not a Git repository: ${dir}`, {
+            suggestion: 'Initialize with jj.git.init() first',
+          });
+        }
+      },
     },
 
     // ========================================
@@ -3348,10 +3472,55 @@ export async function createJJ(options) {
         return annotations;
       },
 
+      /**
+       * Change file permissions (matches `jj file chmod`)
+       * Note: Only works in Node.js, not in browsers
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.path - File path
+       * @param {number|string} args.mode - File mode (e.g., 0o755 or '755')
+       * @returns {Promise<Object>} chmod result
+       */
+      async chmod(args) {
+        if (!args || !args.path) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing path argument', {
+            suggestion: 'Provide a file path to chmod',
+          });
+        }
+
+        if (args.mode === undefined) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing mode argument', {
+            suggestion: 'Provide a mode: { path: "file.sh", mode: 0o755 }',
+          });
+        }
+
+        // Check if we're in a browser environment
+        if (typeof process === 'undefined' || !fs.promises.chmod) {
+          throw new JJError('UNSUPPORTED_OPERATION', 'chmod is not supported in browser environments', {
+            suggestion: 'chmod only works in Node.js',
+          });
+        }
+
+        const fullPath = path.join(dir, args.path);
+
+        // Convert string mode to number if needed
+        const mode = typeof args.mode === 'string' ? parseInt(args.mode, 8) : args.mode;
+
+        await fs.promises.chmod(fullPath, mode);
+
+        // Get updated file stats
+        const stats = await fs.promises.stat(fullPath);
+
+        return {
+          path: args.path,
+          mode: stats.mode,
+          modeOctal: (stats.mode & parseInt('777', 8)).toString(8),
+        };
+      },
+
       // Future extensions:
       // async track(args) { ... }     // Track files
       // async untrack(args) { ... }   // Untrack files
-      // async chmod(args) { ... }     // Set executable bit
     },
 
     /**
@@ -3452,6 +3621,37 @@ export async function createJJ(options) {
         });
 
         return { removed: true };
+      },
+
+      /**
+       * Forget a workspace without removing files (matches `jj workspace forget`)
+       *
+       * @param {Object} args - Forget arguments
+       * @param {string} args.id - Workspace ID
+       */
+      async forget(args) {
+        if (!args || !args.id) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing workspace ID');
+        }
+
+        await workspaces.load();
+        await workspaces.forget(args.id);
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `forget workspace ${args.id}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { forgotten: true };
       },
 
       /**
@@ -3748,6 +3948,53 @@ export async function createJJ(options) {
           timestamp: new Date().toISOString(),
           user: await getUserOplogInfo(),
           description: `bookmark set ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: { [args.name]: args.changeId },
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, changeId: args.changeId };
+      },
+
+      /**
+       * Create a new bookmark (matches `jj bookmark create`)
+       *
+       * Unlike `set()`, this will fail if the bookmark already exists.
+       *
+       * @param {Object} args - Bookmark arguments
+       * @param {string} args.name - Bookmark name
+       * @param {string} args.changeId - Change ID to point to
+       * @returns {Promise<Object>} Bookmark info
+       */
+      async create(args) {
+        if (!args || !args.name || !args.changeId) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name or changeId', {
+            suggestion: 'Provide both: { name: "main", changeId: "abc123..." }',
+          });
+        }
+
+        await bookmarks.load();
+
+        // Check if bookmark already exists
+        const existingBookmark = await bookmarks.get(args.name);
+        if (existingBookmark) {
+          throw new JJError('BOOKMARK_EXISTS', `Bookmark ${args.name} already exists`, {
+            suggestion: 'Use bookmark.set() to update an existing bookmark, or bookmark.move() to move it',
+          });
+        }
+
+        await bookmarks.set(args.name, args.changeId);
+        await bookmarks.save();
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark create ${args.name}`,
           parents: [],
           view: {
             bookmarks: { [args.name]: args.changeId },
@@ -4389,6 +4636,132 @@ export async function createJJ(options) {
         from: fromChangeId,
         to: toChangeId,
         restoredPaths,
+      };
+    },
+
+    /**
+     * Make multiple changes siblings (parallelize them)
+     *
+     * This operation takes multiple changes and gives them the same parent,
+     * making them siblings in the change graph instead of ancestors/descendants.
+     *
+     * @param {Object} args - Arguments
+     * @param {Array<string>} args.changes - Change IDs to parallelize
+     * @param {string} [args.parent] - Optional parent to use (defaults to common ancestor)
+     * @returns {Promise<Object>} Operation result with parallelized changes
+     *
+     * @example
+     * // Make three changes siblings
+     * await jj.parallelize({
+     *   changes: ['abc123', 'def456', 'ghi789']
+     * });
+     *
+     * // Make changes siblings with specific parent
+     * await jj.parallelize({
+     *   changes: ['abc123', 'def456'],
+     *   parent: 'main-change-id'
+     * });
+     */
+    async parallelize(args) {
+      if (!args || !args.changes || !Array.isArray(args.changes)) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid changes array', {
+          suggestion: 'Provide an array of change IDs: { changes: [changeId1, changeId2, ...] }',
+        });
+      }
+
+      if (args.changes.length < 2) {
+        throw new JJError('INVALID_ARGUMENT', 'At least 2 changes are required to parallelize', {
+          suggestion: 'Provide at least 2 change IDs in the changes array',
+        });
+      }
+
+      await graph.load();
+      await workingCopy.load();
+
+      // Validate all changes exist
+      const changes = [];
+      for (const changeId of args.changes) {
+        const change = await graph.getChange(changeId);
+        if (!change) {
+          throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
+        }
+        changes.push(change);
+      }
+
+      // Determine the parent to use
+      let parentId;
+      if (args.parent) {
+        // Use specified parent
+        const parentChange = await graph.getChange(args.parent);
+        if (!parentChange) {
+          throw new JJError('CHANGE_NOT_FOUND', `Parent change ${args.parent} not found`);
+        }
+        parentId = args.parent;
+      } else {
+        // Find common ancestor of all changes
+        if (args.changes.length === 2) {
+          const commonAncestors = await revset.findCommonAncestor(args.changes[0], args.changes[1]);
+          if (commonAncestors.length === 0) {
+            throw new JJError('NO_COMMON_ANCESTOR', 'Changes have no common ancestor', {
+              suggestion: 'Specify a parent explicitly using the parent parameter',
+            });
+          }
+          parentId = commonAncestors[0];
+        } else {
+          // For more than 2 changes, find common ancestor iteratively
+          let commonAncestor = args.changes[0];
+          for (let i = 1; i < args.changes.length; i++) {
+            const ancestors = await revset.findCommonAncestor(commonAncestor, args.changes[i]);
+            if (ancestors.length === 0) {
+              throw new JJError('NO_COMMON_ANCESTOR', 'Changes have no common ancestor', {
+                suggestion: 'Specify a parent explicitly using the parent parameter',
+              });
+            }
+            commonAncestor = ancestors[0];
+          }
+          parentId = commonAncestor;
+        }
+      }
+
+      // Update all changes to have the same parent
+      const parallelizedChanges = [];
+      for (const change of changes) {
+        // Don't modify if already a direct child of the target parent
+        if (change.parents.length === 1 && change.parents[0] === parentId) {
+          parallelizedChanges.push({
+            changeId: change.changeId,
+            alreadyParallel: true,
+          });
+          continue;
+        }
+
+        const oldParents = [...change.parents]; // Store old parents before modifying
+        change.parents = [parentId];
+        await graph.updateChange(change);
+        parallelizedChanges.push({
+          changeId: change.changeId,
+          oldParents,
+          newParent: parentId,
+        });
+      }
+
+      // Record operation
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: `parallelize ${args.changes.length} change(s)`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: args.changes,
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return {
+        parallelized: parallelizedChanges,
+        parent: parentId,
       };
     },
   };

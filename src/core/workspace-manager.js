@@ -192,6 +192,30 @@ export class WorkspaceManager {
   }
 
   /**
+   * Forget a workspace without deleting files
+   *
+   * @param {string} workspaceId - Workspace ID to forget
+   */
+  async forget(workspaceId) {
+    if (workspaceId === 'default') {
+      throw new JJError('INVALID_OPERATION', 'Cannot forget default workspace', {
+        suggestion: 'Use a different workspace ID',
+      });
+    }
+
+    const workspace = this.workspaces.get(workspaceId);
+    if (!workspace) {
+      throw new JJError('WORKSPACE_NOT_FOUND', `Workspace ${workspaceId} not found`, {
+        workspaceId,
+      });
+    }
+
+    // Just remove from tracking, leave files alone
+    this.workspaces.delete(workspaceId);
+    await this.save();
+  }
+
+  /**
    * Get a workspace by ID
    *
    * @param {string} workspaceId - Workspace ID

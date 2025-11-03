@@ -507,7 +507,15 @@ export interface MergeArgs {
  */
 export interface BookmarkSetArgs {
   name: string;
-  target: Revset;
+  changeId: ChangeID;
+}
+
+/**
+ * Bookmark create arguments
+ */
+export interface BookmarkCreateArgs {
+  name: string;
+  changeId: ChangeID;
 }
 
 /**
@@ -515,7 +523,7 @@ export interface BookmarkSetArgs {
  */
 export interface BookmarkMoveArgs {
   name: string;
-  target: Revset;
+  to: ChangeID;
 }
 
 /**
@@ -731,6 +739,44 @@ export interface WorkspaceRemoveArgs {
 }
 
 /**
+ * Workspace forget arguments (matches `jj workspace forget`)
+ */
+export interface WorkspaceForgetArgs {
+  id: string;
+}
+
+/**
+ * Workspace rename arguments (matches `jj workspace rename`)
+ */
+export interface WorkspaceRenameArgs {
+  workspace: string;
+  newName: string;
+}
+
+/**
+ * File chmod arguments (Node.js only)
+ */
+export interface FileChmodArgs {
+  path: string;
+  mode: number | string;
+}
+
+/**
+ * Parallelize arguments (matches `jj parallelize`)
+ */
+export interface ParallelizeArgs {
+  changes: ChangeID[];
+  parent?: ChangeID;
+}
+
+/**
+ * Operation revert arguments (matches `jj operation revert`)
+ */
+export interface OperationRevertArgs {
+  operation: OperationID;
+}
+
+/**
  * Background operation options
  */
 export interface BackgroundOptions {
@@ -862,6 +908,14 @@ export interface JJ {
       timestamp: Date;
       description: string;
     }>;
+    revert(args: OperationRevertArgs): Promise<{
+      reverted: OperationID;
+      inverseChanges: {
+        bookmarks: Record<string, { action: string; from?: ChangeID; to?: ChangeID }>;
+        heads: ChangeID[];
+      };
+      description: string;
+    }>;
   };
 
   // Conflicts
@@ -871,6 +925,7 @@ export interface JJ {
   bookmark: {
     list(): Promise<Bookmark[]>;
     set(args: BookmarkSetArgs): Promise<{ name: string; changeId: ChangeID }>;
+    create(args: BookmarkCreateArgs): Promise<{ name: string; changeId: ChangeID }>;
     move(args: BookmarkMoveArgs): Promise<{ name: string; from: ChangeID; to: ChangeID }>;
     delete(args: BookmarkDeleteArgs): Promise<{ deleted: string }>;
     rename(args: BookmarkRenameArgs): Promise<{ oldName: string; newName: string; changeId: ChangeID }>;
@@ -887,6 +942,7 @@ export interface JJ {
     import(): Promise<{ imported: string[] }>;
     export(args?: GitExportArgs): Promise<{ exported: string[] }>;
     clone(args: GitCloneArgs): Promise<{ url: string; directory: string; ref: string }>;
+    root(): Promise<{ root: string; gitDir: string }>;
     remote: {
       list(): Promise<Array<{ name: string; url: string }>>;
       add(args: RemoteAddArgs): Promise<{ name: string; url: string }>;
@@ -917,6 +973,11 @@ export interface JJ {
       timestamp: Date;
       content: string;
     }>>;
+    chmod(args: FileChmodArgs): Promise<{
+      path: string;
+      mode: number;
+      modeOctal: string;
+    }>;
   };
 
   // Workspaces
@@ -924,8 +985,9 @@ export interface JJ {
     add(args: WorkspaceAddArgs): Promise<Workspace>;
     list(): Promise<Workspace[]>;
     remove(args: WorkspaceRemoveArgs): Promise<void>;
+    forget(args: WorkspaceForgetArgs): Promise<{ forgotten: boolean }>;
     get(args: { id: string }): Promise<Workspace | null>;
-    rename(args: { workspace: string; newName: string }): Promise<Workspace>;
+    rename(args: WorkspaceRenameArgs): Promise<Workspace>;
     root(args?: { workspace?: string }): Promise<string>;
     updateStale(args?: { workspace?: string }): Promise<{ updated: number; workspaces: Array<{ id: string; name: string }> }>;
   };
@@ -972,6 +1034,15 @@ export interface JJ {
     from: ChangeID;
     to: ChangeID;
     restoredPaths: string[];
+  }>;
+  parallelize(args: ParallelizeArgs): Promise<{
+    parallelized: Array<{
+      changeId: ChangeID;
+      oldParents?: ChangeID[];
+      newParent?: ChangeID;
+      alreadyParallel?: boolean;
+    }>;
+    parent: ChangeID;
   }>;
 }
 
