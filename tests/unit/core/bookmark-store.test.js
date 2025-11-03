@@ -129,11 +129,11 @@ describe('BookmarkStore', () => {
       await bookmarks.set('feature-x', tid(3));
       
       const all = await bookmarks.list();
-      
+
       expect(all).toHaveLength(3);
-      expect(all).toContainEqual({ name: 'main', target: tid(1), remote: null });
-      expect(all).toContainEqual({ name: 'develop', target: tid(2), remote: null });
-      expect(all).toContainEqual({ name: 'feature-x', target: tid(3), remote: null });
+      expect(all).toContainEqual({ name: 'main', changeId: tid(1), remote: null });
+      expect(all).toContainEqual({ name: 'develop', changeId: tid(2), remote: null });
+      expect(all).toContainEqual({ name: 'feature-x', changeId: tid(3), remote: null });
     });
 
     it('should return empty array when no bookmarks', async () => {

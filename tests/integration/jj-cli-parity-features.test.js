@@ -76,13 +76,20 @@ describe('JJ CLI Parity Features', () => {
       const change = await jj.new({ message: 'Test' });
       await expect(
         jj.bookmark.create({ changeId: change.changeId })
-      ).rejects.toThrow('Missing name or changeId');
+      ).rejects.toThrow('Missing name');
     });
 
-    it('should throw error if changeId is missing', async () => {
-      await expect(
-        jj.bookmark.create({ name: 'test' })
-      ).rejects.toThrow('Missing name or changeId');
+    it('should default to working copy if changeId is missing (JJ CLI behavior)', async () => {
+      // Create some working copy content
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const status = await jj.status();
+
+      // Should create bookmark at working copy when changeId not provided
+      const result = await jj.bookmark.create({ name: 'test' });
+
+      expect(result).toBeDefined();
+      expect(result.name).toBe('test');
+      expect(result.changeId).toBe(status.workingCopy.changeId);
     });
   });
 

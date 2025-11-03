@@ -115,7 +115,7 @@ export class RevsetEngine {
       if (!this.bookmarkStore) return [];
       await this.bookmarkStore.load();
       const allBookmarks = await this.bookmarkStore.list();
-      return allBookmarks.map(b => b.target);
+      return allBookmarks.map(b => b.changeId);
     }
 
     // v1.0: git_head() - current working copy (Git HEAD equivalent)
@@ -335,6 +335,35 @@ export class RevsetEngine {
         if (currentSet.length === 0) break; // Stop if we reach leaves
       }
       return currentSet;
+    }
+
+    // Range operator (..) - all changes from base to tip
+    // Format: base..tip means ancestors(tip) ~ ancestors(base)
+    if (trimmed.includes('..')) {
+      const parts = trimmed.split('..');
+      if (parts.length === 2) {
+        const base = parts[0].trim();
+        const tip = parts[1].trim();
+
+        // Get ancestors of tip
+        const baseChange = await this.graph.getChange(base);
+        const tipChange = await this.graph.getChange(tip);
+
+        if (!baseChange || !tipChange) {
+          throw new JJError('INVALID_REVSET', `Invalid range: ${trimmed}`, {
+            suggestion: 'Both base and tip must be valid change IDs',
+          });
+        }
+
+        // ancestors(tip) ~ ancestors(base) gives us all changes from base to tip
+        const tipAncestors = new Set(await this.getAncestors(tip));
+        const baseAncestors = new Set(await this.getAncestors(base));
+
+        // Remove base's ancestors from tip's ancestors
+        const rangeChanges = [...tipAncestors].filter(id => !baseAncestors.has(id));
+
+        return rangeChanges;
+      }
     }
 
     // v0.5: Set operations - intersection (&), union (|), difference (~)

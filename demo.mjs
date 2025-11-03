@@ -1124,9 +1124,9 @@ console.log('━━━━━━━━━━━━━━━━━━━━━━�
 
 console.log('Complex revset expressions...\n');
 
-// range() - all changes between two revisions
-const rangeChanges = await jj.log({ revset: `range(${layer1Id}, ${layer3Id})` });
-console.log(`✓ range(layer1, layer3) → ${rangeChanges.length} changes`);
+// range() - all changes between two revisions (uses .. syntax)
+const rangeChanges = await jj.log({ revset: `${layer1Id}..${layer3Id}` });
+console.log(`✓ range(layer1..layer3) → ${rangeChanges.length} changes`);
 console.log('  • All changes between layer 1 and layer 3');
 
 // common_ancestor() - latest common ancestor
