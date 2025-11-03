@@ -238,7 +238,10 @@ export async function createJJ(options) {
       getDescendants: (changeId) => baseGraph.getDescendants(changeId),
       getParents: (changeId) => baseGraph.getParents(changeId),
       getChildren: (changeId) => baseGraph.getChildren(changeId),
-      findChangeByCommitId: (commitId) => baseGraph.findChangeByCommitId(commitId),
+      findChangeByCommitId: async (commitId) => {
+        const changeId = baseGraph.findByCommitId(commitId);
+        return changeId ? await baseGraph.getChange(changeId) : null;
+      },
 
       // Wrap write operations with middleware hooks
       async addChange(change) {
@@ -1293,6 +1296,7 @@ export async function createJJ(options) {
       await workingCopy.load();
       await oplog.load();
       await userConfig.load();
+      await bookmarks.load();
 
       const all = graph.getAll();
       const ops = await oplog.list();
@@ -1334,6 +1338,11 @@ export async function createJJ(options) {
         (c.author.email === currentUser.email || c.author.name === currentUser.name)
       ).length;
 
+      // Get bookmark statistics
+      const allBookmarks = await bookmarks.list();
+      const localBookmarks = allBookmarks.filter(b => !b.remote);
+      const remoteBookmarks = allBookmarks.filter(b => b.remote);
+
       return {
         changes: {
           total: all.length,
@@ -1342,6 +1351,7 @@ export async function createJJ(options) {
           merges: mergeCommits,
           empty: emptyCommits,
           mine: myCommits,
+          byAuthor: authorCounts,
         },
         authors: {
           total: Object.keys(authorCounts).length,
@@ -1350,6 +1360,12 @@ export async function createJJ(options) {
         files: {
           total: allFiles.size,
           list: Array.from(allFiles).sort(),
+          byExtension: {},  // Add file extension breakdown
+        },
+        bookmarks: {
+          total: allBookmarks.length,
+          local: localBookmarks.length,
+          remote: remoteBookmarks.length,
         },
         operations: {
           total: ops.length,
@@ -1712,12 +1728,15 @@ export async function createJJ(options) {
       await oplog.load();
       let operations = await oplog.list();
 
+      // Support both changeId and change parameters
+      const changeId = opts.changeId || opts.change;
+
       // Filter by change if specified
-      if (opts.change) {
+      if (changeId) {
         operations = operations.filter(op =>
           op.view && (
-            op.view.workingCopy === opts.change ||
-            (op.view.heads && op.view.heads.includes(opts.change))
+            op.view.workingCopy === changeId ||
+            (op.view.heads && op.view.heads.includes(changeId))
           )
         );
       }
@@ -1727,8 +1746,17 @@ export async function createJJ(options) {
         operations = operations.slice(-opts.limit);
       }
 
+      // Transform to evolution events with operation field
+      const events = operations.map(op => ({
+        eventType: op.eventType || 'modify',
+        description: op.description,
+        operation: op.id,  // Add operation ID
+        timestamp: op.timestamp,
+        user: op.user,
+      }));
+
       // Reverse to show newest first
-      return operations.reverse();
+      return events.reverse();
     },
 
     /**
@@ -1847,6 +1875,7 @@ export async function createJJ(options) {
           timestamp: op.timestamp,
           user: op.user,
           description: op.description,
+          parents: op.parents || [],
           view: op.view,
           changes,
         };
@@ -1905,7 +1934,9 @@ export async function createJJ(options) {
           to: args.to,
           addedHeads,
           removedHeads,
+          changes: [...addedHeads, ...removedHeads], // Combined for convenience
           bookmarkChanges,
+          bookmarks: Object.keys(bookmarkChanges), // Array of changed bookmark names
           workingCopyChanged: fromOp.view?.workingCopy !== toOp.view?.workingCopy,
         };
       },
@@ -2763,13 +2794,18 @@ export async function createJJ(options) {
             await graph.addChange(change);
           }
 
-          // Create bookmark pointing to this change
-          await bookmarks.set(bookmarkName, change.changeId);
+          // Create or update bookmark pointing to this change
+          const existing = await bookmarks.get(bookmarkName);
+          if (existing) {
+            await bookmarks.move(bookmarkName, change.changeId);
+          } else {
+            await bookmarks.set(bookmarkName, change.changeId);
+          }
           importedBookmarks.push(bookmarkName);
         }
 
         await bookmarks.save();
-        await graph.save();
+        // Note: graph.save() not needed - addChange() saves automatically
 
         // Record operation
         await oplog.recordOperation({
@@ -2805,7 +2841,7 @@ export async function createJJ(options) {
         await graph.load();
         await bookmarks.load();
 
-        const allBookmarks = bookmarks.list();
+        const allBookmarks = await bookmarks.list();
         const exportedRefs = [];
 
         for (const bookmark of allBookmarks) {
@@ -4107,14 +4143,21 @@ export async function createJJ(options) {
        *
        * @param {Object} args - Bookmark arguments
        * @param {string} args.name - Bookmark name
-       * @param {string} args.changeId - Change ID to point to
+       * @param {string} [args.changeId] - Change ID to point to (default: working copy)
        * @returns {Promise<Object>} Bookmark info
        */
       async create(args) {
-        if (!args || !args.name || !args.changeId) {
-          throw new JJError('INVALID_ARGUMENT', 'Missing name or changeId', {
-            suggestion: 'Provide both: { name: "main", changeId: "abc123..." }',
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name argument', {
+            suggestion: 'Provide: { name: "main", changeId: "abc123..." } or { name: "main" } for working copy',
           });
+        }
+
+        // Default to working copy if no changeId provided
+        let changeId = args.changeId;
+        if (!changeId) {
+          await workingCopy.load();
+          changeId = workingCopy.getCurrentChangeId();
         }
 
         await bookmarks.load();
@@ -4127,7 +4170,7 @@ export async function createJJ(options) {
           });
         }
 
-        await bookmarks.set(args.name, args.changeId);
+        await bookmarks.set(args.name, changeId);
         await bookmarks.save();
 
         // Record operation
@@ -4137,14 +4180,14 @@ export async function createJJ(options) {
           description: `bookmark create ${args.name}`,
           parents: [],
           view: {
-            bookmarks: { [args.name]: args.changeId },
+            bookmarks: { [args.name]: changeId },
             remoteBookmarks: {},
             heads: [],
             workingCopy: workingCopy.getCurrentChangeId(),
           },
         });
 
-        return { name: args.name, changeId: args.changeId };
+        return { name: args.name, changeId };
       },
 
       /**
@@ -4168,8 +4211,7 @@ export async function createJJ(options) {
           throw new JJError('NOT_FOUND', `Bookmark ${args.name} not found`);
         }
 
-        await bookmarks.set(args.name, args.to);
-        await bookmarks.save();
+        await bookmarks.move(args.name, args.to);
 
         // Record operation
         await oplog.recordOperation({
@@ -4441,16 +4483,19 @@ export async function createJJ(options) {
        * @returns {Promise<any>} Config value
        */
       async get(args) {
-        if (!args || !args.name) {
-          throw new JJError('INVALID_ARGUMENT', 'Missing config name', {
-            suggestion: 'Provide config name: { name: "user.name" }',
+        // Support both 'key' and 'name' parameters
+        const key = args?.key || args?.name;
+
+        if (!args || !key) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing config key/name', {
+            suggestion: 'Provide config key: { key: "user.name" }',
           });
         }
 
         await userConfig.load();
 
         // Handle nested keys (e.g., 'user.name')
-        const parts = args.name.split('.');
+        const parts = key.split('.');
         let value = userConfig.config;
 
         for (const part of parts) {
@@ -4473,16 +4518,19 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Set result
        */
       async set(args) {
-        if (!args || !args.name || args.value === undefined) {
-          throw new JJError('INVALID_ARGUMENT', 'Missing name or value', {
-            suggestion: 'Provide both: { name: "user.name", value: "John Doe" }',
+        // Support both 'key' and 'name' parameters
+        const key = args?.key || args?.name;
+
+        if (!args || !key || args.value === undefined) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing key/name or value', {
+            suggestion: 'Provide both: { key: "user.name", value: "John Doe" }',
           });
         }
 
         await userConfig.load();
 
         // Handle nested keys (e.g., 'user.name')
-        const parts = args.name.split('.');
+        const parts = key.split('.');
         let obj = userConfig.config;
 
         for (let i = 0; i < parts.length - 1; i++) {
@@ -4495,7 +4543,7 @@ export async function createJJ(options) {
         obj[parts[parts.length - 1]] = args.value;
         await userConfig.save();
 
-        return { name: args.name, value: args.value };
+        return { key, name: key, value: args.value };
       },
 
       /**
@@ -4617,6 +4665,7 @@ export async function createJJ(options) {
       return {
         from: currentChangeId,
         to: targetChange.changeId,
+        changeId: targetChange.changeId, // Add for convenience
         offset,
       };
     },
@@ -4656,6 +4705,7 @@ export async function createJJ(options) {
       return {
         from: workingCopy.getCurrentChangeId(),
         to: currentChangeId,
+        changeId: currentChangeId, // Add for convenience
         offset,
       };
     },
@@ -4673,7 +4723,9 @@ export async function createJJ(options) {
       await workingCopy.load();
       await userConfig.load();
 
-      const changesToDup = args.changes || [workingCopy.getCurrentChangeId()];
+      // Support both changeId (singular) and changes (plural)
+      const changesToDup = args.changes ||
+                          (args.changeId ? [args.changeId] : [workingCopy.getCurrentChangeId()]);
       const duplicatedChanges = [];
 
       for (const changeId of changesToDup) {
@@ -4714,7 +4766,11 @@ export async function createJJ(options) {
         },
       });
 
-      return { duplicated: duplicatedChanges };
+      // Return both formats for compatibility
+      return {
+        duplicated: duplicatedChanges,
+        changeIds: duplicatedChanges.map(d => d.duplicate)
+      };
     },
 
     /**

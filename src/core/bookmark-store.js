@@ -201,7 +201,7 @@ export class BookmarkStore {
 
   /**
    * List all bookmarks (local and remote)
-   * 
+   *
    * @returns {Promise<Array>} Array of bookmark objects
    */
   async list() {
@@ -211,7 +211,7 @@ export class BookmarkStore {
     for (const [name, target] of this.local.entries()) {
       result.push({
         name,
-        target,
+        changeId: target,
         remote: null,
       });
     }
@@ -221,7 +221,7 @@ export class BookmarkStore {
       for (const [name, target] of bookmarks.entries()) {
         result.push({
           name: `${remoteName}/${name}`,
-          target,
+          changeId: target,
           remote: remoteName,
         });
       }

@@ -39,6 +39,334 @@ const jj = await createJJ({ fs, dir: '/repo' });
 
 ---
 
+## Initialization
+
+### `createJJ(options)`
+Create a new JJ repository instance. This is the primary entry point for all isomorphic-jj operations.
+
+**Parameters**:
+```typescript
+{
+  fs: FileSystem;           // File system implementation (Node.js fs or LightningFS)
+  dir: string;              // Working directory path (absolute)
+  git?: GitModule;          // Optional: isomorphic-git module for enhanced Git operations
+  http?: HttpClient;        // Optional: HTTP client for remote operations (isomorphic-git/http)
+  corsProxy?: string;       // Optional: CORS proxy URL for browser environments
+  author?: {                // Optional: Default author for commits
+    name: string;
+    email: string;
+  };
+  onProgress?: (event) => void;  // Optional: Progress callback for long operations
+}
+```
+
+**Returns**: `Promise<JJ>`
+
+The JJ instance provides access to all repository operations through organized namespaces:
+- Core operations: `init()`, `status()`, `log()`, `show()`, `diff()`, `describe()`, `commit()`, etc.
+- `bookmark.*` - Bookmark management
+- `file.*` - File operations
+- `git.*` - Git backend operations
+- `workspace.*` - Multiple working copy management
+- `operations.*` - Operation log and undo/redo
+- `conflicts.*` - Conflict resolution
+- `config.*` - Configuration management
+- `remote.*` - Convenience aliases for git operations
+
+**Example (Node.js)**:
+```javascript
+import { createJJ } from 'isomorphic-jj';
+import fs from 'fs';
+import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/node/index.js';
+
+const jj = await createJJ({
+  fs,
+  dir: '/Users/alice/projects/my-repo',
+  git,
+  http,
+  author: {
+    name: 'Alice Developer',
+    email: 'alice@example.com'
+  }
+});
+
+// Initialize repository
+await jj.init({
+  userName: 'Alice Developer',
+  userEmail: 'alice@example.com'
+});
+
+// Start working
+await jj.write({ path: 'README.md', data: '# My Project' });
+await jj.describe({ message: 'Initial commit' });
+```
+
+**Example (Browser with LightningFS)**:
+```javascript
+import { createJJ } from 'isomorphic-jj';
+import FS from '@isomorphic-git/lightning-fs';
+import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/web/index.js';
+
+// Create LightningFS instance (IndexedDB backend)
+const fs = new FS('my-app-repos');
+
+const jj = await createJJ({
+  fs,
+  dir: '/my-repo',
+  git,
+  http,
+  corsProxy: 'https://cors.isomorphic-git.org',
+  author: {
+    name: 'Alice Developer',
+    email: 'alice@example.com'
+  },
+  onProgress: (event) => {
+    console.log(`${event.phase}: ${event.loaded}/${event.total}`);
+  }
+});
+
+// Initialize repository
+await jj.init({
+  userName: 'Alice Developer',
+  userEmail: 'alice@example.com'
+});
+```
+
+**Example (Browser with OPFS - Origin Private File System)**:
+```javascript
+import { createJJ } from 'isomorphic-jj';
+import git from 'isomorphic-git';
+import http from 'isomorphic-git/http/web/index.js';
+
+// Use OPFS for better performance in supported browsers
+const root = await navigator.storage.getDirectory();
+const repoDir = await root.getDirectoryHandle('my-repo', { create: true });
+
+// OPFS adapter for isomorphic-git
+const fs = {
+  promises: {
+    readFile: async (path) => {
+      const handle = await getFileHandle(repoDir, path);
+      const file = await handle.getFile();
+      return new Uint8Array(await file.arrayBuffer());
+    },
+    writeFile: async (path, data) => {
+      const handle = await getFileHandle(repoDir, path, { create: true });
+      const writable = await handle.createWritable();
+      await writable.write(data);
+      await writable.close();
+    },
+    // ... other fs methods
+  }
+};
+
+const jj = await createJJ({
+  fs,
+  dir: '/my-repo',
+  git,
+  http
+});
+```
+
+**Notes**:
+- The `fs` parameter must implement Node.js fs.promises API
+- For browsers, use `@isomorphic-git/lightning-fs` or OPFS
+- The `git` and `http` parameters are required for Git operations (clone, fetch, push)
+- The `dir` path should be absolute
+- Multiple `createJJ` instances can work with different directories
+- The returned JJ instance is stateful and maintains repository state
+
+---
+
+## Exported Functions and Utilities
+
+### Browser Utilities
+
+isomorphic-jj provides additional browser-specific utilities:
+
+#### `getBrowserCapabilities()`
+Detect browser capabilities for storage and file system access.
+
+**Returns**:
+```typescript
+{
+  hasIndexedDB: boolean;           // IndexedDB support
+  hasPersistentStorage: boolean;   // Persistent storage API
+  hasServiceWorker: boolean;       // Service Worker support
+  hasFileSystemAccess: boolean;    // File System Access API
+  hasOPFS: boolean;                // Origin Private File System
+  estimatedQuota: number;          // Estimated storage quota (bytes)
+}
+```
+
+**Example**:
+```javascript
+import { getBrowserCapabilities } from 'isomorphic-jj';
+
+const caps = await getBrowserCapabilities();
+console.log('IndexedDB available:', caps.hasIndexedDB);
+console.log('Storage quota:', Math.round(caps.estimatedQuota / 1024 / 1024), 'MB');
+
+if (caps.hasOPFS) {
+  console.log('Can use OPFS for better performance');
+}
+```
+
+---
+
+#### `requestPersistentStorage()`
+Request persistent storage permission from the browser.
+
+**Returns**: `Promise<boolean>` - `true` if permission granted
+
+**Example**:
+```javascript
+import { requestPersistentStorage } from 'isomorphic-jj';
+
+const granted = await requestPersistentStorage();
+if (granted) {
+  console.log('Storage will persist across sessions');
+} else {
+  console.log('Storage may be cleared by browser');
+}
+```
+
+---
+
+#### `getStorageEstimate()`
+Get current storage usage and quota.
+
+**Returns**:
+```typescript
+Promise<{
+  usage: number;    // Current usage in bytes
+  quota: number;    // Total quota in bytes
+  percent: number;  // Usage percentage
+}>
+```
+
+**Example**:
+```javascript
+import { getStorageEstimate } from 'isomorphic-jj';
+
+const estimate = await getStorageEstimate();
+console.log(`Using ${estimate.usage} / ${estimate.quota} bytes (${estimate.percent}%)`);
+
+if (estimate.percent > 80) {
+  console.warn('Storage nearly full!');
+}
+```
+
+---
+
+#### `clearBrowserStorage()`
+Clear all isomorphic-jj data from browser storage.
+
+**Parameters**:
+```typescript
+{
+  filesystem?: string;  // LightningFS name to clear (default: all)
+}
+```
+
+**Returns**: `Promise<void>`
+
+**Example**:
+```javascript
+import { clearBrowserStorage } from 'isomorphic-jj';
+
+// Clear all storage
+await clearBrowserStorage();
+
+// Clear specific filesystem
+await clearBrowserStorage({ filesystem: 'my-app-repos' });
+```
+
+---
+
+### Error Handling
+
+#### `JJError`
+All errors thrown by isomorphic-jj are instances of `JJError`.
+
+**Properties**:
+```typescript
+class JJError extends Error {
+  code: string;          // Error code (e.g., 'INVALID_ARGUMENT')
+  context?: any;         // Additional context about the error
+  suggestion?: string;   // Helpful suggestion for fixing
+  details?: any;         // Detailed error information
+}
+```
+
+**Common Error Codes**:
+- `INVALID_ARGUMENT` - Missing or invalid parameter
+- `NOT_FOUND` - Change, file, or bookmark not found
+- `ALREADY_EXISTS` - Resource already exists
+- `CONFLICT` - Operation resulted in conflicts
+- `STORAGE_ERROR` - Filesystem or storage error
+- `STORAGE_READ_FAILED` - Failed to read from storage
+- `STORAGE_WRITE_FAILED` - Failed to write to storage
+- `UNSUPPORTED_OPERATION` - Operation not supported in current environment
+- `VALIDATION_ERROR` - Validation failed
+- `OPERATION_NOT_FOUND` - Operation not found in log
+- `CANNOT_ABANDON` - Cannot abandon (e.g., last operation)
+
+**Example**:
+```javascript
+import { createJJ, JJError } from 'isomorphic-jj';
+
+try {
+  await jj.bookmark.create({ name: 'main' });
+} catch (error) {
+  if (error instanceof JJError) {
+    console.error(`Error [${error.code}]: ${error.message}`);
+    if (error.suggestion) {
+      console.log(`Suggestion: ${error.suggestion}`);
+    }
+    if (error.context) {
+      console.log('Context:', error.context);
+    }
+  } else {
+    throw error;
+  }
+}
+```
+
+---
+
+### Type Definitions
+
+isomorphic-jj exports TypeScript type definitions for all APIs:
+
+```typescript
+import type {
+  JJ,
+  Change,
+  ChangeID,
+  CommitID,
+  Bookmark,
+  Conflict,
+  Operation,
+  OperationID,
+  Workspace,
+  StatusResult,
+  DiffResult,
+  AnnotationLine,
+  RepositoryStats,
+  RevsetQuery,
+  MergeStrategy,
+  ConflictType,
+  FileStatus
+} from 'isomorphic-jj';
+```
+
+See the full type definitions in `src/types.d.ts`.
+
+---
+
 ## Core Repository Operations
 
 ### `jj.init(options)`
