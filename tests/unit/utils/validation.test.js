@@ -69,14 +69,11 @@ describe('Validation', () => {
       }).toThrow('Path traversal (..) not allowed');
     });
 
-    it('should reject absolute paths', () => {
-      expect(() => {
-        validatePath('/etc/passwd');
-      }).toThrow(JJError);
-      
-      expect(() => {
-        validatePath('/etc/passwd');
-      }).toThrow('Absolute paths not allowed');
+    it('should auto-normalize absolute paths by stripping leading slashes', () => {
+      // Auto-normalization for REST API compatibility
+      expect(validatePath('/etc/passwd')).toBe('etc/passwd');
+      expect(validatePath('/src/file.js')).toBe('src/file.js');
+      expect(validatePath('///multiple/slashes')).toBe('multiple/slashes');
     });
 
     it('should reject paths exceeding max length', () => {

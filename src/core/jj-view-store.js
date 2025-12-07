@@ -16,7 +16,7 @@ export class JJViewStore {
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
-    this.protoPath = path.join(__dirname, '..', 'src', 'protos', 'simple_op_store.proto');
+    this.protoPath = path.join(__dirname, '..', 'protos', 'simple_op_store.proto');
   }
 
   /**
