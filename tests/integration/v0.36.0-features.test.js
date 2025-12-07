@@ -152,6 +152,64 @@ describe('v0.36.0 Features', () => {
       expect(await repo.config.get({ name: 'user.name' })).toBe('Global User');
       expect(await repo.config.get({ name: 'user.email' })).toBe('workspace@example.com');
     });
+
+    it('should support programmatic workspace config', async () => {
+      await repo.config.set({ name: 'user.name', value: 'Global User' });
+
+      // Load with programmatic workspace config (no file I/O)
+      await repo.config.load({
+        workspace: { user: { email: 'programmatic@example.com' } }
+      });
+
+      expect(await repo.config.get({ name: 'user.name' })).toBe('Global User');
+      expect(await repo.config.get({ name: 'user.email' })).toBe('programmatic@example.com');
+    });
+
+    it('should support programmatic override config', async () => {
+      await repo.config.set({ name: 'test.value', value: 'original' });
+
+      // Load with programmatic override
+      await repo.config.load({
+        override: { test: { value: 'overridden' } }
+      });
+
+      expect(await repo.config.get({ name: 'test.value' })).toBe('overridden');
+    });
+
+    it('should handle priority: workspace > file-workspace > override > global', async () => {
+      // Global config
+      await repo.config.set({ name: 'priority.test', value: 'global' });
+
+      // File-based workspace config
+      const workspaceConfigPath = path.join(testDir, '.jj', 'workspace-config.json');
+      await fs.promises.writeFile(
+        workspaceConfigPath,
+        JSON.stringify({ priority: { test: 'file-workspace' } })
+      );
+
+      // Programmatic workspace config should have highest priority
+      await repo.config.load({
+        override: { priority: { test: 'override' } },
+        workspace: { priority: { test: 'programmatic-workspace' } }
+      });
+
+      expect(await repo.config.get({ name: 'priority.test' })).toBe('programmatic-workspace');
+    });
+
+    it('should reset to file-based config when load() called without opts', async () => {
+      // Set persistent config
+      await repo.config.set({ name: 'persistent.value', value: 'from-file' });
+
+      // Apply programmatic override
+      await repo.config.load({
+        workspace: { persistent: { value: 'programmatic' } }
+      });
+      expect(await repo.config.get({ name: 'persistent.value' })).toBe('programmatic');
+
+      // Reset by calling load() without opts
+      await repo.config.load();
+      expect(await repo.config.get({ name: 'persistent.value' })).toBe('from-file');
+    });
   });
 
   describe('visible() and hidden() revset aliases', () => {

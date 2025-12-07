@@ -5885,21 +5885,13 @@ export async function createJJ(options) {
           });
         }
 
-        await userConfig.load();
-
-        // Handle nested keys (e.g., 'user.name')
-        const parts = key.split('.');
-        let value = userConfig.config;
-
-        for (const part of parts) {
-          if (value && typeof value === 'object') {
-            value = value[part];
-          } else {
-            return null;
-          }
+        // Ensure config is loaded at least once
+        if (!userConfig.config) {
+          await userConfig.load();
         }
 
-        return value;
+        // Use userConfig.get() to preserve programmatic config
+        return userConfig.get(key);
       },
 
       /**
@@ -5952,11 +5944,31 @@ export async function createJJ(options) {
       /**
        * Reload configuration (including workspace-specific config)
        * v0.35.0: Loads workspace-config.json if present
+       * v0.36.0: Accepts optional config object for programmatic configuration
        *
+       * @param {Object} [opts] - Optional config options
+       * @param {Object} [opts.workspace] - Workspace-specific config to merge (highest priority)
+       * @param {Object} [opts.override] - Config object to merge over loaded config
        * @returns {Promise<void>}
+       *
+       * @example
+       * // Load from files only
+       * await repo.config.load();
+       *
+       * @example
+       * // Programmatic workspace config (no file I/O needed)
+       * await repo.config.load({
+       *   workspace: { user: { email: 'test@example.com' } }
+       * });
+       *
+       * @example
+       * // Override global config programmatically
+       * await repo.config.load({
+       *   override: { test: { value: 'override' } }
+       * });
        */
-      async load() {
-        await userConfig.load();
+      async load(opts) {
+        await userConfig.load(opts);
       },
     },
 

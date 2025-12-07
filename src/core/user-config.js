@@ -37,10 +37,15 @@ export class UserConfig {
   }
 
   /**
-   * Load config from storage
+   * Load config from storage and/or programmatic object
    * v0.35.0: Also loads workspace-specific config from workspace-config.json
+   * v0.36.0: Accepts optional config object for programmatic configuration
+   *
+   * @param {Object} [opts] - Optional config options
+   * @param {Object} [opts.workspace] - Workspace-specific config to merge (highest priority)
+   * @param {Object} [opts.override] - Config object to merge over loaded config
    */
-  async load() {
+  async load(opts = {}) {
     try {
       const data = await this.storage.read('config.json');
       if (data) {
@@ -51,7 +56,12 @@ export class UserConfig {
       await this.init();
     }
 
-    // Load workspace-specific config (v0.35.0)
+    // Merge programmatic override config if provided
+    if (opts.override) {
+      this.config = this._deepMerge(this.config, opts.override);
+    }
+
+    // Load workspace-specific config from file (v0.35.0)
     try {
       const workspaceData = await this.storage.read('workspace-config.json');
       if (workspaceData) {
@@ -60,6 +70,11 @@ export class UserConfig {
       }
     } catch (error) {
       // No workspace config, that's fine
+    }
+
+    // Merge programmatic workspace config if provided (highest priority)
+    if (opts.workspace) {
+      this.config = this._deepMerge(this.config, opts.workspace);
     }
   }
 
