@@ -15,6 +15,7 @@ export class BookmarkStore {
     this.storage = storage;
     this.local = new Map();
     this.remote = new Map(); // remote → (bookmark → changeId)
+    this.tracking = {}; // bookmark → { remote, ref } tracking info (v0.35.0)
   }
 
   /**
@@ -57,6 +58,7 @@ export class BookmarkStore {
 
     this.local.clear();
     this.remote.clear();
+    this.tracking = data.tracked || {}; // Load tracking info (v0.35.0)
 
     // Load local bookmarks
     for (const [name, target] of Object.entries(data.local)) {
@@ -94,7 +96,7 @@ export class BookmarkStore {
       version: 1,
       local,
       remote,
-      tracked: {},
+      tracked: this.tracking || {}, // Save tracking info (v0.35.0)
     });
   }
 
@@ -207,13 +209,23 @@ export class BookmarkStore {
   async list() {
     const result = [];
 
-    // Add local bookmarks
+    // Add local bookmarks with tracking info (v0.35.0)
     for (const [name, target] of this.local.entries()) {
-      result.push({
+      const bookmark = {
         name,
         changeId: target,
         remote: null,
-      });
+      };
+
+      // Include tracking info if available
+      if (this.tracking && this.tracking[name]) {
+        bookmark.tracking = {
+          remote: this.tracking[name].remote,
+          ref: this.tracking[name].remoteName || name,
+        };
+      }
+
+      result.push(bookmark);
     }
 
     // Add remote bookmarks

@@ -1554,7 +1554,8 @@ export async function createJJ(options) {
      * @param {Object} args - Arguments
      * @param {string} [args.revset='all()'] - Revset expression to filter changes
      * @param {number} [args.limit] - Maximum number of changes to return
-     * @returns {Promise<Array>} Array of changes
+     * @param {boolean} [args.count=false] - If true, return count instead of changes (v0.36.0)
+     * @returns {Promise<Array|number>} Array of changes or count if args.count is true
      */
     async log(args = {}) {
       await graph.load();
@@ -1562,6 +1563,11 @@ export async function createJJ(options) {
 
       const revsetExpr = args.revset || 'all()';
       const changeIds = await revset.evaluate(revsetExpr);
+
+      // If count mode, return count early (v0.36.0 feature)
+      if (args.count) {
+        return changeIds.length;
+      }
 
       let changes = [];
       for (const changeId of changeIds) {
