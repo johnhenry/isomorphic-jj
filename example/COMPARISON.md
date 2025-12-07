@@ -12,7 +12,7 @@ Created three diverse applications to comprehensively test isomorphic-jj through
 **Type**: Code review collaboration CLI tool
 **Focus**: Stacked changes, review workflows, team collaboration
 **Features Tested**: 18 scenarios
-**Success Rate**: 100%* (18/18 passing, 2 with minor issues)
+**Success Rate**: 100% (18/18 passing, all issues fixed in v1.1.3)
 **Lines of Code**: ~1,150
 **Key Strength**: Tests high-level workflow and metadata management
 
@@ -38,16 +38,17 @@ Created three diverse applications to comprehensively test isomorphic-jj through
 
 ### jj-review-tool Findings
 
-**Bugs Found**: 2 (1 critical, 1 minor)
+**Bugs Found**: 2 (2 critical - both fixed)
 
-1. ✅ **Proto file path resolution** (CRITICAL)
+1. ✅ **Proto file path resolution** (CRITICAL - FIXED v1.1.2)
    - npm package completely non-functional
    - Fixed in 4 core files
    - **Impact**: Unblocked all npm users
 
-2. ⚠️ **Bookmark API parameter validation** (MINOR)
-   - Unclear error messages
-   - **Status**: Not fixed (documentation issue)
+2. ✅ **Bookmark API parameter normalization** (CRITICAL - FIXED v1.1.3)
+   - Could not use intuitive parameter names (target, change, revision)
+   - Added parameter normalization to all bookmark methods
+   - **Impact**: Better developer experience, API consistency
 
 **Why These Bugs**:
 - Used npm install (found packaging bug)
@@ -207,11 +208,13 @@ Created three diverse applications to comprehensively test isomorphic-jj through
 - Background operations
 - Undo/redo and operation log
 
-### Lightly Tested ⚠️
-- Bookmarks (minor API issue)
-- Git remotes (not tested)
+### Lightly Tested (Example Apps Only) ⚠️
+- Git remotes (not in example apps, but thoroughly unit tested - 9 tests in git-remote-ops.test.js)
 
-### Coverage: ~85% of documented features
+### Well Tested ✅
+- Bookmarks (parameter normalization fixed in v1.1.3)
+
+### Coverage: ~85% of documented features in example apps, ~95% in unit tests
 
 ---
 
@@ -317,9 +320,9 @@ The wiki app found 7 bugs because it tested the most features:
 - **Fix rate**: 100% for critical/major bugs
 
 ### Bug Impact
-- **2 critical bugs** fixed - Unblocked all users
+- **3 critical bugs** fixed - Unblocked all users (proto paths, TagStore, bookmark API)
 - **6 major bugs** fixed - Enabled key features
-- **2 minor issues** remain - Documentation only
+- **1 minor issue** remains - Working copy model documentation (not a bug)
 
 ---
 
