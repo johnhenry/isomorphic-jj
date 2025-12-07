@@ -202,6 +202,54 @@ await jj.amend();
 await jj.undo();
 ```
 
+### Understanding Working Copy vs Parent
+
+A common source of confusion: **the working copy and its parent are different changes**.
+
+```javascript
+// After init, you have a working copy change (with changeId)
+const status1 = await jj.status();
+console.log(status1.workingCopy.changeId);  // e.g., "abc123..."
+console.log(status1.workingCopy.description);  // "(no description set)"
+
+// When you describe(), you're updating the PARENT change
+await jj.describe({ message: 'Add feature' });
+
+// The working copy changeId is STILL the same!
+const status2 = await jj.status();
+console.log(status2.workingCopy.changeId);  // SAME: "abc123..."
+console.log(status2.workingCopy.description);  // UPDATED: "Add feature"
+
+// When you new(), you create a NEW working copy
+await jj.new({ message: 'Next change' });
+
+const status3 = await jj.status();
+console.log(status3.workingCopy.changeId);  // DIFFERENT: "def456..."
+console.log(status3.workingCopy.description);  // "Next change"
+```
+
+**Key points:**
+- **Working copy IS a change** with its own `changeId` (always `@` in revsets)
+- **`describe()`** updates the parent's description, not the working copy's changeId
+- **`status()`** returns the working copy changeId (which may or may not have a description)
+- **`new()`** creates a new working copy change and makes the previous one the parent
+- **Reading metadata immediately after write** shows working copy state, not parent state
+
+**Common pattern:**
+```javascript
+// 1. Edit files
+await jj.write({ path: 'file.js', data: 'content' });
+
+// 2. Describe the change (updates parent)
+await jj.describe({ message: 'Add file' });
+
+// 3. Create new working copy for next change
+await jj.new({ message: 'Next feature' });
+
+// Or use commit() to combine describe() + new()
+await jj.commit({ message: 'Add file', nextMessage: 'Next feature' });
+```
+
 ---
 
 ## Features

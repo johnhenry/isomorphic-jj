@@ -2583,9 +2583,18 @@ export async function createJJ(options) {
      * @returns {Promise<Object>} The new backout change including changeId, description, and backedOut field
      */
     async backout(args) {
+      // Normalize: accept common parameter aliases
+      if (args && args.change && !args.revision) {
+        args = { ...args, revision: args.change };
+      } else if (args && args.changeId && !args.revision) {
+        args = { ...args, revision: args.changeId };
+      } else if (args && args.target && !args.revision) {
+        args = { ...args, revision: args.target };
+      }
+
       if (!args || !args.revision) {
         throw new JJError('INVALID_ARGUMENT', 'Missing revision argument', {
-          suggestion: 'Provide the change ID to back out: { revision: "abc123..." }',
+          suggestion: 'Provide the change ID to back out: { revision: "abc123..." } (or use change/changeId/target)',
         });
       }
 
@@ -3620,6 +3629,15 @@ export async function createJJ(options) {
      * @param {string[]} [args.paths] - Specific paths to include in first split (full implementation planned for future)
      */
     async split(args) {
+      // Normalize: accept common parameter aliases
+      if (args && args.change && !args.changeId) {
+        args = { ...args, changeId: args.change };
+      } else if (args && args.revision && !args.changeId) {
+        args = { ...args, changeId: args.revision };
+      } else if (args && args.target && !args.changeId) {
+        args = { ...args, changeId: args.target };
+      }
+
       // Check for interactive mode (not supported)
       if (args.interactive) {
         throw new JJError(

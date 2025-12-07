@@ -45,7 +45,7 @@ Created **three diverse example applications** that comprehensively test isomorp
 
 **Key Bugs Found**:
 - ✅ **MAJOR**: Absolute path handling (REST APIs couldn't use `/` paths)
-- ⚠️ **MINOR**: Working copy vs parent change ID confusion
+- ✅ **DOCUMENTED**: Working copy vs parent change ID (added to README.md)
 
 **Test Coverage**: REST patterns, absolute paths, version history, concurrent edits
 
@@ -262,17 +262,17 @@ await this.fs.promises.writeFile(filePath, content);
 
 ## Remaining Minor Issues
 
-### ⚠️ Working Copy Model Documentation
+### ✅ Working Copy Model Documentation
 
-**Status**: Needs documentation
-**Impact**: Developer confusion about working copy vs parent change
-**Recommendation**: Add comprehensive docs explaining the model
+**Status**: ✅ COMPLETED - Added comprehensive section to README.md
+**Impact**: Resolved developer confusion about working copy vs parent change
+**Location**: README.md - "Understanding Working Copy vs Parent" section
 
-### ⚠️ Bookmark API Parameter Validation
+### ✅ Bookmark API Parameter Validation
 
-**Status**: Needs better error messages
-**Impact**: Unclear errors when using bookmark API
-**Recommendation**: Improve validation and error messages
+**Status**: ✅ FIXED in v1.1.3 - Parameter normalization added
+**Impact**: bookmark.set(), bookmark.create(), and bookmark.move() now accept intuitive aliases
+**Fix**: Accept target/change/revision in addition to changeId
 
 ---
 
@@ -284,8 +284,8 @@ await this.fs.promises.writeFile(filePath, content);
 - ✅ Test suite passes 100%
 
 ### Short Term 📝
-- Document working copy model
-- Improve bookmark API errors
+- ✅ Document working copy model
+- ✅ Improve bookmark API errors
 - Add CI/CD npm package testing
 - Create getting started guide using examples
 
