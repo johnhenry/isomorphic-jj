@@ -79,13 +79,13 @@ describe('File Operations Integration', () => {
     });
   });
 
-  describe('move()', () => {
+  describe('moveFile()', () => {
     it('should move a file to a new location', async () => {
       // Create a file first
       await jj.write({ path: 'old.txt', data: 'content' });
 
       // Move it
-      await jj.move({ from: 'old.txt', to: 'new.txt' });
+      await jj.moveFile({ from: 'old.txt', to: 'new.txt' });
 
       // Verify new file exists
       const content = await fs.promises.readFile('/test/repo/new.txt', 'utf8');
@@ -98,7 +98,7 @@ describe('File Operations Integration', () => {
     it('should move a file to a nested directory', async () => {
       await jj.write({ path: 'file.txt', data: 'content' });
 
-      await jj.move({ from: 'file.txt', to: 'subdir/file.txt' });
+      await jj.moveFile({ from: 'file.txt', to: 'subdir/file.txt' });
 
       const content = await fs.promises.readFile('/test/repo/subdir/file.txt', 'utf8');
       expect(content).toBe('content');
@@ -106,7 +106,7 @@ describe('File Operations Integration', () => {
 
     it('should update working copy tracking after move', async () => {
       await jj.write({ path: 'old.txt', data: 'content' });
-      await jj.move({ from: 'old.txt', to: 'new.txt' });
+      await jj.moveFile({ from: 'old.txt', to: 'new.txt' });
 
       const state = await jj.workingCopy.getState();
       expect(state.fileStates['old.txt']).toBeUndefined();
@@ -114,12 +114,12 @@ describe('File Operations Integration', () => {
     });
 
     it('should throw error when from is missing', async () => {
-      await expect(jj.move({ to: 'new.txt' })).rejects.toThrow('Missing or invalid from path');
+      await expect(jj.moveFile({ to: 'new.txt' })).rejects.toThrow('Missing or invalid from path');
     });
 
     it('should throw error when to is missing', async () => {
       await jj.write({ path: 'old.txt', data: 'test' });
-      await expect(jj.move({ from: 'old.txt' })).rejects.toThrow('Missing or invalid to path');
+      await expect(jj.moveFile({ from: 'old.txt' })).rejects.toThrow('Missing or invalid to path');
     });
   });
 

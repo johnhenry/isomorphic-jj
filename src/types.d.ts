@@ -331,6 +331,24 @@ export interface MoveFileArgs {
 }
 
 /**
+ * Move change (rebase) arguments
+ */
+export interface MoveChangeArgs {
+  /** Change ID to move (also accepts 'from' or 'source') */
+  changeId?: ChangeID;
+  /** Source change ID (alias for changeId) */
+  from?: ChangeID;
+  /** Source change ID (alias for changeId) */
+  source?: ChangeID;
+  /** New parent change ID (also accepts 'to' or 'destination') */
+  newParent?: ChangeID;
+  /** Destination change ID (alias for newParent) */
+  to?: ChangeID;
+  /** Destination change ID (alias for newParent) */
+  destination?: ChangeID;
+}
+
+/**
  * Remove file arguments
  */
 export interface RemoveArgs {
@@ -460,6 +478,8 @@ export interface UnabandonArgs {
 export interface LogOptions {
   revset?: Revset;
   limit?: number;
+  /** If true, return count of commits instead of commit objects */
+  count?: boolean;
 }
 
 /**
@@ -856,6 +876,122 @@ export interface MergeResult {
   conflicts: Conflict[];
 }
 
+/**
+ * Absorb operation arguments
+ */
+export interface AbsorbArgs {
+  /** Change to absorb into (optional, defaults to working copy parent) */
+  changeId?: ChangeID;
+  /** Destination change to absorb into (alias for changeId) */
+  destination?: ChangeID;
+  /** Dry run mode - don't apply changes */
+  dryRun?: boolean;
+  /** Specific paths to absorb */
+  paths?: string[];
+}
+
+/**
+ * Absorb operation result
+ */
+export interface AbsorbResult {
+  /** Changes that were absorbed */
+  absorbed: Array<{
+    path: string;
+    hunks: number;
+    destination: ChangeID;
+  }>;
+  /** Changes affected by the absorb */
+  affectedChanges: ChangeID[];
+  /** Changes that would be absorbed (dry run mode) */
+  wouldAbsorb?: Array<{
+    path: string;
+    hunks: number;
+    destination: ChangeID;
+  }>;
+}
+
+/**
+ * Bisect start arguments
+ */
+export interface BisectStartArgs {
+  /** Good change ID */
+  good: ChangeID;
+  /** Bad change ID */
+  bad: ChangeID;
+}
+
+/**
+ * Bisect state
+ */
+export interface BisectState {
+  /** Whether bisect is active */
+  active: boolean;
+  /** Good change */
+  good?: ChangeID;
+  /** Bad change */
+  bad?: ChangeID;
+  /** Current change being tested */
+  current?: ChangeID;
+  /** Remaining changes to test */
+  remaining?: number;
+}
+
+/**
+ * Sparse checkout set arguments
+ */
+export interface SparseSetArgs {
+  /** Patterns to set (replaces existing patterns) */
+  patterns: string[];
+}
+
+/**
+ * Sparse checkout add arguments
+ */
+export interface SparseAddArgs {
+  /** Patterns to add to existing sparse checkout */
+  patterns: string[];
+}
+
+/**
+ * Sparse checkout remove arguments
+ */
+export interface SparseRemoveArgs {
+  /** Patterns to remove from sparse checkout */
+  patterns: string[];
+}
+
+/**
+ * Merge driver for custom file merging
+ */
+export interface MergeDriver {
+  /** Driver name */
+  name: string;
+  /** Detect if this driver should handle a file */
+  detect(path: string, content: string): boolean;
+  /** Merge three versions of a file */
+  merge(args: {
+    path: string;
+    base: string;
+    ours: string;
+    theirs: string;
+  }): {
+    merged: string;
+    conflicts?: Array<{ line: number; message: string }>;
+  };
+}
+
+/**
+ * Merge driver registry
+ */
+export interface MergeDriverRegistry {
+  /** Register a custom merge driver */
+  register(driver: MergeDriver): void;
+  /** Get driver for a file path */
+  getDriver(path: string, content: string): MergeDriver | null;
+  /** List all registered drivers */
+  list(): MergeDriver[];
+}
+
 // ============================================================================
 // Main JJ Repository Interface
 // ============================================================================
@@ -875,6 +1011,7 @@ export interface JJ {
   revset: any;
   gitBackend?: any;
   backgroundOps?: any;
+  mergeDrivers: MergeDriverRegistry;
 
   // Repository lifecycle
   init(opts?: InitOptions): Promise<void>;
@@ -883,7 +1020,12 @@ export interface JJ {
   write(args: WriteArgs): Promise<WriteResult>;
   read(args: ReadArgs): Promise<string | Uint8Array>;
   cat(args: ReadArgs): Promise<string | Uint8Array>;
-  move(args: MoveFileArgs): Promise<MoveResult>;
+  moveFile(args: MoveFileArgs): Promise<MoveResult>;
+  moveChange(args: MoveChangeArgs): Promise<Change>;
+  /**
+   * @deprecated Use moveFile() for files or moveChange() for history operations
+   */
+  move(args: MoveFileArgs | MoveChangeArgs): Promise<MoveResult | Change>;
   remove(args: RemoveArgs): Promise<RemoveResult>;
   listFiles(args?: ListFilesArgs): Promise<string[]>;
   readStream(args: ReadStreamArgs): Promise<any>;
@@ -904,9 +1046,11 @@ export interface JJ {
   rebase(args: RebaseArgs): Promise<Change>;
   abandon(args: AbandonArgs): Promise<void>;
   unabandon(args: UnabandonArgs): Promise<void>;
+  absorb(args?: AbsorbArgs): Promise<AbsorbResult>;
 
   // Queries
-  log(opts?: LogOptions): Promise<LogEntry[]>;
+  log(opts?: LogOptions & { count?: false }): Promise<LogEntry[]>;
+  log(opts: LogOptions & { count: true }): Promise<number>;
   show(args: ShowArgs): Promise<Change>;
   obslog(opts?: ObslogOptions): Promise<Operation[]>;
 
@@ -1104,6 +1248,25 @@ export interface JJ {
     }>;
     parent: ChangeID;
   }>;
+
+  // Bisect operations
+  bisect: {
+    start(args: BisectStartArgs): Promise<void>;
+    good(): Promise<void>;
+    bad(): Promise<void>;
+    status(): Promise<BisectState>;
+    reset(): Promise<void>;
+  };
+
+  // Sparse checkout
+  sparse: {
+    list(): Promise<string[]>;
+    set(args: SparseSetArgs): Promise<void>;
+    add(args: SparseAddArgs): Promise<void>;
+    remove(args: SparseRemoveArgs): Promise<void>;
+    reset(): Promise<void>;
+    clear(): Promise<void>;
+  };
 }
 
 // ============================================================================

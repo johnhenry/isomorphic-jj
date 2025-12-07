@@ -203,7 +203,7 @@ Detect browser capabilities for storage and file system access.
 
 **Example**:
 ```javascript
-import { getBrowserCapabilities } from 'isomorphic-jj';
+import { getBrowserCapabilities } from 'isomorphic-jj/browser';
 
 const caps = await getBrowserCapabilities();
 console.log('IndexedDB available:', caps.hasIndexedDB);
@@ -559,11 +559,12 @@ Manage repository configuration.
 **Example**:
 ```javascript
 // Get config value
-const value = await jj.config.get({ key: 'user.name' });
+const value = await jj.config.get({ name: 'user.name' });
+// Note: 'key' is also accepted for backward compatibility
 
 // Set config value
 await jj.config.set({
-  key: 'user.email',
+  name: 'user.email',  // Recommended (also accepts 'key' for compatibility)
   value: 'alice@example.com',
   scope: 'repo'  // 'user' | 'repo' | 'global'
 });

@@ -756,69 +756,116 @@ export async function createJJ(options) {
      * @param {string[]} [args.paths] - Paths to move between changes (for history operations)
      * @returns {Promise<Object>} Returns change object for history operations, file info for file operations
      */
-    async move(args) {
-      if (!args || typeof args !== 'object') {
-        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid arguments', {
-          suggestion: 'Use file.move({ from, to }) for files or rebase({ changeId, newParent }) for history',
+    /**
+     * Move a file in the working copy
+     *
+     * @param {Object} args - Move file arguments
+     * @param {string} args.from - Source file path
+     * @param {string} args.to - Destination file path
+     * @returns {Promise<Object>} Operation result including from, to paths and file stats
+     */
+    async moveFile(args) {
+      if (!args.from || typeof args.from !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid from path', {
+          suggestion: 'Provide a valid source file path',
+          provided: { from: args.from, type: typeof args.from },
         });
       }
 
-      // Detect operation type based on arguments
-      const isHistoryOp = this._detectHistoryOperation(args);
-
-      if (isHistoryOp) {
-        return await this._moveChange(args);
-      } else {
-        return await this._moveFile(args);
+      if (!args.to || typeof args.to !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid to path', {
+          suggestion: 'Provide a valid destination file path',
+          provided: { to: args.to, type: typeof args.to },
+        });
       }
+
+      // Prevent moving to the same location
+      if (args.from === args.to) {
+        throw new JJError('INVALID_OPERATION', 'Source and destination paths are the same', {
+          path: args.from,
+          suggestion: 'Specify a different destination path',
+        });
+      }
+
+      // Prevent absolute paths
+      if (args.from.startsWith('/') || args.to.startsWith('/')) {
+        throw new JJError('INVALID_PATH', 'Absolute paths are not allowed', {
+          suggestion: 'Use paths relative to the repository root',
+          provided: { from: args.from, to: args.to },
+        });
+      }
+
+      // Prevent parent directory traversal
+      if (args.from.includes('..') || args.to.includes('..')) {
+        throw new JJError('INVALID_PATH', 'Parent directory traversal (..) is not allowed', {
+          suggestion: 'Use paths within the repository',
+          provided: { from: args.from, to: args.to },
+        });
+      }
+
+      const fromPath = `${dir}/${args.from}`;
+      const toPath = `${dir}/${args.to}`;
+
+      // Check if source file exists
+      try {
+        await fs.promises.stat(fromPath);
+      } catch (error) {
+        throw new JJError('FILE_NOT_FOUND', `Source file not found: ${args.from}`, {
+          path: args.from,
+          suggestion: 'Check that the source file exists',
+        });
+      }
+
+      // Ensure destination directory exists
+      const toDir = toPath.substring(0, toPath.lastIndexOf('/'));
+      try {
+        await fs.promises.mkdir(toDir, { recursive: true });
+      } catch (error) {
+        throw new JJError('FILE_SYSTEM_ERROR', `Failed to create destination directory: ${error.message}`, {
+          path: toDir,
+          error: error.message,
+        });
+      }
+
+      // Move the file
+      try {
+        await fs.promises.rename(fromPath, toPath);
+      } catch (error) {
+        throw new JJError('FILE_SYSTEM_ERROR', `Failed to move file: ${error.message}`, {
+          from: args.from,
+          to: args.to,
+          error: error.message,
+        });
+      }
+
+      // Update working copy tracking
+      await workingCopy.load();
+      await workingCopy.untrackFile(args.from);
+      const stats = await fs.promises.stat(toPath);
+      await workingCopy.trackFile(args.to, {
+        mtime: stats.mtime,
+        size: stats.size,
+        mode: stats.mode,
+      });
+
+      return {
+        from: args.from,
+        to: args.to,
+        size: stats.size,
+        mode: stats.mode,
+        mtime: stats.mtime,
+      };
     },
 
     /**
-     * Detect if move operation is for history (rebase) or files
+     * Move (rebase) a change to a new parent
      *
-     * @private
-     * @param {Object} args - Move arguments
-     * @returns {boolean} True if history operation, false if file operation
-     */
-    _detectHistoryOperation(args) {
-      // Explicit history operation indicators
-      if (args.paths || args.changeId || args.newParent) {
-        return true;
-      }
-
-      // If only from/to are present, check if they look like change IDs
-      if (args.from && args.to && !args.changeId && !args.newParent && !args.paths) {
-        // Change IDs are 32-character hex strings
-        const changeIdPattern = /^[0-9a-f]{32}$/;
-        const fromLooksLikeChangeId = changeIdPattern.test(args.from);
-        const toLooksLikeChangeId = changeIdPattern.test(args.to);
-
-        // If both look like change IDs, it's likely a history operation
-        // However, we err on the side of file operations to be safe
-        // Users should use explicit { changeId, newParent } for clarity
-        if (fromLooksLikeChangeId && toLooksLikeChangeId) {
-          // This is ambiguous - throw a helpful error
-          throw new JJError('AMBIGUOUS_OPERATION',
-            'Ambiguous move operation: arguments look like change IDs', {
-            suggestion: 'Use { changeId, newParent } for history operations or ensure file paths don\'t match change ID pattern',
-            args,
-          });
-        }
-
-        return false; // Treat as file operation
-      }
-
-      return false;
-    },
-
-    /**
-     * Move/rebase a change to a new parent (history operation)
-     *
-     * @private
-     * @param {Object} args - Move arguments
+     * @param {Object} args - Move change arguments
+     * @param {string} args.changeId - Change ID to move (also accepts 'from' or 'source')
+     * @param {string} args.newParent - New parent change ID (also accepts 'to' or 'destination')
      * @returns {Promise<Object>} Updated change object
      */
-    async _moveChange(args) {
+    async moveChange(args) {
       await graph.load();
 
       // Support multiple parameter names for flexibility
@@ -906,110 +953,62 @@ export async function createJJ(options) {
     },
 
     /**
-     * Move/rename a file in the working copy (file operation)
+     * @deprecated Use moveFile() for files or moveChange() for history operations
+     * Move operation - delegates to moveFile or moveChange based on arguments
+     */
+    async move(args) {
+      if (!args || typeof args !== 'object') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid arguments', {
+          suggestion: 'Use moveFile({ from, to }) for files or moveChange({ changeId, newParent }) for history',
+        });
+      }
+
+      // Detect operation type based on arguments
+      const isHistoryOp = this._detectHistoryOperation(args);
+
+      if (isHistoryOp) {
+        return await this.moveChange(args);
+      } else {
+        return await this.moveFile(args);
+      }
+    },
+
+    /**
+     * Detect if move operation is for history (rebase) or files
      *
      * @private
      * @param {Object} args - Move arguments
-     * @returns {Promise<Object>} Operation result including from, to paths and file stats
+     * @returns {boolean} True if history operation, false if file operation
      */
-    async _moveFile(args) {
-      if (!args.from || typeof args.from !== 'string') {
-        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid from path', {
-          suggestion: 'Provide a valid source file path',
-          provided: { from: args.from, type: typeof args.from },
-        });
+    _detectHistoryOperation(args) {
+      // Explicit history operation indicators
+      if (args.paths || args.changeId || args.newParent) {
+        return true;
       }
 
-      if (!args.to || typeof args.to !== 'string') {
-        throw new JJError('INVALID_ARGUMENT', 'Missing or invalid to path', {
-          suggestion: 'Provide a valid destination file path',
-          provided: { to: args.to, type: typeof args.to },
-        });
-      }
+      // If only from/to are present, check if they look like change IDs
+      if (args.from && args.to && !args.changeId && !args.newParent && !args.paths) {
+        // Change IDs are 32-character hex strings
+        const changeIdPattern = /^[0-9a-f]{32}$/;
+        const fromLooksLikeChangeId = changeIdPattern.test(args.from);
+        const toLooksLikeChangeId = changeIdPattern.test(args.to);
 
-      // Prevent moving to the same location
-      if (args.from === args.to) {
-        throw new JJError('INVALID_OPERATION', 'Source and destination paths are the same', {
-          path: args.from,
-          suggestion: 'Specify a different destination path',
-        });
-      }
-
-      // Prevent absolute paths
-      if (args.from.startsWith('/') || args.to.startsWith('/')) {
-        throw new JJError('INVALID_PATH', 'Absolute paths are not allowed', {
-          suggestion: 'Use paths relative to the repository root',
-          provided: { from: args.from, to: args.to },
-        });
-      }
-
-      // Prevent parent directory traversal
-      if (args.from.includes('..') || args.to.includes('..')) {
-        throw new JJError('INVALID_PATH', 'Parent directory traversal (..) is not allowed', {
-          suggestion: 'Use paths within the repository',
-          provided: { from: args.from, to: args.to },
-        });
-      }
-
-      const fromPath = `${dir}/${args.from}`;
-      const toPath = `${dir}/${args.to}`;
-
-      // Check if source file exists
-      try {
-        await fs.promises.access(fromPath);
-      } catch (error) {
-        throw new JJError('FILE_NOT_FOUND', `Source file not found: ${args.from}`, {
-          path: args.from,
-          fullPath: fromPath,
-          suggestion: 'Check that the file exists',
-        });
-      }
-
-      // Ensure destination directory exists
-      const pathParts = args.to.split('/');
-      if (pathParts.length > 1) {
-        const dirPath = pathParts.slice(0, -1).join('/');
-        const fullDirPath = `${dir}/${dirPath}`;
-        try {
-          await fs.promises.mkdir(fullDirPath, { recursive: true });
-        } catch (error) {
-          throw new JJError('DIRECTORY_CREATE_FAILED',
-            `Failed to create destination directory: ${dirPath}`, {
-            directory: dirPath,
-            originalError: error.message,
+        // If both look like change IDs, it's likely a history operation
+        // However, we err on the side of file operations to be safe
+        // Users should use explicit { changeId, newParent } for clarity
+        if (fromLooksLikeChangeId && toLooksLikeChangeId) {
+          // This is ambiguous - throw a helpful error
+          throw new JJError('AMBIGUOUS_OPERATION',
+            'Ambiguous move operation: arguments look like change IDs', {
+            suggestion: 'Use { changeId, newParent } for history operations or ensure file paths don\'t match change ID pattern',
+            args,
           });
         }
+
+        return false; // Treat as file operation
       }
 
-      // Move the file
-      try {
-        await fs.promises.rename(fromPath, toPath);
-      } catch (error) {
-        throw new JJError('FILE_MOVE_FAILED', `Failed to move file: ${error.message}`, {
-          from: args.from,
-          to: args.to,
-          originalError: error.message,
-        });
-      }
-
-      // Update working copy tracking
-      await workingCopy.load();
-      await workingCopy.untrackFile(args.from);
-      const stats = await fs.promises.stat(toPath);
-      await workingCopy.trackFile(args.to, {
-        mtime: stats.mtime,
-        size: stats.size,
-        mode: stats.mode,
-      });
-
-      // Return useful information about the move operation
-      return {
-        from: args.from,
-        to: args.to,
-        size: stats.size,
-        mode: stats.mode,
-        mtime: stats.mtime,
-      };
+      return false;
     },
 
     /**
@@ -2516,7 +2515,7 @@ export async function createJJ(options) {
      * });
      */
     async rebase(args) {
-      return await this._moveChange(args);
+      return await this.moveChange(args);
     },
 
     /**

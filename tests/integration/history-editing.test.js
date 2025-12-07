@@ -93,7 +93,7 @@ describe('History Editing Operations (v0.2)', () => {
       const feature = await jj.new({ message: 'Feature on branch 2' });
 
       // Move feature from branch2 to branch1
-      await jj.move({
+      await jj.moveChange({
         changeId: feature.changeId,
         newParent: branch1.changeId,
       });

@@ -166,7 +166,7 @@ describe('Move Validation and Detection', () => {
       } catch (error) {
         expect(error.code).toBe('FILE_NOT_FOUND');
         expect(error.details.path).toBe('missing.txt');
-        expect(error.details.suggestion).toContain('Check that the file exists');
+        expect(error.details.suggestion).toContain('Check that the source file exists');
       }
     });
   });
