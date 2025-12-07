@@ -1,0 +1,26 @@
+{
+  "name": "jj-storage-server",
+  "version": "1.0.0",
+  "description": "Versioned content storage server using isomorphic-jj as backend",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node examples/basic-usage.js",
+    "test:concurrent": "node examples/concurrent-edits.js",
+    "test:stress": "node examples/stress-test.js"
+  },
+  "keywords": [
+    "version-control",
+    "storage",
+    "jujutsu",
+    "rest-api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "isomorphic-git": "^1.35.1",
+    "isomorphic-jj": "file:../.."
+  }
+}

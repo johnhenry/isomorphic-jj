@@ -64,7 +64,7 @@ export class TagStore {
    */
   async load() {
     try {
-      const data = await this.fs.readFile(this.tagsFile, 'utf8');
+      const data = await this.fs.promises.readFile(this.tagsFile, 'utf8');
       return JSON.parse(data);
     } catch (error) {
       if (error.code === 'ENOENT') {
@@ -80,7 +80,14 @@ export class TagStore {
    * @returns {Promise<void>}
    */
   async save(tags) {
-    await this.fs.writeFile(this.tagsFile, JSON.stringify(tags, null, 2));
+    // Ensure the store directory exists
+    const storeDir = `${this.jjDir}/store`;
+    try {
+      await this.fs.promises.mkdir(storeDir, { recursive: true });
+    } catch (err) {
+      // Directory might already exist, ignore
+    }
+    await this.fs.promises.writeFile(this.tagsFile, JSON.stringify(tags, null, 2));
   }
 
   /**

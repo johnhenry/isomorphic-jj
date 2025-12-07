@@ -16,7 +16,7 @@ export class JJCheckout {
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
-    this.protoPath = path.join(__dirname, '..', 'protos', 'local_working_copy.proto');
+    this.protoPath = path.join(__dirname, '..', 'src', 'protos', 'local_working_copy.proto');
   }
 
   /**

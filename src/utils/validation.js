@@ -33,9 +33,25 @@ export function validateChangeId(changeId) {
 }
 
 /**
+ * Normalize a file path by stripping leading slashes
+ *
+ * @param {string} path - File path to normalize
+ * @returns {string} Normalized path (without leading slash)
+ */
+export function normalizePath(path) {
+  if (typeof path !== 'string') {
+    return path;
+  }
+
+  // Strip leading slashes for compatibility with REST APIs and absolute paths
+  return path.replace(/^\/+/, '');
+}
+
+/**
  * Validate a file path
- * 
+ *
  * @param {string} path - File path to validate
+ * @returns {string} Normalized path
  * @throws {JJError} If path is invalid or contains path traversal
  */
 export function validatePath(path) {
@@ -45,27 +61,25 @@ export function validatePath(path) {
     });
   }
 
-  if (path.includes('..')) {
+  // Auto-normalize: strip leading slashes (common with REST APIs)
+  const normalizedPath = normalizePath(path);
+
+  if (normalizedPath.includes('..')) {
     throw new JJError('INVALID_PATH', 'Path traversal (..) not allowed', {
-      path,
+      path: normalizedPath,
       suggestion: 'Use relative paths without .. components',
     });
   }
 
-  if (path.startsWith('/')) {
-    throw new JJError('INVALID_PATH', 'Absolute paths not allowed', {
-      path,
-      suggestion: 'Use relative paths from repository root',
-    });
-  }
-
-  if (path.length > 4096) {
+  if (normalizedPath.length > 4096) {
     throw new JJError('INVALID_PATH', 'Path exceeds maximum length', {
-      path,
+      path: normalizedPath,
       maxLength: 4096,
       suggestion: 'Use shorter file paths',
     });
   }
+
+  return normalizedPath;
 }
 
 /**

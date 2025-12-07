@@ -821,8 +821,9 @@ export async function createJJ(options) {
     async _moveChange(args) {
       await graph.load();
 
-      const changeId = args.changeId || args.from;
-      const newParent = args.newParent || args.to;
+      // Support multiple parameter names for flexibility
+      const changeId = args.changeId || args.from || args.source;
+      const newParent = args.newParent || args.to || args.destination;
 
       if (!changeId || typeof changeId !== 'string') {
         throw new JJError('INVALID_ARGUMENT', 'Missing or invalid changeId', {
@@ -1162,11 +1163,14 @@ export async function createJJ(options) {
     /**
      * Edit change metadata without modifying content
      *
-     * Allows updating author, committer information, and optionally regenerating the change ID.
+     * Allows updating author, committer, description, and optionally regenerating the change ID.
      * The file content and snapshot remain unchanged.
      *
      * @param {Object} [args={}] - Arguments
      * @param {string} [args.revision] - Change ID to edit (defaults to working copy @)
+     * @param {string} [args.change] - Alias for revision
+     * @param {string} [args.description] - Update the change description
+     * @param {string} [args.message] - Alias for description
      * @param {Object} [args.author] - Author information to update
      * @param {string} [args.author.name] - Author name
      * @param {string} [args.author.email] - Author email
@@ -1177,6 +1181,16 @@ export async function createJJ(options) {
      * @returns {Promise<Object>} Updated change object
      */
     async metaedit(args = {}) {
+      // Normalize: accept 'change' as alias for 'revision'
+      if (args.change && !args.revision) {
+        args = { ...args, revision: args.change };
+      }
+
+      // Normalize: accept 'message' as alias for 'description'
+      if (args.message && !args.description) {
+        args = { ...args, description: args.message };
+      }
+
       await graph.load();
       await workingCopy.load();
       await userConfig.load();
@@ -1194,13 +1208,14 @@ export async function createJJ(options) {
       const hasAuthor = args.author && (args.author.name || args.author.email);
       const hasCommitter = args.committer && (args.committer.name || args.committer.email);
       const hasResetChangeId = args.resetChangeId === true;
+      const hasDescription = args.description !== undefined;
 
-      if (!hasAuthor && !hasCommitter && !hasResetChangeId) {
+      if (!hasAuthor && !hasCommitter && !hasResetChangeId && !hasDescription) {
         throw new JJError(
           'INVALID_ARGUMENT',
           'No metadata provided to update',
           {
-            suggestion: 'Provide author, committer, or resetChangeId: true',
+            suggestion: 'Provide author, committer, description, or resetChangeId: true',
           }
         );
       }
@@ -1243,6 +1258,11 @@ export async function createJJ(options) {
           change.committer.email = args.committer.email;
         }
         change.committer.timestamp = new Date().toISOString();
+      }
+
+      // Update description if provided
+      if (args.description !== undefined) {
+        change.description = args.description;
       }
 
       // Regenerate change ID if requested
@@ -1678,9 +1698,14 @@ export async function createJJ(options) {
      * @returns {Promise<Object>} Information about the edited change including changeId, description, and file count
      */
     async edit(args) {
+      // Normalize: accept both 'change' and 'changeId' parameters
+      if (args && args.change && !args.changeId) {
+        args = { ...args, changeId: args.change };
+      }
+
       if (!args || !args.changeId) {
         throw new JJError('INVALID_ARGUMENT', 'Missing changeId argument', {
-          suggestion: 'Provide a changeId to edit',
+          suggestion: 'Provide a changeId (or change) to edit',
         });
       }
 
@@ -3522,6 +3547,23 @@ export async function createJJ(options) {
      * @returns {Promise<Object>} The un-abandoned change object including changeId, description, and abandoned flag (now false)
      */
     async unabandon(args) {
+      // Normalize: accept both 'change' and 'changeId' parameters
+      if (args && args.change && !args.changeId) {
+        args = { ...args, changeId: args.change };
+      }
+
+      if (!args || !args.changeId) {
+        throw new JJError('INVALID_ARGUMENT', 'Missing changeId argument', {
+          suggestion: 'Provide a changeId (or change) to unabandon',
+        });
+      }
+
+      if (typeof args.changeId !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Change ID must be a string', {
+          changeId: args.changeId,
+        });
+      }
+
       await graph.load();
       await userConfig.load();
 
@@ -4886,6 +4928,13 @@ export async function createJJ(options) {
        */
       async add(args) {
         await workspaces.load();
+
+        // If no changeId specified, default to current working copy change
+        if (!args.changeId) {
+          const currentChangeId = workingCopy.getCurrentChangeId();
+          args = { ...args, changeId: currentChangeId };
+        }
+
         const workspace = await workspaces.add(args);
 
         // If a change was specified, check it out in the new workspace

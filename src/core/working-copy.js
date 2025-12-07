@@ -132,7 +132,7 @@ export class WorkingCopy {
    * @param {Object} fileState - File state (mtime, size, mode, hash)
    */
   async trackFile(path, fileState) {
-    validatePath(path);
+    path = validatePath(path); // Normalize path
 
     if (!this.state) {
       await this.load();
@@ -144,11 +144,11 @@ export class WorkingCopy {
 
   /**
    * Untrack a file from the working copy
-   * 
+   *
    * @param {string} path - File path to untrack
    */
   async untrackFile(path) {
-    validatePath(path);
+    path = validatePath(path); // Normalize path
 
     if (!this.state) {
       await this.load();

@@ -1,0 +1,22 @@
+{
+  "name": "jj-wiki",
+  "version": "1.0.0",
+  "description": "Collaborative wiki with conflict resolution using isomorphic-jj",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "jj-wiki": "./cli.js"
+  },
+  "scripts": {
+    "test": "node examples/comprehensive-test.js",
+    "test:conflicts": "node examples/conflict-test.js",
+    "test:workspaces": "node examples/workspace-test.js"
+  },
+  "keywords": ["wiki", "collaboration", "version-control", "jujutsu", "conflict-resolution"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "isomorphic-git": "^1.35.1",
+    "isomorphic-jj": "file:../.."
+  }
+}

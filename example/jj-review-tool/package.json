@@ -1,0 +1,26 @@
+{
+  "name": "jj-review-tool",
+  "version": "1.0.0",
+  "description": "Code review collaboration tool using isomorphic-jj",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "jj-review": "./bin/jj-review.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "demo": "node examples/basic-workflow.js"
+  },
+  "keywords": [
+    "jujutsu",
+    "code-review",
+    "version-control",
+    "collaboration"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "isomorphic-git": "^1.35.1",
+    "isomorphic-jj": "file:../.."
+  }
+}
