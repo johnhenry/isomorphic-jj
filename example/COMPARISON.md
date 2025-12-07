@@ -157,7 +157,7 @@ Created three diverse applications to comprehensively test isomorphic-jj through
 | File list | ✅ | ✅ | ✅ | All working |
 | Describe | ✅ | ✅ | ✅ | All working |
 | New change | ✅ | ✅ | ✅ | All working |
-| Amend | ✅ | ⏸️ | ✅ | Mostly working |
+| Amend | ✅ | ⏸️ | ✅ | All working |
 | **History Editing** | | | | |
 | Edit | ✅ | ⏸️ | ✅ | **Fixed!** |
 | Squash | ✅ | ⏸️ | ✅ | All working |
@@ -182,7 +182,7 @@ Created three diverse applications to comprehensively test isomorphic-jj through
 | **Other** | | | | |
 | Operation log | ✅ | ⏸️ | ⏸️ | All working |
 | Undo/Redo | ✅ | ⏸️ | ⏸️ | All working |
-| Bookmarks | ⚠️ | ⏸️ | ⏸️ | Minor issue |
+| Bookmarks | ✅ | ⏸️ | ⏸️ | **Fixed!** |
 | Git remotes | ⏸️ | ⏸️ | ⏸️ | Not tested |
 
 **Legend**: ✅ Tested | ⏸️ Not tested | ⚠️ Issue found
