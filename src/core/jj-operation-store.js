@@ -12,11 +12,17 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Determine proto path based on whether we're running from dist or src
+const inDist = __dirname.includes('/dist') || __dirname.includes('\\dist');
+const protoDir = inDist
+  ? path.join(__dirname, '..', 'src', 'protos')
+  : path.join(__dirname, '..', 'protos');
+
 export class JJOperationStore {
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
-    this.protoPath = path.join(__dirname, '..', 'protos', 'simple_op_store.proto');
+    this.protoPath = path.join(protoDir, 'simple_op_store.proto');
   }
 
   /**

@@ -248,7 +248,7 @@ async function run() {
       });
       const bookmarks = await tool.jj.bookmark.list();
       console.log(`   🔖 Bookmarks: ${bookmarks.length}`);
-      bookmarks.forEach(b => console.log(`      - ${b.name} -> ${b.target.substring(0, 8)}`));
+      bookmarks.forEach(b => console.log(`      - ${b.name} -> ${b.changeId.substring(0, 8)}`));
       console.log();
     } catch (err) {
       console.log(`   ⚠️  Bookmark test error: ${err.message}\n`);

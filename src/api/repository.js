@@ -5331,9 +5331,21 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Bookmark info
        */
       async set(args) {
+        // Normalize: accept common parameter aliases
+        if (args) {
+          if (args.target && !args.changeId) {
+            args = { ...args, changeId: args.target };
+          } else if (args.change && !args.changeId) {
+            args = { ...args, changeId: args.change };
+          } else if (args.revision && !args.changeId) {
+            args = { ...args, changeId: args.revision };
+          }
+        }
+
         if (!args || !args.name || !args.changeId) {
           throw new JJError('INVALID_ARGUMENT', 'Missing name or changeId', {
-            suggestion: 'Provide both: { name: "main", changeId: "abc123..." }',
+            args,
+            suggestion: 'Provide both: { name: "main", changeId: "abc123..." } (or use target/change/revision instead of changeId)',
           });
         }
 
@@ -5369,6 +5381,17 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Bookmark info
        */
       async create(args) {
+        // Normalize: accept common parameter aliases
+        if (args) {
+          if (args.target && !args.changeId) {
+            args = { ...args, changeId: args.target };
+          } else if (args.change && !args.changeId) {
+            args = { ...args, changeId: args.change };
+          } else if (args.revision && !args.changeId) {
+            args = { ...args, changeId: args.revision };
+          }
+        }
+
         if (!args || !args.name) {
           throw new JJError('INVALID_ARGUMENT', 'Missing name argument', {
             suggestion: 'Provide: { name: "main", changeId: "abc123..." } or { name: "main" } for working copy',
@@ -5421,9 +5444,23 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Move result
        */
       async move(args) {
+        // Normalize: accept common parameter aliases
+        if (args) {
+          if (args.target && !args.to) {
+            args = { ...args, to: args.target };
+          } else if (args.changeId && !args.to) {
+            args = { ...args, to: args.changeId };
+          } else if (args.change && !args.to) {
+            args = { ...args, to: args.change };
+          } else if (args.revision && !args.to) {
+            args = { ...args, to: args.revision };
+          }
+        }
+
         if (!args || !args.name || !args.to) {
           throw new JJError('INVALID_ARGUMENT', 'Missing name or to', {
-            suggestion: 'Provide both: { name: "main", to: "abc123..." }',
+            args,
+            suggestion: 'Provide both: { name: "main", to: "abc123..." } (or use target/changeId/change/revision instead of to)',
           });
         }
 
