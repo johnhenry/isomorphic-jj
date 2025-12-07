@@ -129,6 +129,24 @@ export class RevsetEngine {
       }
     }
 
+    // v0.36.0: visible() - non-abandoned changes
+    if (trimmed === 'visible()') {
+      await this.graph.load();
+      const all = this.graph.getAll();
+      return all
+        .filter(c => !c.abandoned)
+        .map(c => c.changeId);
+    }
+
+    // v0.36.0: hidden() - abandoned changes
+    if (trimmed === 'hidden()') {
+      await this.graph.load();
+      const all = this.graph.getAll();
+      return all
+        .filter(c => c.abandoned === true)
+        .map(c => c.changeId);
+    }
+
     // ancestors(changeId) - all ancestors including the change itself
     const ancestorsMatch = trimmed.match(/^ancestors\(([0-9a-f]{32})\)$/);
     if (ancestorsMatch) {

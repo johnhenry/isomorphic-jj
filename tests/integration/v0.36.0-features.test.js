@@ -118,7 +118,7 @@ describe('v0.36.0 Features', () => {
   describe('Workspace-specific configuration', () => {
     it('should load workspace-specific config', async () => {
       // Set a global config value
-      await repo.config.set('test.global', 'global-value');
+      await repo.config.set({ name: 'test.global', value: 'global-value' });
 
       // Create workspace-specific config
       const workspaceConfigPath = path.join(testDir, '.jj', 'workspace-config.json');
@@ -130,15 +130,15 @@ describe('v0.36.0 Features', () => {
       // Reload config to pick up workspace config
       await repo.config.load();
 
-      // Workspace config should override
-      expect(await repo.config.get('test.workspace')).toBe('workspace-value');
+      // Workspace config should be accessible
+      expect(await repo.config.get({ name: 'test.workspace' })).toBe('workspace-value');
       // Global config should still be accessible
-      expect(await repo.config.get('test.global')).toBe('global-value');
+      expect(await repo.config.get({ name: 'test.global' })).toBe('global-value');
     });
 
     it('should merge workspace config with global config', async () => {
-      await repo.config.set('user.name', 'Global User');
-      await repo.config.set('user.email', 'global@example.com');
+      await repo.config.set({ name: 'user.name', value: 'Global User' });
+      await repo.config.set({ name: 'user.email', value: 'global@example.com' });
 
       // Workspace config overrides email but not name
       const workspaceConfigPath = path.join(testDir, '.jj', 'workspace-config.json');
@@ -149,8 +149,8 @@ describe('v0.36.0 Features', () => {
 
       await repo.config.load();
 
-      expect(await repo.config.get('user.name')).toBe('Global User');
-      expect(await repo.config.get('user.email')).toBe('workspace@example.com');
+      expect(await repo.config.get({ name: 'user.name' })).toBe('Global User');
+      expect(await repo.config.get({ name: 'user.email' })).toBe('workspace@example.com');
     });
   });
 

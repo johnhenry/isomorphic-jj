@@ -5948,6 +5948,67 @@ export async function createJJ(options) {
         await userConfig.load();
         return userConfig.config;
       },
+
+      /**
+       * Reload configuration (including workspace-specific config)
+       * v0.35.0: Loads workspace-config.json if present
+       *
+       * @returns {Promise<void>}
+       */
+      async load() {
+        await userConfig.load();
+      },
+    },
+
+    /**
+     * Template helper functions (v0.36.0)
+     *
+     * Utilities for displaying and formatting JJ data
+     */
+    template: {
+      /**
+       * Get files modified in a change
+       *
+       * @param {string} changeId - Change ID
+       * @returns {Promise<string[]>} Array of file paths
+       */
+      async files(changeId) {
+        await graph.load();
+        const change = await graph.getChange(changeId);
+        if (!change || !change.fileSnapshot) {
+          return [];
+        }
+        return Object.keys(change.fileSnapshot);
+      },
+
+      /**
+       * Join array elements with a separator
+       *
+       * @param {string[]} array - Array of strings
+       * @param {string} separator - Separator string
+       * @returns {string} Joined string
+       */
+      join(array, separator) {
+        if (!Array.isArray(array)) {
+          return '';
+        }
+        return array.join(separator);
+      },
+
+      /**
+       * Format path for display
+       *
+       * @param {string} path - File path
+       * @returns {string} Formatted path
+       */
+      format_path(path) {
+        if (!path) {
+          return '';
+        }
+        // Simple formatting: just return the path as-is for now
+        // In real JJ, this might apply colors, truncation, etc.
+        return path;
+      },
     },
 
     /**

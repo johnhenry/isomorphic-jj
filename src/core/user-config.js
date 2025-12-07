@@ -38,6 +38,7 @@ export class UserConfig {
 
   /**
    * Load config from storage
+   * v0.35.0: Also loads workspace-specific config from workspace-config.json
    */
   async load() {
     try {
@@ -49,6 +50,35 @@ export class UserConfig {
       // No config file yet, use defaults
       await this.init();
     }
+
+    // Load workspace-specific config (v0.35.0)
+    try {
+      const workspaceData = await this.storage.read('workspace-config.json');
+      if (workspaceData) {
+        // Merge workspace config over global config (workspace takes precedence)
+        this.config = this._deepMerge(this.config, workspaceData);
+      }
+    } catch (error) {
+      // No workspace config, that's fine
+    }
+  }
+
+  /**
+   * Deep merge two config objects (workspace overrides global)
+   * @private
+   */
+  _deepMerge(target, source) {
+    const result = { ...target };
+
+    for (const key in source) {
+      if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+        result[key] = this._deepMerge(target[key] || {}, source[key]);
+      } else {
+        result[key] = source[key];
+      }
+    }
+
+    return result;
   }
 
   /**
