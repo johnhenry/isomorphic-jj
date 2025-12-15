@@ -1089,8 +1089,8 @@ export async function createJJ(options) {
         change.metadata = args.metadata;
       }
 
-      // Only snapshot files if describing working copy
-      if (isWorkingCopy) {
+      // Only snapshot files if describing working copy AND preserveSnapshot is not true
+      if (isWorkingCopy && !args.preserveSnapshot) {
         // Snapshot current file contents for conflict detection
         // This allows us to load file contents during merge/rebase
         const fileSnapshot = {};
@@ -1323,16 +1323,19 @@ export async function createJJ(options) {
       await workingCopy.load();
       await userConfig.load();
 
-      // Snapshot filesystem BEFORE operation (for undo)
-      const fileSnapshot = await snapshotFilesystem();
+      // Snapshot filesystem BEFORE operation (for undo) unless preserveSnapshot is true
+      let fileSnapshot;
+      if (!args.preserveSnapshot) {
+        fileSnapshot = await snapshotFilesystem();
 
-      // Update current working copy change with the file snapshot
-      // This ensures files written before jj.new() are captured
-      const currentChangeId = workingCopy.getCurrentChangeId();
-      const currentChange = await graph.getChange(currentChangeId);
-      if (currentChange && fileSnapshot) {
-        currentChange.fileSnapshot = fileSnapshot;
-        await graph.updateChange(currentChange);
+        // Update current working copy change with the file snapshot
+        // This ensures files written before jj.new() are captured
+        const currentChangeId = workingCopy.getCurrentChangeId();
+        const currentChange = await graph.getChange(currentChangeId);
+        if (currentChange && fileSnapshot) {
+          currentChange.fileSnapshot = fileSnapshot;
+          await graph.updateChange(currentChange);
+        }
       }
 
       // Determine parents
@@ -1697,8 +1700,16 @@ export async function createJJ(options) {
      * @returns {Promise<Object>} The newly created change
      */
     async commit(args = {}) {
-      await this.describe({ message: args.message, author: args.author, metadata: args.metadata });
-      return await this.new({ message: args.nextMessage });
+      await this.describe({
+        message: args.message,
+        author: args.author,
+        metadata: args.metadata,
+        preserveSnapshot: args.preserveSnapshot
+      });
+      return await this.new({
+        message: args.nextMessage,
+        preserveSnapshot: args.preserveSnapshot
+      });
     },
 
     /**
@@ -1734,16 +1745,34 @@ export async function createJJ(options) {
 
       const previousChangeId = workingCopy.getCurrentChangeId();
 
-      // Snapshot current filesystem into current change before switching
-      // This preserves any uncommitted modifications
+      // CRITICAL FIX: Clean working directory BEFORE snapshotting to prevent cross-branch pollution
+      // Remove files that don't belong to the current changeId before we snapshot it
       if (previousChangeId !== args.changeId) {
+        const previousChange = await graph.getChange(previousChangeId);
+        if (previousChange) {
+          const previousSnapshot = previousChange.fileSnapshot || {};
+          const workingDirFiles = await workingCopy.listFiles();
+
+          // Delete files that exist in working dir but NOT in previous changeId's snapshot
+          // This removes pollution from other branches that were previously checked out
+          for (const filePath of workingDirFiles) {
+            if (!previousSnapshot[filePath]) {
+              try {
+                const fullPath = path.join(dir, filePath);
+                await fs.promises.unlink(fullPath);
+                await workingCopy.untrackFile(filePath);
+              } catch (error) {
+                // Ignore errors - file might already be deleted or inaccessible
+              }
+            }
+          }
+        }
+
+        // Now snapshot the CLEAN working directory (no pollution!)
         const currentSnapshot = await snapshotFilesystem();
         if (currentSnapshot && Object.keys(currentSnapshot).length > 0) {
-          const previousChange = await graph.getChange(previousChangeId);
-          if (previousChange) {
-            previousChange.fileSnapshot = currentSnapshot;
-            await graph.updateChange(previousChange);
-          }
+          previousChange.fileSnapshot = currentSnapshot;
+          await graph.updateChange(previousChange);
         }
       }
 
