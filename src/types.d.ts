@@ -76,6 +76,7 @@ export interface Change {
   description: string;
   timestamp: Date;
   fileSnapshot?: Record<string, FileSnapshot>;
+  metadata?: Record<string, any>;
 }
 
 /**

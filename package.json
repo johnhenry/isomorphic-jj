@@ -1,6 +1,6 @@
 {
   "name": "isomorphic-jj",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers",
   "type": "module",
   "bin": {

@@ -1084,6 +1084,11 @@ export async function createJJ(options) {
         change.timestamp = new Date().toISOString();
       }
 
+      // Update metadata
+      if (args.metadata !== undefined) {
+        change.metadata = args.metadata;
+      }
+
       // Only snapshot files if describing working copy
       if (isWorkingCopy) {
         // Snapshot current file contents for conflict detection
@@ -1688,10 +1693,11 @@ export async function createJJ(options) {
      * @param {Object} [args={}] - Arguments
      * @param {string} [args.message] - Description for current change
      * @param {Object} [args.author] - Author for current change
+     * @param {Object} [args.metadata] - Metadata to attach to the change
      * @returns {Promise<Object>} The newly created change
      */
     async commit(args = {}) {
-      await this.describe({ message: args.message, author: args.author });
+      await this.describe({ message: args.message, author: args.author, metadata: args.metadata });
       return await this.new({ message: args.nextMessage });
     },
 
