@@ -386,6 +386,7 @@ export interface WriteStreamArgs {
 export interface DescribeArgs {
   message?: string;
   author?: User;
+  metadata?: Record<string, any>;
 }
 
 /**
@@ -412,6 +413,7 @@ export interface AmendArgs {
 export interface CommitArgs {
   message?: string;
   author?: User;
+  metadata?: Record<string, any>;
   nextMessage?: string;
 }
 
