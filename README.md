@@ -920,7 +920,7 @@ See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELO
 
 ### Requirements
 
-- **Node.js**: 18.0.0 or higher
+- **Node.js**: 20.0.0 or higher (uses the Web Crypto global, stabilized in Node 20; Node 18 is EOL)
 - **Browsers**: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
 - **Optional**: Git CLI (for JJ CLI interop testing)
 
