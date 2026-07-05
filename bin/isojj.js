@@ -10,6 +10,7 @@
 import { createJJ } from '../src/api/repository.js';
 import nodeFs from 'fs';
 import nodePath from 'path';
+import { fileURLToPath } from 'url';
 
 // Flags that are always boolean and must never consume the next token as a
 // value — otherwise `isojj describe --dryRun "fix typo"` would swallow the
@@ -418,8 +419,12 @@ export async function run(argv, io = {}) {
 }
 
 // Only run (and exit the process) when this file is executed directly, not
-// when it's imported by tests.
-const isMainModule = import.meta.url === `file://${process.argv[1]}`;
+// when it's imported by tests. Comparing `import.meta.url` (a file:// URL,
+// e.g. "file:///C:/repo/bin/isojj.js" on Windows) against the raw
+// `process.argv[1]` string (a native path, e.g. "C:\repo\bin\isojj.js") is
+// never equal on Windows — convert the URL to a native path first.
+const isMainModule =
+  !!process.argv[1] && fileURLToPath(import.meta.url) === nodePath.resolve(process.argv[1]);
 if (isMainModule) {
   run(process.argv).then((code) => process.exit(code));
 }
