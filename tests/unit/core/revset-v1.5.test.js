@@ -32,7 +32,10 @@ function mkChange(changeId, parents, overrides = {}) {
     parents,
     description: `change ${changeId.slice(0, 4)}`,
     fileSnapshot: { 'file.txt': 'content' },
-    commitId: changeId.replace(/./g, (ch) => (ch === '0' ? '0' : ch)).slice(0, 40).padEnd(40, '0'),
+    commitId: changeId
+      .replace(/./g, (ch) => (ch === '0' ? '0' : ch))
+      .slice(0, 40)
+      .padEnd(40, '0'),
     tree: '1'.repeat(40),
     author: { name: 'Alice', email: 'alice@example.com', timestamp: ts },
     committer: { name: 'Alice', email: 'alice@example.com', timestamp: ts },
@@ -67,15 +70,23 @@ describe('v1.5 revset functions', () => {
     // DAG:  ROOT -> A -> B \
     //                  \-> C -> M   (A forks into B and C; M merges B and C)
     await graph.addChange(mkChange(ROOT, []));
-    await graph.addChange(mkChange(A, [ROOT], {
-      description: 'Add feature\nDetails here',
-      commitId: 'abc1230000000000000000000000000000000000',
-    }));
-    await graph.addChange(mkChange(B, [A], {
-      author: { name: 'Bob', email: 'bob@example.com', timestamp: new Date().toISOString() },
-      committer: { name: 'Carol', email: 'carol@example.com', timestamp: new Date().toISOString() },
-      signed: true,
-    }));
+    await graph.addChange(
+      mkChange(A, [ROOT], {
+        description: 'Add feature\nDetails here',
+        commitId: 'abc1230000000000000000000000000000000000',
+      })
+    );
+    await graph.addChange(
+      mkChange(B, [A], {
+        author: { name: 'Bob', email: 'bob@example.com', timestamp: new Date().toISOString() },
+        committer: {
+          name: 'Carol',
+          email: 'carol@example.com',
+          timestamp: new Date().toISOString(),
+        },
+        signed: true,
+      })
+    );
     await graph.addChange(mkChange(C, [A]));
     await graph.addChange(mkChange(M, [B, C]));
 

@@ -1,6 +1,6 @@
 /**
  * Validation utilities for isomorphic-jj
- * 
+ *
  * Provides validation functions for change IDs, paths, bookmark names, etc.
  */
 
@@ -8,7 +8,7 @@ import { JJError } from './errors.js';
 
 /**
  * Validate a change ID
- * 
+ *
  * @param {string} changeId - Change ID to validate
  * @throws {JJError} If change ID is invalid
  */
@@ -84,7 +84,7 @@ export function validatePath(path) {
 
 /**
  * Validate a bookmark name (follows Git ref name rules)
- * 
+ *
  * @param {string} name - Bookmark name to validate
  * @throws {JJError} If bookmark name is invalid
  */
@@ -115,13 +115,9 @@ export function validateBookmarkName(name) {
   }
 
   if (name.startsWith('.') || name.endsWith('.')) {
-    throw new JJError(
-      'INVALID_BOOKMARK_NAME',
-      'Bookmark name cannot start or end with "."',
-      {
-        name,
-      }
-    );
+    throw new JJError('INVALID_BOOKMARK_NAME', 'Bookmark name cannot start or end with "."', {
+      name,
+    });
   }
 
   if (name.endsWith('.lock')) {

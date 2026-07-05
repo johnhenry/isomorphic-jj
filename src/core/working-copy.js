@@ -1,6 +1,6 @@
 /**
  * WorkingCopy - Manages working copy state and file tracking
- * 
+ *
  * Tracks file states (mtime, size, mode) for efficient modification detection.
  */
 
@@ -10,7 +10,7 @@ import { validateChangeId, validatePath } from '../utils/validation.js';
 export class WorkingCopy {
   /**
    * @param {Storage} storage - Storage manager instance
-   * @param {Object} fs - Filesystem implementation
+   * @param {any} fs - Filesystem implementation
    * @param {string} dir - Repository directory
    * @param {string} [workspaceId='default'] - Workspace identifier
    */
@@ -85,8 +85,8 @@ export class WorkingCopy {
 
   /**
    * Get current working copy state
-   * 
-   * @returns {Object} Working copy state
+   *
+   * @returns {Promise<Record<string, any>>} Working copy state
    */
   async getState() {
     if (!this.state) {
@@ -97,7 +97,7 @@ export class WorkingCopy {
 
   /**
    * Get current change ID
-   * 
+   *
    * @returns {string} Current change ID
    */
   getCurrentChangeId() {
@@ -111,7 +111,7 @@ export class WorkingCopy {
 
   /**
    * Set current change ID
-   * 
+   *
    * @param {string} changeId - New change ID
    */
   async setCurrentChange(changeId) {
@@ -127,7 +127,7 @@ export class WorkingCopy {
 
   /**
    * Track a file in the working copy
-   * 
+   *
    * @param {string} path - File path relative to repo root
    * @param {Object} fileState - File state (mtime, size, mode, hash)
    */
@@ -160,9 +160,9 @@ export class WorkingCopy {
 
   /**
    * Get list of modified files
-   * 
+   *
    * Uses mtime + size comparison for fast detection.
-   * 
+   *
    * @returns {Promise<Array<string>>} Array of modified file paths
    */
   async getModifiedFiles() {

@@ -1,6 +1,6 @@
 /**
  * ChangeGraph - Manages the change graph with stable change IDs
- * 
+ *
  * Tracks changes, their relationships (parents/children), and evolution (amends/rewrites).
  */
 
@@ -62,6 +62,7 @@ export class ChangeGraph {
    * Save graph to storage
    */
   async save() {
+    /** @type {Record<string, any>} */
     const changes = {};
     for (const [changeId, change] of this.nodes.entries()) {
       changes[changeId] = change;
@@ -75,8 +76,8 @@ export class ChangeGraph {
 
   /**
    * Add a change to the graph
-   * 
-   * @param {Object} change - Change object
+   *
+   * @param {Record<string, any>} change - Change object
    */
   async addChange(change) {
     validateChangeId(change.changeId);
@@ -96,9 +97,9 @@ export class ChangeGraph {
 
   /**
    * Get a change by ID
-   * 
+   *
    * @param {string} changeId - Change ID
-   * @returns {Object|null} Change object or null if not found
+   * @returns {Promise<Record<string, any>|null>} Change object or null if not found
    */
   async getChange(changeId) {
     validateChangeId(changeId);
@@ -107,7 +108,7 @@ export class ChangeGraph {
 
   /**
    * Get all changes
-   * 
+   *
    * @returns {Array<any>} Array of all changes
    */
   getAll() {
@@ -116,7 +117,7 @@ export class ChangeGraph {
 
   /**
    * Find change by commit ID
-   * 
+   *
    * @param {string} commitId - Git commit SHA-1
    * @returns {string|null} Change ID or null if not found
    */
@@ -126,8 +127,8 @@ export class ChangeGraph {
 
   /**
    * Get parent change IDs
-   * 
-   * @param {string} changeId - Change ID
+   *
+   * @param {any} changeId - Change ID
    * @returns {Array<string>} Array of parent change IDs
    */
   getParents(changeId) {
@@ -137,27 +138,27 @@ export class ChangeGraph {
 
   /**
    * Get child change IDs
-   * 
+   *
    * @param {string} changeId - Change ID
    * @returns {Array<string>} Array of child change IDs
    */
   getChildren(changeId) {
     const children = [];
-    
+
     for (const change of this.nodes.values()) {
       if (change.parents.includes(changeId)) {
         children.push(change.changeId);
       }
     }
-    
+
     return children;
   }
 
   /**
    * Evolve a change (update commitId, track predecessor)
-   * 
+   *
    * Used when amending or rewriting a change.
-   * 
+   *
    * @param {string} changeId - Change ID
    * @param {string} newCommitId - New commit SHA-1
    */
@@ -188,8 +189,8 @@ export class ChangeGraph {
 
   /**
    * Update a change (modify in place)
-   * 
-   * @param {Object} change - Updated change object
+   *
+   * @param {Record<string, any>} change - Updated change object
    */
   async updateChange(change) {
     validateChangeId(change.changeId);
@@ -239,12 +240,8 @@ export class ChangeGraph {
   /**
    * Create a change with default values (helper for tests)
    *
-   * @param {Object} params - Change parameters
-   * @param {string[]} [params.parents] - Parent change IDs
-   * @param {string} [params.description] - Change description
-   * @param {Object} [params.fileSnapshot] - File snapshot
-   * @param {Object} [params.conflicts] - Conflict markers
-   * @returns {Promise<Object>} Created change object
+   * @param {Record<string, any>} [params] - Change parameters
+   * @returns {Promise<Record<string, any>>} Created change object
    */
   async createChange(params = {}) {
     const crypto = await import('crypto');
@@ -253,6 +250,7 @@ export class ChangeGraph {
     const tree = params.tree || crypto.randomBytes(20).toString('hex');
     const timestamp = params.timestamp || new Date().toISOString();
 
+    /** @type {Record<string, any>} */
     const change = {
       changeId,
       parents: params.parents || [],

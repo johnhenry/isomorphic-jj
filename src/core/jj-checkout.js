@@ -19,6 +19,10 @@ const protoDir = inDist
   : path.join(__dirname, '..', 'protos');
 
 export class JJCheckout {
+  /**
+   * @param {any} fs - File system module (isomorphic-git compatible)
+   * @param {any} dir - Repository directory path
+   */
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
@@ -42,7 +46,7 @@ export class JJCheckout {
     // Create message (use camelCase for protobufjs)
     const message = Checkout.create({
       operationId: opIdBuffer,
-      workspaceName: workspaceName
+      workspaceName: workspaceName,
     });
 
     // Verify the message
@@ -62,7 +66,7 @@ export class JJCheckout {
   /**
    * Read checkout file
    *
-   * @returns {Object} Decoded checkout data
+   * @returns {Promise<Record<string, any>>} Decoded checkout data
    */
   async readCheckout() {
     const checkoutPath = `${this.dir}/.jj/working_copy/checkout`;
@@ -73,12 +77,12 @@ export class JJCheckout {
     const Checkout = root.lookupType('local_working_copy.Checkout');
 
     // Decode
-    const message = Checkout.decode(buffer);
+    const message = /** @type {any} */ (Checkout.decode(buffer));
 
     // Return the decoded message with proper field access
     return {
       operation_id: message.operationId,
-      workspace_name: message.workspaceName
+      workspace_name: message.workspaceName,
     };
   }
 }

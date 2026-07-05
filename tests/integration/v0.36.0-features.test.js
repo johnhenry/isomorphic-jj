@@ -91,7 +91,7 @@ describe('v0.36.0 Features', () => {
 
       // Verify tracking info (should be stored in bookmark metadata)
       const bookmarks = await repo.bookmark.list();
-      const featureBookmark = bookmarks.find(b => b.name === 'feature');
+      const featureBookmark = bookmarks.find((b) => b.name === 'feature');
       expect(featureBookmark).toBeDefined();
       expect(featureBookmark.tracking).toEqual({ remote: 'origin', ref: 'feature' });
     });
@@ -110,7 +110,7 @@ describe('v0.36.0 Features', () => {
       await repo.bookmark.untrack({ name: 'feature' });
 
       const bookmarks = await repo.bookmark.list();
-      const featureBookmark = bookmarks.find(b => b.name === 'feature');
+      const featureBookmark = bookmarks.find((b) => b.name === 'feature');
       expect(featureBookmark.tracking).toBeUndefined();
     });
   });
@@ -158,7 +158,7 @@ describe('v0.36.0 Features', () => {
 
       // Load with programmatic workspace config (no file I/O)
       await repo.config.load({
-        workspace: { user: { email: 'programmatic@example.com' } }
+        workspace: { user: { email: 'programmatic@example.com' } },
       });
 
       expect(await repo.config.get({ name: 'user.name' })).toBe('Global User');
@@ -170,7 +170,7 @@ describe('v0.36.0 Features', () => {
 
       // Load with programmatic override
       await repo.config.load({
-        override: { test: { value: 'overridden' } }
+        override: { test: { value: 'overridden' } },
       });
 
       expect(await repo.config.get({ name: 'test.value' })).toBe('overridden');
@@ -190,7 +190,7 @@ describe('v0.36.0 Features', () => {
       // Programmatic workspace config should have highest priority
       await repo.config.load({
         override: { priority: { test: 'override' } },
-        workspace: { priority: { test: 'programmatic-workspace' } }
+        workspace: { priority: { test: 'programmatic-workspace' } },
       });
 
       expect(await repo.config.get({ name: 'priority.test' })).toBe('programmatic-workspace');
@@ -202,7 +202,7 @@ describe('v0.36.0 Features', () => {
 
       // Apply programmatic override
       await repo.config.load({
-        workspace: { persistent: { value: 'programmatic' } }
+        workspace: { persistent: { value: 'programmatic' } },
       });
       expect(await repo.config.get({ name: 'persistent.value' })).toBe('programmatic');
 
@@ -236,7 +236,7 @@ describe('v0.36.0 Features', () => {
       const hidden = await repo.log({ revset: 'hidden()' });
       expect(Array.isArray(hidden)).toBe(true);
       // Should include the abandoned commit
-      const abandonedCommit = hidden.find(c => c.changeId === changeId);
+      const abandonedCommit = hidden.find((c) => c.changeId === changeId);
       expect(abandonedCommit).toBeDefined();
     });
 

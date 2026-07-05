@@ -26,7 +26,7 @@ describe('ChangeGraph', () => {
   describe('initialization', () => {
     it('should initialize empty graph', async () => {
       await graph.init();
-      
+
       const nodes = graph.getAll();
       expect(nodes).toEqual([]);
     });
@@ -110,7 +110,11 @@ describe('ChangeGraph', () => {
         parents: [],
         tree: 'def1234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Test',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -125,7 +129,7 @@ describe('ChangeGraph', () => {
   describe('getChange', () => {
     it('should return null for non-existent change', async () => {
       await graph.init();
-      
+
       const change = await graph.getChange('00000000000000000000000000000000');
       expect(change).toBeNull();
     });
@@ -143,7 +147,11 @@ describe('ChangeGraph', () => {
         parents: [],
         tree: 'def1234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Root',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -161,7 +169,11 @@ describe('ChangeGraph', () => {
         parents: [],
         tree: 'tree1234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Parent',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -172,7 +184,11 @@ describe('ChangeGraph', () => {
         parents: [parent.changeId],
         tree: 'tree2234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:01:00.000Z',
+        },
         description: 'Child',
         timestamp: '2025-10-30T12:01:00.000Z',
       };
@@ -197,7 +213,11 @@ describe('ChangeGraph', () => {
         parents: [],
         tree: 'def1234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Leaf',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -215,7 +235,11 @@ describe('ChangeGraph', () => {
         parents: [],
         tree: 'tree1234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Parent',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -226,7 +250,11 @@ describe('ChangeGraph', () => {
         parents: [parent.changeId],
         tree: 'tree2234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:01:00.000Z',
+        },
         description: 'Child 1',
         timestamp: '2025-10-30T12:01:00.000Z',
       };
@@ -237,7 +265,11 @@ describe('ChangeGraph', () => {
         parents: [parent.changeId],
         tree: 'tree3234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:02:00.000Z',
+        },
         description: 'Child 2',
         timestamp: '2025-10-30T12:02:00.000Z',
       };
@@ -265,7 +297,11 @@ describe('ChangeGraph', () => {
         parents: [],
         tree: 'tree1234567890abcdef1234567890abcdef12345',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Original',
         timestamp: '2025-10-30T12:00:00.000Z',
       };

@@ -37,7 +37,6 @@ describe('API Parameter Normalization Audit', () => {
   });
 
   describe('Methods accepting changeId should accept aliases', () => {
-
     it('abandon() should accept { change: ... } alias', async () => {
       const changes = await repo.log();
       const changeId = changes[0].changeId;
@@ -57,14 +56,16 @@ describe('API Parameter Normalization Audit', () => {
       await repo.describe({ message: 'Change 2' });
 
       const changes = await repo.log();
-      const source = changes[0].changeId;  // Latest
-      const dest = changes[1].changeId;    // Previous
+      const source = changes[0].changeId; // Latest
+      const dest = changes[1].changeId; // Previous
 
       // Should work with 'from'/'to' aliases
-      await expect(repo.squash({
-        from: source,
-        to: dest
-      })).resolves.not.toThrow();
+      await expect(
+        repo.squash({
+          from: source,
+          to: dest,
+        })
+      ).resolves.not.toThrow();
     });
 
     it('describe() should accept { change: ... } alias', async () => {
@@ -72,10 +73,12 @@ describe('API Parameter Normalization Audit', () => {
       const changeId = changes[0].changeId;
 
       // Should work with 'change' alias
-      await expect(repo.describe({
-        change: changeId,
-        message: 'Updated'
-      })).resolves.not.toThrow();
+      await expect(
+        repo.describe({
+          change: changeId,
+          message: 'Updated',
+        })
+      ).resolves.not.toThrow();
     });
 
     it('amend() should accept { change: ... } alias for parent', async () => {
@@ -86,9 +89,11 @@ describe('API Parameter Normalization Audit', () => {
       const parentChange = changes[1].changeId;
 
       // Should work with 'change' alias
-      await expect(repo.amend({
-        change: parentChange
-      })).resolves.not.toThrow();
+      await expect(
+        repo.amend({
+          change: parentChange,
+        })
+      ).resolves.not.toThrow();
     });
 
     it('split() should accept { change: ... } alias', async () => {
@@ -100,10 +105,12 @@ describe('API Parameter Normalization Audit', () => {
       const changeId = changes[0].changeId;
 
       // Should work with 'change' alias
-      await expect(repo.split({
-        change: changeId,
-        paths: ['file1.txt']
-      })).resolves.not.toThrow();
+      await expect(
+        repo.split({
+          change: changeId,
+          paths: ['file1.txt'],
+        })
+      ).resolves.not.toThrow();
     });
 
     it('backout() should accept { change: ... } alias', async () => {
@@ -114,9 +121,11 @@ describe('API Parameter Normalization Audit', () => {
       const changeId = changes[0].changeId;
 
       // Should work with 'change' alias
-      await expect(repo.backout({
-        change: changeId
-      })).resolves.not.toThrow();
+      await expect(
+        repo.backout({
+          change: changeId,
+        })
+      ).resolves.not.toThrow();
     });
 
     it('absorb() should accept { change: ... } alias for destination', async () => {
@@ -130,17 +139,18 @@ describe('API Parameter Normalization Audit', () => {
       await repo.describe({ message: 'Modification' });
 
       const changes = await repo.log();
-      const destination = changes[1].changeId;  // Base change
+      const destination = changes[1].changeId; // Base change
 
       // Should work with 'change' alias
-      await expect(repo.absorb({
-        destination: destination
-      })).resolves.not.toThrow();
+      await expect(
+        repo.absorb({
+          destination: destination,
+        })
+      ).resolves.not.toThrow();
     });
   });
 
   describe('Bookmark methods should accept aliases (already fixed)', () => {
-
     it('bookmark.set() accepts target/change/revision aliases', async () => {
       const changes = await repo.log();
       const changeId = changes[0].changeId;
@@ -185,7 +195,6 @@ describe('API Parameter Normalization Audit', () => {
   });
 
   describe('Edit/metaedit/unabandon methods should accept aliases (already fixed)', () => {
-
     it('edit() accepts change alias', async () => {
       const changes = await repo.log();
       const changeId = changes[0].changeId;
@@ -197,10 +206,12 @@ describe('API Parameter Normalization Audit', () => {
       const changes = await repo.log();
       const changeId = changes[0].changeId;
 
-      await expect(repo.metaedit({
-        change: changeId,
-        message: 'Updated description'
-      })).resolves.not.toThrow();
+      await expect(
+        repo.metaedit({
+          change: changeId,
+          message: 'Updated description',
+        })
+      ).resolves.not.toThrow();
     });
 
     it('unabandon() accepts change alias', async () => {

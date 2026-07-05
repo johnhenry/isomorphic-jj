@@ -19,6 +19,10 @@ const protoDir = inDist
   : path.join(__dirname, '..', 'protos');
 
 export class JJOperationStore {
+  /**
+   * @param {any} fs - File system module (isomorphic-git compatible)
+   * @param {any} dir - Repository directory path
+   */
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
@@ -31,7 +35,7 @@ export class JJOperationStore {
    * @param {string} operationId - Operation ID as hex string (128 characters)
    * @param {string} viewId - View ID as hex string (128 characters)
    * @param {Array<string>} parentIds - Parent operation IDs as hex strings
-   * @param {Object} metadata - Operation metadata
+   * @param {Record<string, any>} metadata - Operation metadata
    */
   async writeOperation(operationId, viewId, parentIds, metadata) {
     // Load protobuf schema
@@ -40,23 +44,23 @@ export class JJOperationStore {
 
     // Convert hex IDs to bytes
     const viewIdBuffer = Buffer.from(viewId, 'hex');
-    const parentBuffers = parentIds.map(id => Buffer.from(id, 'hex'));
+    const parentBuffers = parentIds.map((id) => Buffer.from(id, 'hex'));
 
     // Create metadata message (use camelCase for protobufjs)
     const metadataMsg = {
       startTime: {
         millisSinceEpoch: metadata.start_time.millis_since_epoch,
-        tzOffset: metadata.start_time.tz_offset
+        tzOffset: metadata.start_time.tz_offset,
       },
       endTime: {
         millisSinceEpoch: metadata.end_time.millis_since_epoch,
-        tzOffset: metadata.end_time.tz_offset
+        tzOffset: metadata.end_time.tz_offset,
       },
       description: metadata.description,
       hostname: metadata.hostname,
       username: metadata.username,
       isSnapshot: metadata.is_snapshot,
-      tags: metadata.tags
+      tags: metadata.tags,
     };
 
     // Create operation message (use camelCase for protobufjs)
@@ -65,7 +69,7 @@ export class JJOperationStore {
       parents: parentBuffers,
       metadata: metadataMsg,
       commitPredecessors: [], // Empty for now
-      storesCommitPredecessors: false
+      storesCommitPredecessors: false,
     });
 
     // Verify the message
@@ -86,7 +90,7 @@ export class JJOperationStore {
    * Read operation file
    *
    * @param {string} operationId - Operation ID as hex string (128 characters)
-   * @returns {Object} Decoded operation data
+   * @returns {Promise<Record<string, any>>} Decoded operation data
    */
   async readOperation(operationId) {
     // Read from .jj/repo/op_store/operations/OPERATIONID
@@ -98,7 +102,7 @@ export class JJOperationStore {
     const Operation = root.lookupType('simple_op_store.Operation');
 
     // Decode
-    const message = Operation.decode(buffer);
+    const message = /** @type {any} */ (Operation.decode(buffer));
 
     // Return the decoded message with proper field access
     return {
@@ -107,20 +111,20 @@ export class JJOperationStore {
       metadata: {
         start_time: {
           millis_since_epoch: message.metadata.startTime.millisSinceEpoch,
-          tz_offset: message.metadata.startTime.tzOffset
+          tz_offset: message.metadata.startTime.tzOffset,
         },
         end_time: {
           millis_since_epoch: message.metadata.endTime.millisSinceEpoch,
-          tz_offset: message.metadata.endTime.tzOffset
+          tz_offset: message.metadata.endTime.tzOffset,
         },
         description: message.metadata.description,
         hostname: message.metadata.hostname,
         username: message.metadata.username,
         is_snapshot: message.metadata.isSnapshot,
-        tags: message.metadata.tags
+        tags: message.metadata.tags,
       },
       commit_predecessors: message.commitPredecessors,
-      stores_commit_predecessors: message.storesCommitPredecessors
+      stores_commit_predecessors: message.storesCommitPredecessors,
     };
   }
 }

@@ -49,7 +49,7 @@ function matchesPattern(name, pattern) {
 
 export class TagStore {
   /**
-   * @param {Object} fs - Filesystem interface
+   * @param {any} fs - Filesystem interface
    * @param {string} jjDir - Path to .jj directory
    */
   constructor(fs, jjDir) {
@@ -60,7 +60,7 @@ export class TagStore {
 
   /**
    * Loads tags from storage
-   * @returns {Promise<Object>} Map of tag name to changeId
+   * @returns {Promise<Record<string, any>>} Map of tag name to changeId
    */
   async load() {
     try {

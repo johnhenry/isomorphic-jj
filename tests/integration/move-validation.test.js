@@ -124,39 +124,39 @@ describe('Move Validation and Detection', () => {
     it('should reject moving file to itself', async () => {
       await jj.write({ path: 'test.txt', data: 'content' });
 
-      await expect(
-        jj.move({ from: 'test.txt', to: 'test.txt' })
-      ).rejects.toThrow('Source and destination paths are the same');
+      await expect(jj.move({ from: 'test.txt', to: 'test.txt' })).rejects.toThrow(
+        'Source and destination paths are the same'
+      );
     });
 
     it('should reject absolute paths', async () => {
       await jj.write({ path: 'test.txt', data: 'content' });
 
-      await expect(
-        jj.move({ from: '/absolute/path.txt', to: 'relative.txt' })
-      ).rejects.toThrow('Absolute paths are not allowed');
+      await expect(jj.move({ from: '/absolute/path.txt', to: 'relative.txt' })).rejects.toThrow(
+        'Absolute paths are not allowed'
+      );
 
-      await expect(
-        jj.move({ from: 'test.txt', to: '/absolute/dest.txt' })
-      ).rejects.toThrow('Absolute paths are not allowed');
+      await expect(jj.move({ from: 'test.txt', to: '/absolute/dest.txt' })).rejects.toThrow(
+        'Absolute paths are not allowed'
+      );
     });
 
     it('should reject parent directory traversal', async () => {
       await jj.write({ path: 'test.txt', data: 'content' });
 
-      await expect(
-        jj.move({ from: '../test.txt', to: 'file.txt' })
-      ).rejects.toThrow('Parent directory traversal');
+      await expect(jj.move({ from: '../test.txt', to: 'file.txt' })).rejects.toThrow(
+        'Parent directory traversal'
+      );
 
-      await expect(
-        jj.move({ from: 'test.txt', to: '../outside.txt' })
-      ).rejects.toThrow('Parent directory traversal');
+      await expect(jj.move({ from: 'test.txt', to: '../outside.txt' })).rejects.toThrow(
+        'Parent directory traversal'
+      );
     });
 
     it('should reject moving non-existent file', async () => {
-      await expect(
-        jj.move({ from: 'nonexistent.txt', to: 'dest.txt' })
-      ).rejects.toThrow('Source file not found');
+      await expect(jj.move({ from: 'nonexistent.txt', to: 'dest.txt' })).rejects.toThrow(
+        'Source file not found'
+      );
     });
 
     it('should provide helpful error details for missing files', async () => {
@@ -175,17 +175,17 @@ describe('Move Validation and Detection', () => {
     it('should reject missing changeId', async () => {
       const change = await jj.status();
 
-      await expect(
-        jj.move({ newParent: change.workingCopy.changeId })
-      ).rejects.toThrow('Missing or invalid changeId');
+      await expect(jj.move({ newParent: change.workingCopy.changeId })).rejects.toThrow(
+        'Missing or invalid changeId'
+      );
     });
 
     it('should reject missing newParent', async () => {
       const change = await jj.status();
 
-      await expect(
-        jj.move({ changeId: change.workingCopy.changeId })
-      ).rejects.toThrow('Missing or invalid newParent');
+      await expect(jj.move({ changeId: change.workingCopy.changeId })).rejects.toThrow(
+        'Missing or invalid newParent'
+      );
     });
 
     it('should reject invalid changeId format', async () => {
@@ -231,9 +231,9 @@ describe('Move Validation and Detection', () => {
       const change = await jj.status();
       const changeId = change.workingCopy.changeId;
 
-      await expect(
-        jj.move({ changeId, newParent: changeId })
-      ).rejects.toThrow('Cannot move a change to itself as parent');
+      await expect(jj.move({ changeId, newParent: changeId })).rejects.toThrow(
+        'Cannot move a change to itself as parent'
+      );
     });
 
     it('should provide helpful error details with suggestions', async () => {

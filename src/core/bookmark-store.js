@@ -1,6 +1,6 @@
 /**
  * BookmarkStore - Manages local and remote bookmarks
- * 
+ *
  * Bookmarks are named pointers to changes, similar to Git branches.
  */
 
@@ -15,6 +15,7 @@ export class BookmarkStore {
     this.storage = storage;
     this.local = new Map();
     this.remote = new Map(); // remote → (bookmark → changeId)
+    /** @type {Record<string, any>} */
     this.tracking = {}; // bookmark → { remote, ref } tracking info (v0.35.0)
   }
 
@@ -79,11 +80,13 @@ export class BookmarkStore {
    * Save bookmarks to storage
    */
   async save() {
+    /** @type {Record<string, any>} */
     const local = {};
     for (const [name, target] of this.local.entries()) {
       local[name] = target;
     }
 
+    /** @type {Record<string, any>} */
     const remote = {};
     for (const [remoteName, bookmarks] of this.remote.entries()) {
       remote[remoteName] = {};
@@ -102,7 +105,7 @@ export class BookmarkStore {
 
   /**
    * Set a local bookmark
-   * 
+   *
    * @param {string} name - Bookmark name
    * @param {string} target - Change ID to point to
    */
@@ -123,7 +126,7 @@ export class BookmarkStore {
 
   /**
    * Move an existing local bookmark
-   * 
+   *
    * @param {string} name - Bookmark name
    * @param {string} target - New change ID to point to
    */
@@ -144,7 +147,7 @@ export class BookmarkStore {
 
   /**
    * Delete a local bookmark
-   * 
+   *
    * @param {string} name - Bookmark name
    */
   async delete(name) {
@@ -162,7 +165,7 @@ export class BookmarkStore {
 
   /**
    * Get bookmark target
-   * 
+   *
    * @param {string} name - Bookmark name
    * @returns {Promise<string|null>} Change ID or null if not found
    */
@@ -172,7 +175,7 @@ export class BookmarkStore {
 
   /**
    * Set a remote bookmark
-   * 
+   *
    * @param {string} remoteName - Remote name
    * @param {string} name - Bookmark name
    * @param {string} target - Change ID to point to
@@ -191,7 +194,7 @@ export class BookmarkStore {
 
   /**
    * Get remote bookmark target
-   * 
+   *
    * @param {string} remoteName - Remote name
    * @param {string} name - Bookmark name
    * @returns {Promise<string|null>} Change ID or null if not found
@@ -211,6 +214,7 @@ export class BookmarkStore {
 
     // Add local bookmarks with tracking info (v0.35.0)
     for (const [name, target] of this.local.entries()) {
+      /** @type {Record<string, any>} */
       const bookmark = {
         name,
         changeId: target,

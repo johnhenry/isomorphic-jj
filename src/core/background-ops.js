@@ -8,8 +8,8 @@ import { JJError } from '../utils/errors.js';
 
 export class BackgroundOps {
   /**
-   * @param {Object} jj - JJ instance
-   * @param {Object} fs - Filesystem implementation
+   * @param {any} jj - JJ instance
+   * @param {any} fs - Filesystem implementation
    * @param {string} dir - Repository directory
    */
   constructor(jj, fs, dir) {
@@ -63,7 +63,7 @@ export class BackgroundOps {
    *
    * @param {string} path - Path to watch
    * @param {Function} callback - Callback function(event, filename)
-   * @returns {string} Watcher ID
+   * @returns {Promise<string>} Watcher ID
    */
   async watch(path, callback) {
     if (!this.running) {
@@ -81,13 +81,15 @@ export class BackgroundOps {
     }
 
     // Browser: use FileSystem Access API observeDirectory if available
-    if (typeof FileSystemObserver !== 'undefined') {
+    if (typeof (/** @type {any} */ (globalThis).FileSystemObserver) !== 'undefined') {
       const watcherId = `watcher-${this.watchers.size}`;
-      const observer = new FileSystemObserver(async (records) => {
-        for (const record of records) {
-          callback(record.type, record.relativePathComponents.join('/'));
+      const observer = new /** @type {any} */ (globalThis).FileSystemObserver(
+        async (/** @type {any} */ records) => {
+          for (const record of records) {
+            callback(record.type, record.relativePathComponents.join('/'));
+          }
         }
-      });
+      );
 
       // Note: This API is experimental and may not be available
       this.watchers.set(watcherId, observer);
@@ -135,6 +137,7 @@ export class BackgroundOps {
   async queue(operation, opts = {}) {
     const operationId = `op-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
+    /** @type {Record<string, any>} */
     const op = {
       id: operationId,
       description: opts.description || 'background operation',
@@ -190,10 +193,10 @@ export class BackgroundOps {
     let ops = Array.from(this.operations.values());
 
     if (opts.status) {
-      ops = ops.filter(op => op.status === opts.status);
+      ops = ops.filter((op) => op.status === opts.status);
     }
 
-    return ops.map(op => ({
+    return ops.map((op) => ({
       id: op.id,
       description: op.description,
       status: op.status,
@@ -212,42 +215,50 @@ export class BackgroundOps {
   async enableAutoSnapshot(opts = {}) {
     const debounceMs = opts.debounceMs || 1000;
 
-    const watcherId = await this.watch(this.dir, (event, filename) => {
-      if (filename && filename.startsWith('.jj/')) {
-        return; // Ignore .jj directory changes
-      }
-
-      if (filename && filename.startsWith('.git/')) {
-        return; // Ignore .git directory changes
-      }
-
-      // Debounce: wait for changes to settle
-      const existingTimer = this.timers.get(watcherId);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-      }
-
-      const timer = setTimeout(async () => {
-        try {
-          // Create automatic snapshot
-          await this.queue(async () => {
-            await this.jj.describe({ message: `Auto-snapshot: ${filename || 'multiple files'} changed` });
-          }, { description: 'auto-snapshot' });
-        } catch (error) {
-          console.error('Auto-snapshot failed:', error);
-        } finally {
-          // Clean up timer reference
-          this.timers.delete(watcherId);
+    const watcherId = await this.watch(
+      this.dir,
+      (/** @type {any} */ event, /** @type {any} */ filename) => {
+        if (filename && filename.startsWith('.jj/')) {
+          return; // Ignore .jj directory changes
         }
-      }, debounceMs);
 
-      // Use unref() to allow process to exit if this is the only pending timer
-      if (timer.unref) {
-        timer.unref();
+        if (filename && filename.startsWith('.git/')) {
+          return; // Ignore .git directory changes
+        }
+
+        // Debounce: wait for changes to settle
+        const existingTimer = this.timers.get(watcherId);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+        }
+
+        const timer = setTimeout(async () => {
+          try {
+            // Create automatic snapshot
+            await this.queue(
+              async () => {
+                await this.jj.describe({
+                  message: `Auto-snapshot: ${filename || 'multiple files'} changed`,
+                });
+              },
+              { description: 'auto-snapshot' }
+            );
+          } catch (error) {
+            console.error('Auto-snapshot failed:', error);
+          } finally {
+            // Clean up timer reference
+            this.timers.delete(watcherId);
+          }
+        }, debounceMs);
+
+        // Use unref() to allow process to exit if this is the only pending timer
+        if (timer.unref) {
+          timer.unref();
+        }
+
+        this.timers.set(watcherId, timer);
       }
-
-      this.timers.set(watcherId, timer);
-    });
+    );
 
     return watcherId;
   }

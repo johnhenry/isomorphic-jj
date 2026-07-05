@@ -140,9 +140,7 @@ describe('backout()', () => {
 
   describe('Error handling', () => {
     it('should throw error when backing out nonexistent change', async () => {
-      await expect(
-        jj.backout({ revision: '0'.repeat(32) })
-      ).rejects.toMatchObject({
+      await expect(jj.backout({ revision: '0'.repeat(32) })).rejects.toMatchObject({
         code: 'CHANGE_NOT_FOUND',
       });
     });

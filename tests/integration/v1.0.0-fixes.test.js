@@ -64,7 +64,7 @@ describe('v1.0.0 Bug Fixes', () => {
       // Should have both duplicated (detailed) and changeIds (convenience) fields
       expect(result.duplicated).toBeDefined();
       expect(result.changeIds).toBeDefined();
-      expect(result.changeIds).toEqual(result.duplicated.map(d => d.duplicate));
+      expect(result.changeIds).toEqual(result.duplicated.map((d) => d.duplicate));
     });
 
     it('should still support changes array parameter', async () => {
@@ -191,7 +191,7 @@ describe('v1.0.0 Bug Fixes', () => {
       const events = await jj.obslog({ changeId: change.changeId });
 
       // Each event should have an operation field
-      events.forEach(event => {
+      events.forEach((event) => {
         expect(event.operation).toBeDefined();
         expect(typeof event.operation).toBe('string');
         expect(event.description).toBeDefined();
@@ -296,7 +296,7 @@ describe('v1.0.0 Bug Fixes', () => {
       expect(Array.isArray(rangeChanges)).toBe(true);
 
       // Should include change2 and change3, but not change1
-      const changeIds = rangeChanges.map(c => c.changeId);
+      const changeIds = rangeChanges.map((c) => c.changeId);
       expect(changeIds).toContain(change2.changeId);
       expect(changeIds).toContain(change3.changeId);
       expect(changeIds).not.toContain(change1.changeId);
@@ -316,7 +316,7 @@ describe('v1.0.0 Bug Fixes', () => {
       expect(rangeChanges).toBeDefined();
       expect(rangeChanges.length).toBeGreaterThan(0);
 
-      const changeIds = rangeChanges.map(c => c.changeId);
+      const changeIds = rangeChanges.map((c) => c.changeId);
       expect(changeIds).toContain(change2.changeId);
       expect(changeIds).not.toContain(change1.changeId);
     });

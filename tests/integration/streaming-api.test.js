@@ -123,9 +123,9 @@ describe('Streaming API', () => {
       const status = await jj.status();
       const changeId = status.workingCopy.changeId;
 
-      await expect(
-        jj.readStream({ path: 'test.txt', changeId })
-      ).rejects.toThrow('not yet supported');
+      await expect(jj.readStream({ path: 'test.txt', changeId })).rejects.toThrow(
+        'not yet supported'
+      );
     });
   });
 
@@ -217,7 +217,7 @@ describe('Streaming API', () => {
       });
 
       // Give it a moment for tracking to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
       // Verify file is in working copy
       const files = await jj.listFiles();

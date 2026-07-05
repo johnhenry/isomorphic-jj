@@ -35,13 +35,15 @@ export class MockFS {
       throw error;
     }
     // Handle both 'utf8' and 'utf-8' encoding
-    return (encoding === 'utf8' || encoding === 'utf-8') ? file.content : Buffer.from(file.content);
+    return encoding === 'utf8' || encoding === 'utf-8' ? file.content : Buffer.from(file.content);
   }
 
   async rename(oldPath, newPath) {
     const file = this.files.get(oldPath);
     if (!file) {
-      const error = new Error(`ENOENT: no such file or directory, rename '${oldPath}' -> '${newPath}'`);
+      const error = new Error(
+        `ENOENT: no such file or directory, rename '${oldPath}' -> '${newPath}'`
+      );
       error.code = 'ENOENT';
       throw error;
     }

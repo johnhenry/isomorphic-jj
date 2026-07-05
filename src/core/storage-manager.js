@@ -1,6 +1,6 @@
 /**
  * Storage Manager for isomorphic-jj
- * 
+ *
  * Manages JSON storage in .jj directory with atomic writes and caching.
  */
 
@@ -8,15 +8,15 @@ import { JJError } from '../utils/errors.js';
 
 export class Storage {
   /**
-   * @param {Object} fs - Filesystem implementation (Node fs, LightningFS, etc.)
+   * @param {any} fs - Filesystem implementation (Node fs, LightningFS, etc.)
    * @param {string} dir - Repository directory path
    */
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
     this.jjDir = `${dir}/.jj`;
-    this.repoDir = `${dir}/.jj/repo`;  // Core repo data
-    this.workingCopyDir = `${dir}/.jj/working_copy`;  // Default workspace working copy
+    this.repoDir = `${dir}/.jj/repo`; // Core repo data
+    this.workingCopyDir = `${dir}/.jj/working_copy`; // Default workspace working copy
     this.cache = new Map();
   }
 
@@ -44,16 +44,20 @@ export class Storage {
       // Create default workspace directory
       await this.fs.promises.mkdir(`${this.workingCopyDir}/default`, { recursive: true });
     } catch (error) {
-      throw new JJError('STORAGE_INIT_FAILED', `Failed to initialize .jj directory: ${error.message}`, {
-        dir: this.jjDir,
-        originalError: error,
-      });
+      throw new JJError(
+        'STORAGE_INIT_FAILED',
+        `Failed to initialize .jj directory: ${error.message}`,
+        {
+          dir: this.jjDir,
+          originalError: error,
+        }
+      );
     }
   }
 
   /**
    * Read and parse JSON file
-   * 
+   *
    * @param {string} path - Relative path from .jj directory
    * @returns {Promise<Object|null>} Parsed JSON or null if file doesn't exist
    */
@@ -83,7 +87,7 @@ export class Storage {
 
   /**
    * Write JSON file atomically
-   * 
+   *
    * @param {string} path - Relative path from .jj directory
    * @param {Object|string} data - Data to write (object will be stringified)
    */
@@ -124,7 +128,7 @@ export class Storage {
 
   /**
    * Read JSONL file (newline-delimited JSON)
-   * 
+   *
    * @param {string} path - Relative path from .jj directory
    * @returns {Promise<Array<any>>} Array of parsed JSON objects
    */
@@ -136,8 +140,8 @@ export class Storage {
       return content
         .trim()
         .split('\n')
-        .filter((line) => line.length > 0)
-        .map((line) => JSON.parse(line));
+        .filter((/** @type {any} */ line) => line.length > 0)
+        .map((/** @type {any} */ line) => JSON.parse(line));
     } catch (error) {
       if (error.code === 'ENOENT') {
         return [];
@@ -151,7 +155,7 @@ export class Storage {
 
   /**
    * Append line to JSONL file
-   * 
+   *
    * @param {string} path - Relative path from .jj directory
    * @param {string} line - JSON string to append
    */
@@ -179,13 +183,13 @@ export class Storage {
 
   /**
    * Check if file exists
-   * 
+   *
    * @param {string} path - Relative path from .jj directory
    * @returns {Promise<boolean>}
    */
   async exists(path) {
     const fullPath = `${this.jjDir}/${path}`;
-    
+
     try {
       await this.fs.promises.stat(fullPath);
       return true;
@@ -196,7 +200,7 @@ export class Storage {
 
   /**
    * Invalidate cache
-   * 
+   *
    * @param {string} [path] - Specific path to invalidate, or all if not provided
    */
   invalidateCache(path) {

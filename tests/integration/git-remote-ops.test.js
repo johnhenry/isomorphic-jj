@@ -80,15 +80,13 @@ describe('Git Remote Operations', () => {
 
   describe('Remote Operations API', () => {
     test('fetch() should throw error without http client', async () => {
-      await expect(
-        jj.git.fetch({ remote: 'origin' })
-      ).rejects.toThrow('HTTP client not provided');
+      await expect(jj.git.fetch({ remote: 'origin' })).rejects.toThrow('HTTP client not provided');
     });
 
     test('push() should throw error without http client', async () => {
-      await expect(
-        jj.git.push({ remote: 'origin', refs: ['refs/heads/main'] })
-      ).rejects.toThrow('HTTP client not provided');
+      await expect(jj.git.push({ remote: 'origin', refs: ['refs/heads/main'] })).rejects.toThrow(
+        'HTTP client not provided'
+      );
     });
 
     test('fetch() should record operation in log', async () => {

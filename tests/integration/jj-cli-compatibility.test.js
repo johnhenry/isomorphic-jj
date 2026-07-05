@@ -61,7 +61,7 @@ describe('JJ CLI Compatibility', () => {
       const output = execSync('jj debug local-working-copy --ignore-working-copy', {
         cwd: testDir,
         encoding: 'utf-8',
-        stdio: 'pipe'
+        stdio: 'pipe',
       });
       // If jj can read it, it won't error
       expect(output).toBeDefined();
@@ -99,7 +99,7 @@ describe('JJ CLI Compatibility', () => {
       hostname: 'test-host',
       username: 'test-user',
       is_snapshot: false,
-      tags: {}
+      tags: {},
     };
 
     await opStore.writeOperation(operationId, viewId, parentIds, metadata);
@@ -147,7 +147,7 @@ describe('JJ CLI Compatibility', () => {
       hostname: 'localhost',
       username: 'test',
       is_snapshot: false,
-      tags: {}
+      tags: {},
     };
     await opStore.writeOperation(opId, viewId, [], metadata);
 

@@ -128,7 +128,9 @@ describe('File Operations Integration', () => {
       await jj.write({ path: 'delete-me.txt', data: 'content' });
 
       // Verify file exists
-      await expect(fs.promises.readFile('/test/repo/delete-me.txt', 'utf8')).resolves.toBe('content');
+      await expect(fs.promises.readFile('/test/repo/delete-me.txt', 'utf8')).resolves.toBe(
+        'content'
+      );
 
       // Remove it
       await jj.remove({ path: 'delete-me.txt' });

@@ -1,6 +1,6 @@
 /**
  * JJError - Custom error class for isomorphic-jj
- * 
+ *
  * Provides structured errors with error codes, context, and user-actionable suggestions.
  */
 export class JJError extends Error {

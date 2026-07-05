@@ -19,6 +19,10 @@ const protoDir = inDist
   : path.join(__dirname, '..', 'protos');
 
 export class JJTreeState {
+  /**
+   * @param {any} fs - File system module (isomorphic-git compatible)
+   * @param {any} dir - Repository directory path
+   */
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
@@ -40,13 +44,13 @@ export class JJTreeState {
     const treeIdBuffer = Buffer.from(treeId, 'hex');
 
     // Convert file states to protobuf format
-    const fileStateEntries = fileStates.map(fs => ({
+    const fileStateEntries = fileStates.map((fs) => ({
       path: fs.path,
       state: {
         mtimeMillisSinceEpoch: fs.mtime, // Use camelCase for protobufjs
         size: fs.size,
-        fileType: fs.fileType || 0 // 0 = Normal
-      }
+        fileType: fs.fileType || 0, // 0 = Normal
+      },
     }));
 
     // Create message (use camelCase for protobufjs)
@@ -55,8 +59,8 @@ export class JJTreeState {
       fileStates: fileStateEntries,
       isFileStatesSorted: false, // We don't sort them
       sparsePatterns: {
-        prefixes: [] // No sparse patterns
-      }
+        prefixes: [], // No sparse patterns
+      },
     });
 
     // Verify the message
@@ -76,7 +80,7 @@ export class JJTreeState {
   /**
    * Read tree_state file
    *
-   * @returns {Object} Decoded tree state data
+   * @returns {Promise<Record<string, any>>} Decoded tree state data
    */
   async readTreeState() {
     const treeStatePath = `${this.dir}/.jj/working_copy/tree_state`;
@@ -87,14 +91,14 @@ export class JJTreeState {
     const TreeState = root.lookupType('local_working_copy.TreeState');
 
     // Decode
-    const message = TreeState.decode(buffer);
+    const message = /** @type {any} */ (TreeState.decode(buffer));
 
     // Return the decoded message with proper field access
     return {
       tree_ids: message.treeIds,
       file_states: message.fileStates,
       is_file_states_sorted: message.isFileStatesSorted,
-      sparse_patterns: message.sparsePatterns
+      sparse_patterns: message.sparsePatterns,
     };
   }
 }

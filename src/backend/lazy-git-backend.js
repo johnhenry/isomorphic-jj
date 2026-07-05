@@ -44,11 +44,7 @@ export class LazyGitBackend extends IsomorphicGitBackend {
   async readBlob(oid) {
     // Validate OID format
     if (!/^[0-9a-f]{40}$/.test(oid)) {
-      throw new JJError(
-        'INVALID_OID',
-        `Invalid object ID format: ${oid}`,
-        { oid }
-      );
+      throw new JJError('INVALID_OID', `Invalid object ID format: ${oid}`, { oid });
     }
 
     try {
@@ -160,9 +156,10 @@ export class LazyGitBackend extends IsomorphicGitBackend {
       lazyLoad: this.lazyLoad,
       missingObjects: this.missingObjects.size,
       fetchedObjects: this.fetchedObjects.size,
-      hitRate: this.fetchedObjects.size > 0
-        ? (this.fetchedObjects.size - this.missingObjects.size) / this.fetchedObjects.size
-        : 0,
+      hitRate:
+        this.fetchedObjects.size > 0
+          ? (this.fetchedObjects.size - this.missingObjects.size) / this.fetchedObjects.size
+          : 0,
     };
   }
 

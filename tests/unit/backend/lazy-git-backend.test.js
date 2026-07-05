@@ -56,10 +56,7 @@ describe('LazyGitBackend (v0.4)', () => {
 
       // Mock the blob in filesystem
       await fs.promises.mkdir('/test/repo/.git/objects/12', { recursive: true });
-      await fs.promises.writeFile(
-        `/test/repo/.git/objects/12/${blobOid.slice(2)}`,
-        blobContent
-      );
+      await fs.promises.writeFile(`/test/repo/.git/objects/12/${blobOid.slice(2)}`, blobContent);
 
       // Mock git.readBlob behavior
       backend._gitReadBlob = async (oid) => {

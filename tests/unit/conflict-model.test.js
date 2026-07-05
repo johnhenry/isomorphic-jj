@@ -212,7 +212,7 @@ describe('ConflictModel', () => {
       });
 
       expect(detected).toHaveLength(2);
-      expect(detected.map(c => c.path).sort()).toEqual(['file1.txt', 'file2.txt']);
+      expect(detected.map((c) => c.path).sort()).toEqual(['file1.txt', 'file2.txt']);
     });
   });
 
@@ -295,9 +295,9 @@ describe('ConflictModel', () => {
     });
 
     it('should throw error when resolving non-existent conflict', async () => {
-      await expect(
-        conflicts.resolveConflict('nonexistent', 'content')
-      ).rejects.toThrow('not found');
+      await expect(conflicts.resolveConflict('nonexistent', 'content')).rejects.toThrow(
+        'not found'
+      );
     });
 
     it('should remove conflict', async () => {
@@ -346,7 +346,7 @@ describe('ConflictModel', () => {
     it('should list unresolved conflicts', () => {
       const unresolved = conflicts.listConflicts({ resolved: false });
       expect(unresolved).toHaveLength(2);
-      expect(unresolved.map(c => c.conflictId).sort()).toEqual(['conflict1', 'conflict3']);
+      expect(unresolved.map((c) => c.conflictId).sort()).toEqual(['conflict1', 'conflict3']);
     });
 
     it('should list resolved conflicts', () => {

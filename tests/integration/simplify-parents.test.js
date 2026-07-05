@@ -80,9 +80,7 @@ describe('simplifyParents()', () => {
 
   describe('Error handling', () => {
     it('should throw error when revision not found', async () => {
-      await expect(
-        jj.simplifyParents({ revision: '0'.repeat(32) })
-      ).rejects.toMatchObject({
+      await expect(jj.simplifyParents({ revision: '0'.repeat(32) })).rejects.toMatchObject({
         code: 'CHANGE_NOT_FOUND',
       });
     });

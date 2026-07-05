@@ -161,8 +161,8 @@ describe('Conflict Resolution Enhancements (v0.5)', () => {
       const conflicts = await jj.conflicts.list();
       // Should still have conflicts for file2 and file3
       expect(conflicts.length).toBe(2);
-      expect(conflicts.some(c => c.path === 'file1.txt')).toBe(false);
-      expect(conflicts.some(c => c.path === 'file2.txt')).toBe(true);
+      expect(conflicts.some((c) => c.path === 'file1.txt')).toBe(false);
+      expect(conflicts.some((c) => c.path === 'file2.txt')).toBe(true);
     });
 
     it('should resolve conflicts matching pattern', async () => {

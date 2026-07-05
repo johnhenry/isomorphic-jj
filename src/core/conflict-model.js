@@ -18,20 +18,26 @@ import { generateId } from '../utils/id-generation.js';
  * Conflict types supported by JJ
  */
 export const ConflictType = {
-  CONTENT: 'content',        // File content conflicts (3-way merge)
-  PATH: 'path',              // Path/rename conflicts
-  DELETE_MODIFY: 'delete-modify',  // File deleted in one side, modified in other
-  MODIFY_DELETE: 'modify-delete',  // File modified in one side, deleted in other
-  ADD_ADD: 'add-add',        // Same path added in both sides
+  CONTENT: 'content', // File content conflicts (3-way merge)
+  PATH: 'path', // Path/rename conflicts
+  DELETE_MODIFY: 'delete-modify', // File deleted in one side, modified in other
+  MODIFY_DELETE: 'modify-delete', // File modified in one side, deleted in other
+  ADD_ADD: 'add-add', // Same path added in both sides
 };
 
 /**
  * ConflictModel manages conflict detection, storage, and resolution
  */
 export class ConflictModel {
+  /**
+   * @param {any} storage
+   * @param {any} fs
+   * @param {any} [mergeDriverRegistry]
+   */
   constructor(storage, fs, mergeDriverRegistry = null) {
     this.storage = storage;
     this.fs = fs;
+    /** @type {any} */
     this.mergeDriverRegistry = mergeDriverRegistry; // v0.5: merge drivers
     this.conflicts = new Map(); // conflictId -> Conflict
     this.fileConflicts = new Map(); // path -> conflictId
@@ -86,18 +92,24 @@ export class ConflictModel {
    * @param {Map<any, any>} opts.rightFiles - Files in right
    * @param {Object} opts.drivers - Custom merge drivers (v0.5)
    * @param {string} opts.workingCopyDir - Working copy directory for file writes (v0.5)
-   * @returns {Array<Conflict>} Detected conflicts
+   * @returns {Promise<any[]>} Detected conflicts
    */
   async detectConflicts(opts) {
-    const { baseFiles, leftFiles, rightFiles, drivers = {}, workingCopyDir, baseChange, leftChange, rightChange } = opts;
+    const {
+      baseFiles,
+      leftFiles,
+      rightFiles,
+      drivers = {},
+      workingCopyDir,
+      baseChange,
+      leftChange,
+      rightChange,
+    } = opts;
+    /** @type {any[]} */
     const conflicts = [];
 
     // Get all unique paths across all versions
-    const allPaths = new Set([
-      ...baseFiles.keys(),
-      ...leftFiles.keys(),
-      ...rightFiles.keys(),
-    ]);
+    const allPaths = new Set([...baseFiles.keys(), ...leftFiles.keys(), ...rightFiles.keys()]);
 
     for (const path of allPaths) {
       const baseContent = baseFiles.get(path);
@@ -108,7 +120,7 @@ export class ConflictModel {
       if (this.mergeDriverRegistry) {
         const mergeResult = await this._tryMergeDriver(
           path,
-          {base: baseContent, ours: leftContent, theirs: rightContent},
+          { base: baseContent, ours: leftContent, theirs: rightContent },
           drivers,
           { baseChange, leftChange, rightChange }
         );
@@ -125,7 +137,10 @@ export class ConflictModel {
                   type: driverConflict.type || 'driver-conflict',
                   path,
                   sides: { base: baseContent, left: leftContent, right: rightContent },
-                  message: driverConflict.message || mergeResult.message || `Merge driver detected conflicts`,
+                  message:
+                    driverConflict.message ||
+                    mergeResult.message ||
+                    `Merge driver detected conflicts`,
                   driverResult: mergeResult,
                   driverFailed: mergeResult.driverFailed,
                   driverError: mergeResult.driverError,
@@ -167,6 +182,11 @@ export class ConflictModel {
 
   /**
    * Detect conflict for a single path
+   *
+   * @param {any} path
+   * @param {any} base
+   * @param {any} left
+   * @param {any} right
    */
   _detectPathConflict(path, base, left, right) {
     const baseExists = base !== undefined;
@@ -243,9 +263,12 @@ export class ConflictModel {
 
   /**
    * Create a conflict object
+   *
+   * @param {{ type: any, path: any, sides: any, message: any, driverFailed?: any, driverError?: any, driverResult?: any }} args
    */
   _createConflict({ type, path, sides, message, driverFailed, driverError }) {
     const conflictId = generateId('conflict');
+    /** @type {Record<string, any>} */
     const conflict = {
       conflictId,
       type,
@@ -269,6 +292,8 @@ export class ConflictModel {
 
   /**
    * Store a conflict
+   *
+   * @param {any} conflict
    */
   async addConflict(conflict) {
     this.conflicts.set(conflict.conflictId, conflict);
@@ -279,6 +304,8 @@ export class ConflictModel {
 
   /**
    * Get conflict by ID
+   *
+   * @param {any} conflictId
    */
   getConflict(conflictId) {
     return this.conflicts.get(conflictId);
@@ -286,6 +313,8 @@ export class ConflictModel {
 
   /**
    * Get conflict for a file path
+   *
+   * @param {any} path
    */
   getConflictForPath(path) {
     const conflictId = this.fileConflicts.get(path);
@@ -295,16 +324,18 @@ export class ConflictModel {
 
   /**
    * List all conflicts
+   *
+   * @param {Record<string, any>} [opts]
    */
   listConflicts(opts = {}) {
     let conflicts = Array.from(this.conflicts.values());
 
     if (opts.resolved !== undefined) {
-      conflicts = conflicts.filter(c => c.resolved === opts.resolved);
+      conflicts = conflicts.filter((c) => c.resolved === opts.resolved);
     }
 
     if (opts.type) {
-      conflicts = conflicts.filter(c => c.type === opts.type);
+      conflicts = conflicts.filter((c) => c.type === opts.type);
     }
 
     return conflicts;
@@ -312,6 +343,9 @@ export class ConflictModel {
 
   /**
    * Mark a conflict as resolved
+   *
+   * @param {any} conflictId
+   * @param {any} resolution
    */
   async resolveConflict(conflictId, resolution) {
     const conflict = this.conflicts.get(conflictId);
@@ -331,7 +365,7 @@ export class ConflictModel {
         // { side: 'ours' | 'theirs' | 'base' }
         if (!['ours', 'theirs', 'base'].includes(resolution.side)) {
           throw new JJError('INVALID_RESOLUTION', `Invalid side: ${resolution.side}`, {
-            suggestion: 'Use "ours", "theirs", or "base"'
+            suggestion: 'Use "ours", "theirs", or "base"',
           });
         }
         resolvedContent = { type: 'side', side: resolution.side };
@@ -359,6 +393,8 @@ export class ConflictModel {
 
   /**
    * Remove a conflict (after resolution is committed)
+   *
+   * @param {any} conflictId
    */
   async removeConflict(conflictId) {
     const conflict = this.conflicts.get(conflictId);
@@ -378,11 +414,12 @@ export class ConflictModel {
 
   /**
    * Create conflict markers for a content conflict (like Git's <<<<<<<, =======, >>>>>>>)
+   *
+   * @param {any} conflict
    */
   generateConflictMarkers(conflict) {
     if (conflict.type !== ConflictType.CONTENT) {
-      throw new JJError('INVALID_CONFLICT_TYPE',
-        'Can only generate markers for content conflicts');
+      throw new JJError('INVALID_CONFLICT_TYPE', 'Can only generate markers for content conflicts');
     }
 
     const { base, left, right } = conflict.sides;
@@ -400,9 +437,12 @@ export class ConflictModel {
 
   /**
    * Parse conflict markers from file content
+   *
+   * @param {any} content
    */
   parseConflictMarkers(content) {
-    const markerRegex = /^<{7} Left\n([\s\S]*?)\n\|{7} Base\n([\s\S]*?)\n={7}\n([\s\S]*?)\n>{7} Right$/gm;
+    const markerRegex =
+      /^<{7} Left\n([\s\S]*?)\n\|{7} Base\n([\s\S]*?)\n={7}\n([\s\S]*?)\n>{7} Right$/gm;
     const matches = markerRegex.exec(content);
 
     if (!matches) {
@@ -429,10 +469,10 @@ export class ConflictModel {
    * Try to use a merge driver for a file (v0.5)
    *
    * @param {string} path - File path
-   * @param {Object} content - Content versions { base, ours, theirs }
+   * @param {{ base?: string, ours?: string, theirs?: string }} content - Content versions { base, ours, theirs }
    * @param {Object} customDrivers - Per-merge custom drivers
    * @param {Object} metadata - Merge metadata
-   * @returns {Promise<Object|null>} Merge result or null if no driver
+   * @returns {Promise<Record<string, any>|null>} Merge result or null if no driver
    */
   async _tryMergeDriver(path, content, customDrivers, metadata) {
     if (!this.mergeDriverRegistry) {
@@ -469,7 +509,7 @@ export class ConflictModel {
    *
    * @param {string} workingCopyDir - Working copy directory
    * @param {string} filePath - File path
-   * @param {Object} result - Merge result
+   * @param {Record<string, any>} result - Merge result
    */
   async _writeDriverResult(workingCopyDir, filePath, result) {
     const fullPath = path.join(workingCopyDir, filePath);
