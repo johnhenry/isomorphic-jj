@@ -86,7 +86,7 @@ describe('Sparse Checkout', () => {
 
     it('should accept multiple patterns', async () => {
       await jj.sparse.set({
-        patterns: ['src/**', 'tests/**', 'README.md']
+        patterns: ['src/**', 'tests/**', 'README.md'],
       });
 
       const patterns = await jj.sparse.list();
@@ -139,7 +139,7 @@ describe('Sparse Checkout', () => {
 
       const patterns = await jj.sparse.list();
 
-      expect(patterns.filter(p => p === 'src/**').length).toBe(1);
+      expect(patterns.filter((p) => p === 'src/**').length).toBe(1);
     });
 
     it('should throw error when patterns parameter missing', async () => {

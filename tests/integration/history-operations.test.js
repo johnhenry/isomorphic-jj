@@ -33,7 +33,7 @@ describe('History Operations Integration', () => {
 
       expect(log.length).toBe(3);
       // Check that all changes are present
-      const descriptions = log.map(c => c.description);
+      const descriptions = log.map((c) => c.description);
       expect(descriptions).toContain('First change');
       expect(descriptions).toContain('Second change');
       expect(descriptions).toContain('Third change');
@@ -89,7 +89,7 @@ describe('History Operations Integration', () => {
       const log = await jj.log({ revset: 'author(Test)' });
 
       expect(log.length).toBeGreaterThan(0);
-      log.forEach(change => {
+      log.forEach((change) => {
         expect(change.author.name).toContain('Test');
       });
     });
@@ -111,7 +111,7 @@ describe('History Operations Integration', () => {
       const log = await jj.log({ revset: 'empty()' });
 
       expect(log.length).toBeGreaterThan(0);
-      log.forEach(change => {
+      log.forEach((change) => {
         expect(change.tree).toBe('0000000000000000000000000000000000000000');
       });
     });
@@ -264,10 +264,10 @@ describe('History Operations Integration', () => {
       const log = await jj.log({ limit: 10 });
 
       expect(log.length).toBe(4);
-      expect(log.map(c => c.description)).toContain('Root change');
-      expect(log.map(c => c.description)).toContain('Change 1');
-      expect(log.map(c => c.description)).toContain('Change 2');
-      expect(log.map(c => c.description)).toContain('Change 3');
+      expect(log.map((c) => c.description)).toContain('Root change');
+      expect(log.map((c) => c.description)).toContain('Change 1');
+      expect(log.map((c) => c.description)).toContain('Change 2');
+      expect(log.map((c) => c.description)).toContain('Change 3');
     });
 
     it('should allow editing any change from log', async () => {
@@ -276,7 +276,7 @@ describe('History Operations Integration', () => {
       await jj.new({ message: 'C' });
 
       const log = await jj.log();
-      const middleChange = log.find(c => c.description === 'B');
+      const middleChange = log.find((c) => c.description === 'B');
 
       await jj.edit({ changeId: middleChange.changeId });
 

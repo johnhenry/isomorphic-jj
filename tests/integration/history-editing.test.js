@@ -39,7 +39,7 @@ describe('History Editing Operations (v0.2)', () => {
       // Verify feature1 now has combined content
       const result = await jj.graph.getChange(feature1.changeId);
       expect(result.description).toContain('Feature part 1');
-      
+
       // Verify feature2 is marked as abandoned
       const source = await jj.graph.getChange(feature2.changeId);
       expect(source.abandoned).toBe(true);
@@ -58,12 +58,12 @@ describe('History Editing Operations (v0.2)', () => {
 
     it('should record abandon in operation log', async () => {
       const change = await jj.new({ message: 'Test' });
-      
+
       await jj.abandon({ changeId: change.changeId });
-      
+
       // Verify operation was recorded
       const ops = await jj.oplog.list();
-      const abandonOp = ops.find(op => op.description && op.description.includes('abandon'));
+      const abandonOp = ops.find((op) => op.description && op.description.includes('abandon'));
       expect(abandonOp).toBeDefined();
     });
   });
@@ -88,7 +88,7 @@ describe('History Editing Operations (v0.2)', () => {
       await jj.describe({ message: 'Base' });
       const branch1 = await jj.new({ message: 'Branch 1' });
       await jj.undo(); // Back to base
-      
+
       const branch2 = await jj.new({ message: 'Branch 2' });
       const feature = await jj.new({ message: 'Feature on branch 2' });
 

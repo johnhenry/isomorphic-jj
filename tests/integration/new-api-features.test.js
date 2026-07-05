@@ -108,7 +108,10 @@ describe('New API Features (v1.0)', () => {
 
     describe('file.write()', () => {
       it('should write files via file namespace', async () => {
-        const result = await jj.file.write({ path: 'namespace-test.txt', data: 'via file.write()' });
+        const result = await jj.file.write({
+          path: 'namespace-test.txt',
+          data: 'via file.write()',
+        });
         expect(result.path).toBe('namespace-test.txt');
 
         // Verify file was written
@@ -212,13 +215,13 @@ describe('New API Features (v1.0)', () => {
       });
 
       it('should throw error when missing arguments', async () => {
-        await expect(
-          jj.workspace.rename({ workspace: 'ws1' })
-        ).rejects.toThrow('Missing workspace or newName');
+        await expect(jj.workspace.rename({ workspace: 'ws1' })).rejects.toThrow(
+          'Missing workspace or newName'
+        );
 
-        await expect(
-          jj.workspace.rename({ newName: 'new-name' })
-        ).rejects.toThrow('Missing workspace or newName');
+        await expect(jj.workspace.rename({ newName: 'new-name' })).rejects.toThrow(
+          'Missing workspace or newName'
+        );
       });
     });
 
@@ -249,9 +252,9 @@ describe('New API Features (v1.0)', () => {
       });
 
       it('should throw error for non-existent workspace', async () => {
-        await expect(
-          jj.workspace.root({ workspace: 'nonexistent' })
-        ).rejects.toThrow('Workspace nonexistent not found');
+        await expect(jj.workspace.root({ workspace: 'nonexistent' })).rejects.toThrow(
+          'Workspace nonexistent not found'
+        );
       });
     });
 
@@ -326,9 +329,9 @@ describe('New API Features (v1.0)', () => {
           name: 'fresh',
         });
 
-        await expect(
-          jj.workspace.updateStale({ workspace: workspace.id })
-        ).rejects.toThrow('Workspace fresh is not stale');
+        await expect(jj.workspace.updateStale({ workspace: workspace.id })).rejects.toThrow(
+          'Workspace fresh is not stale'
+        );
       });
     });
   });
@@ -385,13 +388,9 @@ describe('New API Features (v1.0)', () => {
     });
 
     it('should throw error for invalid arguments', async () => {
-      await expect(
-        jj.rebase({ changeId: 'invalid' })
-      ).rejects.toThrow();
+      await expect(jj.rebase({ changeId: 'invalid' })).rejects.toThrow();
 
-      await expect(
-        jj.rebase({ newParent: 'invalid' })
-      ).rejects.toThrow();
+      await expect(jj.rebase({ newParent: 'invalid' })).rejects.toThrow();
     });
   });
 });

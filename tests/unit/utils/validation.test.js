@@ -21,7 +21,7 @@ describe('Validation', () => {
       expect(() => {
         validateChangeId(123);
       }).toThrow(JJError);
-      
+
       expect(() => {
         validateChangeId(123);
       }).toThrow('Change ID must be a string');
@@ -31,7 +31,7 @@ describe('Validation', () => {
       expect(() => {
         validateChangeId('abc123');
       }).toThrow(JJError);
-      
+
       expect(() => {
         validateChangeId('abc123');
       }).toThrow('must be 32 hexadecimal characters');
@@ -63,7 +63,7 @@ describe('Validation', () => {
       expect(() => {
         validatePath('../file.js');
       }).toThrow(JJError);
-      
+
       expect(() => {
         validatePath('src/../file.js');
       }).toThrow('Path traversal (..) not allowed');
@@ -78,11 +78,11 @@ describe('Validation', () => {
 
     it('should reject paths exceeding max length', () => {
       const longPath = 'a'.repeat(5000);
-      
+
       expect(() => {
         validatePath(longPath);
       }).toThrow(JJError);
-      
+
       expect(() => {
         validatePath(longPath);
       }).toThrow('exceeds maximum length');
@@ -108,11 +108,11 @@ describe('Validation', () => {
       expect(() => {
         validateBookmarkName('feature x');
       }).toThrow('invalid characters');
-      
+
       expect(() => {
         validateBookmarkName('feature*');
       }).toThrow(JJError);
-      
+
       expect(() => {
         validateBookmarkName('feature~');
       }).toThrow(JJError);
@@ -128,7 +128,7 @@ describe('Validation', () => {
       expect(() => {
         validateBookmarkName('.feature');
       }).toThrow(JJError);
-      
+
       expect(() => {
         validateBookmarkName('feature.');
       }).toThrow(JJError);

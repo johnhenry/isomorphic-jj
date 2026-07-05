@@ -134,9 +134,9 @@ describe('v1.5 features', () => {
       const second = await jj.describe({ message: 'second' });
       await jj.bookmark.set({ name: 'main', changeId: second.changeId });
 
-      await expect(
-        jj.bookmark.advance({ name: 'main', to: first.changeId })
-      ).rejects.toMatchObject({ code: 'BOOKMARK_NOT_ADVANCEABLE' });
+      await expect(jj.bookmark.advance({ name: 'main', to: first.changeId })).rejects.toMatchObject(
+        { code: 'BOOKMARK_NOT_ADVANCEABLE' }
+      );
     });
   });
 

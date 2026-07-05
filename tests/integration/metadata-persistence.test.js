@@ -33,7 +33,7 @@ describe('Metadata Persistence', () => {
           event_id: 'evt-123',
           event_type: 'user_message',
           sequence: 1,
-        }
+        },
       };
 
       await jj.commit({
@@ -44,7 +44,7 @@ describe('Metadata Persistence', () => {
       // commit() describes current change (adding metadata) then creates new one
       // So we need to check the parent (the described change)
       const log = await jj.log({ limit: 2 });
-      const committedChange = log.find(c => c.description === 'Test commit with metadata');
+      const committedChange = log.find((c) => c.description === 'Test commit with metadata');
       expect(committedChange).toBeDefined();
       expect(committedChange.metadata).toEqual(metadata);
     });
@@ -59,8 +59,8 @@ describe('Metadata Persistence', () => {
             name: 'calculator',
             args: { a: 1, b: 2 },
             result: 3,
-          }
-        }
+          },
+        },
       };
 
       await jj.commit({
@@ -69,7 +69,7 @@ describe('Metadata Persistence', () => {
       });
 
       const log = await jj.log();
-      const committedChange = log.find(c => c.description === 'Complex metadata');
+      const committedChange = log.find((c) => c.description === 'Complex metadata');
       expect(committedChange.metadata).toEqual(metadata);
       expect(committedChange.metadata.cess.tool_data.result).toBe(3);
     });
@@ -80,7 +80,7 @@ describe('Metadata Persistence', () => {
       });
 
       const log = await jj.log();
-      const committedChange = log.find(c => c.description === 'Commit without metadata');
+      const committedChange = log.find((c) => c.description === 'Commit without metadata');
       expect(committedChange).toBeDefined();
       expect(committedChange.metadata).toBeUndefined();
     });
@@ -97,9 +97,9 @@ describe('Metadata Persistence', () => {
       const log = await jj.log();
 
       // Find each commit and verify metadata
-      const commit1 = log.find(c => c.description === 'Commit 1');
-      const commit2 = log.find(c => c.description === 'Commit 2');
-      const commit3 = log.find(c => c.description === 'Commit 3');
+      const commit1 = log.find((c) => c.description === 'Commit 1');
+      const commit2 = log.find((c) => c.description === 'Commit 2');
+      const commit3 = log.find((c) => c.description === 'Commit 3');
 
       expect(commit1.metadata).toEqual(metadata1);
       expect(commit2.metadata).toEqual(metadata2);
@@ -113,7 +113,7 @@ describe('Metadata Persistence', () => {
         cess: {
           event_id: 'evt-describe',
           event_type: 'assistant_complete',
-        }
+        },
       };
 
       await jj.describe({
@@ -151,28 +151,28 @@ describe('Metadata Persistence', () => {
     it('should return metadata for all commits in log', async () => {
       await jj.commit({
         message: 'First',
-        metadata: { cess: { id: 1 } }
+        metadata: { cess: { id: 1 } },
       });
       await jj.commit({
         message: 'Second',
-        metadata: { cess: { id: 2 } }
+        metadata: { cess: { id: 2 } },
       });
 
       const log = await jj.log();
 
-      const withMetadata = log.filter(c => c.metadata !== undefined);
+      const withMetadata = log.filter((c) => c.metadata !== undefined);
       expect(withMetadata.length).toBeGreaterThanOrEqual(2);
     });
 
     it('should filter commits by revset and return metadata', async () => {
       await jj.commit({
         message: 'Test commit',
-        metadata: { cess: { test: true } }
+        metadata: { cess: { test: true } },
       });
 
       // Get all commits and find the one we created
       const log = await jj.log();
-      const committedChange = log.find(c => c.description === 'Test commit');
+      const committedChange = log.find((c) => c.description === 'Test commit');
       expect(committedChange).toBeDefined();
       expect(committedChange.metadata?.cess?.test).toBe(true);
     });
@@ -229,7 +229,7 @@ describe('Metadata Persistence', () => {
       });
 
       const log = await jj.log();
-      const committedChange = log.find(c => c.description === 'Empty metadata');
+      const committedChange = log.find((c) => c.description === 'Empty metadata');
       expect(committedChange.metadata).toEqual({});
     });
 
@@ -240,7 +240,7 @@ describe('Metadata Persistence', () => {
       });
 
       let log = await jj.log();
-      let committedChange = log.find(c => c.description === 'Null metadata');
+      let committedChange = log.find((c) => c.description === 'Null metadata');
       expect(committedChange.metadata).toBeNull();
 
       await jj.commit({
@@ -249,7 +249,7 @@ describe('Metadata Persistence', () => {
       });
 
       log = await jj.log();
-      committedChange = log.find(c => c.description === 'Undefined metadata');
+      committedChange = log.find((c) => c.description === 'Undefined metadata');
       expect(committedChange.metadata).toBeUndefined();
     });
 
@@ -271,7 +271,7 @@ describe('Metadata Persistence', () => {
       });
 
       const log = await jj.log();
-      const committedChange = log.find(c => c.description === 'Special metadata');
+      const committedChange = log.find((c) => c.description === 'Special metadata');
       expect(committedChange.metadata).toEqual(metadata);
     });
   });

@@ -1,6 +1,6 @@
 /**
  * OperationLog - Manages the append-only operation log
- * 
+ *
  * Records all repository mutations for complete undo/redo and time-travel.
  */
 
@@ -13,6 +13,7 @@ export class OperationLog {
    */
   constructor(storage) {
     this.storage = storage;
+    /** @type {any[]} */
     this.operations = [];
     this.headOperationId = null;
   }
@@ -39,9 +40,9 @@ export class OperationLog {
 
   /**
    * Record a new operation
-   * 
-   * @param {Object} operation - Operation to record (without id)
-   * @returns {Promise<Object>} Recorded operation with id
+   *
+   * @param {Record<string, any>} operation - Operation to record (without id)
+   * @returns {Promise<Record<string, any>>} Recorded operation with id
    */
   async recordOperation(operation) {
     // Ensure operations are loaded
@@ -76,20 +77,20 @@ export class OperationLog {
 
   /**
    * Get all operations
-   * 
-   * @returns {Promise<Array>} Array of all operations (chronological order)
+   *
+   * @returns {Promise<Array<any>>} Array of all operations (chronological order)
    */
   async list() {
     if (this.operations.length === 0 && this.headOperationId === null) {
       await this.load();
     }
-    
+
     return this.operations;
   }
 
   /**
    * Get the head (latest) operation
-   * 
+   *
    * @returns {Promise<Object|null>} Latest operation or null if log is empty
    */
   async getHeadOperation() {
@@ -102,10 +103,10 @@ export class OperationLog {
 
   /**
    * Undo the last operation
-   * 
+   *
    * Returns the view from the previous operation, allowing the caller
    * to restore repository state.
-   * 
+   *
    * @returns {Promise<Object>} View from previous operation
    */
   async undo() {
@@ -128,10 +129,10 @@ export class OperationLog {
     // Return view from parent operation
     const currentHead = this.operations[this.operations.length - 1];
     const parentId = currentHead.parents[0];
-    
+
     // Find parent operation
-    const parentOp = this.operations.find(op => op.id === parentId);
-    
+    const parentOp = this.operations.find((op) => op.id === parentId);
+
     if (!parentOp) {
       // If parent not found, return view from operation before current
       return this.operations[this.operations.length - 2].view;
@@ -142,7 +143,7 @@ export class OperationLog {
 
   /**
    * Get snapshot (view) at a specific operation
-   * 
+   *
    * @param {string} operationId - Operation ID
    * @returns {Promise<Object>} View from that operation
    */
@@ -151,8 +152,8 @@ export class OperationLog {
       await this.load();
     }
 
-    const operation = this.operations.find(op => op.id === operationId);
-    
+    const operation = this.operations.find((op) => op.id === operationId);
+
     if (!operation) {
       throw new JJError('OPERATION_NOT_FOUND', `Operation ${operationId} not found`, {
         operationId,
@@ -174,7 +175,7 @@ export class OperationLog {
       await this.load();
     }
 
-    return this.operations.find(op => op.id === operationId) || null;
+    return this.operations.find((op) => op.id === operationId) || null;
   }
 
   /**
@@ -199,7 +200,7 @@ export class OperationLog {
     }
 
     // Find the operation
-    const opIndex = this.operations.findIndex(op => op.id === operationId);
+    const opIndex = this.operations.findIndex((op) => op.id === operationId);
     if (opIndex === -1) {
       throw new JJError('OPERATION_NOT_FOUND', `Operation ${operationId} not found`, {
         operationId,
@@ -217,23 +218,20 @@ export class OperationLog {
     }
 
     // Find children (operations that reference this as a parent)
-    const children = this.operations.filter(op =>
-      op.parents && op.parents.includes(operationId)
-    );
+    const children = this.operations.filter((op) => op.parents && op.parents.includes(operationId));
 
     // Get the parent of the operation being abandoned (may be undefined for root)
-    const grandparentId = operation.parents && operation.parents.length > 0
-      ? operation.parents[0]
-      : undefined;
+    const grandparentId =
+      operation.parents && operation.parents.length > 0 ? operation.parents[0] : undefined;
 
     // Relink children to grandparent
     const relinkedChildren = [];
     for (const child of children) {
       // Replace references to abandoned operation with grandparent
       const oldParents = [...child.parents];
-      child.parents = child.parents.map(p =>
-        p === operationId ? grandparentId : p
-      ).filter(Boolean); // Remove undefined if there was no grandparent
+      child.parents = child.parents
+        .map((/** @type {any} */ p) => (p === operationId ? grandparentId : p))
+        .filter(Boolean); // Remove undefined if there was no grandparent
 
       // If there was no grandparent, the child becomes a root operation
       if (!grandparentId && child.parents.length === 0) {
@@ -252,15 +250,14 @@ export class OperationLog {
 
     // Update head if we abandoned the head operation
     if (this.headOperationId === operationId) {
-      this.headOperationId = this.operations.length > 0
-        ? this.operations[this.operations.length - 1].id
-        : null;
+      this.headOperationId =
+        this.operations.length > 0 ? this.operations[this.operations.length - 1].id : null;
     }
 
     // Rewrite JSONL file
-    const content = this.operations
-      .map(op => JSON.stringify(op))
-      .join('\n') + (this.operations.length > 0 ? '\n' : '');
+    const content =
+      this.operations.map((op) => JSON.stringify(op)).join('\n') +
+      (this.operations.length > 0 ? '\n' : '');
     await this.storage.write('repo/op_log/oplog.jsonl', content);
 
     return {

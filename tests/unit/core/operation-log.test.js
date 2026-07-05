@@ -35,7 +35,7 @@ describe('OperationLog', () => {
   describe('initialization', () => {
     it('should initialize empty operation log', async () => {
       await oplog.init();
-      
+
       const ops = await oplog.list();
       expect(ops).toEqual([]);
     });
@@ -68,7 +68,7 @@ describe('OperationLog', () => {
       };
 
       const op = await oplog.recordOperation(operation);
-      
+
       expect(op.id).toBeDefined();
       expect(op.id).toMatch(/^[0-9a-f]{64}$/);
       expect(op.description).toBe('test operation');
@@ -205,7 +205,7 @@ describe('OperationLog', () => {
       await oplog.recordOperation(op2);
 
       const previousView = await oplog.undo();
-      
+
       expect(previousView.bookmarks.main).toBe(tid(1));
       expect(previousView.workingCopy).toBe(tid(1));
     });
@@ -270,14 +270,16 @@ describe('OperationLog', () => {
       });
 
       const snapshot = await oplog.getSnapshotAt(op1.id);
-      
+
       expect(snapshot.bookmarks.main).toBe(tid(1));
       expect(snapshot.workingCopy).toBe(tid(1));
     });
 
     it('should throw for non-existent operation', async () => {
       await expect(oplog.getSnapshotAt(oid(999))).rejects.toThrow(JJError);
-      await expect(oplog.getSnapshotAt(oid(999))).rejects.toMatchObject({ code: 'OPERATION_NOT_FOUND' });
+      await expect(oplog.getSnapshotAt(oid(999))).rejects.toMatchObject({
+        code: 'OPERATION_NOT_FOUND',
+      });
     });
   });
 });

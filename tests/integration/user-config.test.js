@@ -308,9 +308,7 @@ describe('User Configuration', () => {
       await jj.userConfig.set('git.remote.origin', 'https://github.com/user/repo');
 
       // Get nested value
-      expect(jj.userConfig.get('git.remote.origin')).toBe(
-        'https://github.com/user/repo'
-      );
+      expect(jj.userConfig.get('git.remote.origin')).toBe('https://github.com/user/repo');
     });
   });
 

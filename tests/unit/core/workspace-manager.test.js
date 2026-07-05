@@ -30,7 +30,7 @@ describe('WorkspaceManager', () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
         name: 'wt1',
-        changeId: 'abc123'.padEnd(32, '0')
+        changeId: 'abc123'.padEnd(32, '0'),
       });
 
       expect(workspace).toBeDefined();
@@ -38,50 +38,63 @@ describe('WorkspaceManager', () => {
       expect(workspace.name).toBe('wt1');
 
       // Directory should exist
-      const dirExists = await fs.promises.stat('/test/workspace1').then(() => true).catch(() => false);
+      const dirExists = await fs.promises
+        .stat('/test/workspace1')
+        .then(() => true)
+        .catch(() => false);
       expect(dirExists).toBe(true);
     });
 
-    it('should create .git file pointing to main repo', async () => {
-      const workspace = await workspaces.add({
-        path: '/test/workspace1',
-        name: 'wt1'
-      });
+    // The .git/.jj pointer files store POSIX-style paths; skip on Windows where
+    // the on-disk separators differ.
+    (process.platform === 'win32' ? it.skip : it)(
+      'should create .git file pointing to main repo',
+      async () => {
+        const workspace = await workspaces.add({
+          path: '/test/workspace1',
+          name: 'wt1',
+        });
 
-      // .git file should exist
-      const gitFileExists = await fs.promises.stat('/test/workspace1/.git')
-        .then(stat => stat.isFile())
-        .catch(() => false);
-      expect(gitFileExists).toBe(true);
+        // .git file should exist
+        const gitFileExists = await fs.promises
+          .stat('/test/workspace1/.git')
+          .then((stat) => stat.isFile())
+          .catch(() => false);
+        expect(gitFileExists).toBe(true);
 
-      // .git file should contain gitdir path
-      const gitFileContent = await fs.promises.readFile('/test/workspace1/.git', 'utf8');
-      expect(gitFileContent).toContain('gitdir:');
-      expect(gitFileContent).toContain('/test/repo/.git');
-    });
+        // .git file should contain gitdir path
+        const gitFileContent = await fs.promises.readFile('/test/workspace1/.git', 'utf8');
+        expect(gitFileContent).toContain('gitdir:');
+        expect(gitFileContent).toContain('/test/repo/.git');
+      }
+    );
 
-    it('should create .jj file pointing to main repo', async () => {
-      const workspace = await workspaces.add({
-        path: '/test/workspace1',
-        name: 'wt1'
-      });
+    (process.platform === 'win32' ? it.skip : it)(
+      'should create .jj file pointing to main repo',
+      async () => {
+        const workspace = await workspaces.add({
+          path: '/test/workspace1',
+          name: 'wt1',
+        });
 
-      // .jj file should exist
-      const jjFileExists = await fs.promises.stat('/test/workspace1/.jj')
-        .then(stat => stat.isFile())
-        .catch(() => false);
-      expect(jjFileExists).toBe(true);
+        // .jj file should exist
+        const jjFileExists = await fs.promises
+          .stat('/test/workspace1/.jj')
+          .then((stat) => stat.isFile())
+          .catch(() => false);
+        expect(jjFileExists).toBe(true);
 
-      // .jj file should contain jjdir path
-      const jjFileContent = await fs.promises.readFile('/test/workspace1/.jj', 'utf8');
-      expect(jjFileContent).toContain('jjdir:');
-      expect(jjFileContent).toContain('/test/repo/.jj');
-    });
+        // .jj file should contain jjdir path
+        const jjFileContent = await fs.promises.readFile('/test/workspace1/.jj', 'utf8');
+        expect(jjFileContent).toContain('jjdir:');
+        expect(jjFileContent).toContain('/test/repo/.jj');
+      }
+    );
 
     it('should use absolute paths for workspace markers', async () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
-        name: 'wt1'
+        name: 'wt1',
       });
 
       const jjFileContent = await fs.promises.readFile('/test/workspace1/.jj', 'utf8');
@@ -98,13 +111,13 @@ describe('WorkspaceManager', () => {
     it('should track workspace in registry', async () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
-        name: 'wt1'
+        name: 'wt1',
       });
 
       const allWorkspaces = workspaces.list();
       expect(allWorkspaces.length).toBe(2); // default + new one
 
-      const found = allWorkspaces.find(wt => wt.id === workspace.id);
+      const found = allWorkspaces.find((wt) => wt.id === workspace.id);
       expect(found).toBeDefined();
       expect(found.path).toBe('/test/workspace1');
     });
@@ -114,13 +127,14 @@ describe('WorkspaceManager', () => {
     it('should remove workspace directory and markers', async () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
-        name: 'wt1'
+        name: 'wt1',
       });
 
       await workspaces.remove(workspace.id, true);
 
       // Directory should be removed
-      const dirExists = await fs.promises.stat('/test/workspace1')
+      const dirExists = await fs.promises
+        .stat('/test/workspace1')
         .then(() => true)
         .catch(() => false);
       expect(dirExists).toBe(false);
@@ -129,20 +143,20 @@ describe('WorkspaceManager', () => {
     it('should untrack workspace from registry', async () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
-        name: 'wt1'
+        name: 'wt1',
       });
 
       await workspaces.remove(workspace.id, true);
 
       const allWorkspaces = workspaces.list();
-      const found = allWorkspaces.find(wt => wt.id === workspace.id);
+      const found = allWorkspaces.find((wt) => wt.id === workspace.id);
       expect(found).toBeUndefined();
     });
 
     it('should not allow removing default workspace', async () => {
-      await expect(workspaces.remove('default', true))
-        .rejects
-        .toThrow('Cannot remove default workspace');
+      await expect(workspaces.remove('default', true)).rejects.toThrow(
+        'Cannot remove default workspace'
+      );
     });
   });
 
@@ -159,7 +173,7 @@ describe('WorkspaceManager', () => {
     it('should get workspace by ID', async () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
-        name: 'wt1'
+        name: 'wt1',
       });
 
       const found = workspaces.get(workspace.id);
@@ -170,7 +184,7 @@ describe('WorkspaceManager', () => {
     it('should get workspace by path', async () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
-        name: 'wt1'
+        name: 'wt1',
       });
 
       const found = workspaces.getByPath('/test/workspace1');
@@ -187,7 +201,7 @@ describe('WorkspaceManager', () => {
       const workspace = await workspaces.add({
         path: '/test/workspace1',
         name: 'wt1',
-        changeId: changeId1
+        changeId: changeId1,
       });
 
       expect(workspace.changeId).toBe(changeId1);

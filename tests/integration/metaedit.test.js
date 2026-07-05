@@ -194,9 +194,7 @@ describe('metaedit()', () => {
       await jj.write({ path: 'file.txt', data: 'content' });
       const change = await jj.describe({ message: 'Original' });
 
-      await expect(
-        jj.metaedit({ revision: change.changeId })
-      ).rejects.toMatchObject({
+      await expect(jj.metaedit({ revision: change.changeId })).rejects.toMatchObject({
         code: 'INVALID_ARGUMENT',
         message: expect.stringContaining('metadata'),
       });

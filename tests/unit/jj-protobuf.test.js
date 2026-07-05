@@ -107,14 +107,14 @@ describe('JJ Protobuf Encoding', () => {
           path: 'README.md',
           mtime: Date.now(),
           size: 100,
-          fileType: 0 // Normal
+          fileType: 0, // Normal
         },
         {
           path: 'src/main.js',
           mtime: Date.now(),
           size: 500,
-          fileType: 2 // Executable
-        }
+          fileType: 2, // Executable
+        },
       ];
 
       await treeState.writeTreeState(treeId, fileStates);
@@ -134,8 +134,8 @@ describe('JJ Protobuf Encoding', () => {
           path: 'test.txt',
           mtime: 1234567890000,
           size: 42,
-          fileType: 0
-        }
+          fileType: 0,
+        },
       ];
 
       await treeState.writeTreeState(treeId, fileStates);
@@ -165,7 +165,7 @@ describe('JJ Protobuf Encoding', () => {
         hostname: 'test-host',
         username: 'test-user',
         is_snapshot: false,
-        tags: {}
+        tags: {},
       };
 
       await opStore.writeOperation(operationId, viewId, parentIds, metadata);
@@ -189,7 +189,7 @@ describe('JJ Protobuf Encoding', () => {
         hostname: 'localhost',
         username: 'testuser',
         is_snapshot: true,
-        tags: { test: 'value' }
+        tags: { test: 'value' },
       };
 
       await opStore.writeOperation(operationId, viewId, parentIds, metadata);
@@ -198,7 +198,7 @@ describe('JJ Protobuf Encoding', () => {
       const decoded = await opStore.readOperation(operationId);
 
       expect(decoded.view_id).toBeDefined();
-      expect(decoded.parents).toEqual(parentIds.map(p => Buffer.from(p, 'hex')));
+      expect(decoded.parents).toEqual(parentIds.map((p) => Buffer.from(p, 'hex')));
       expect(decoded.metadata.description).toBe('test commit');
       expect(decoded.metadata.hostname).toBe('localhost');
       expect(decoded.metadata.username).toBe('testuser');
@@ -216,7 +216,7 @@ describe('JJ Protobuf Encoding', () => {
         hostname: 'host',
         username: 'user',
         is_snapshot: false,
-        tags: {}
+        tags: {},
       };
 
       await opStore.writeOperation(operationId, viewId, [], metadata);
@@ -245,13 +245,10 @@ describe('JJ Protobuf Encoding', () => {
     it('should encode and decode view', async () => {
       const viewStore = new JJViewStore(fs, testDir);
       const viewId = 'abc123' + '0'.repeat(122);
-      const headIds = [
-        '111111' + '0'.repeat(122),
-        '222222' + '0'.repeat(122)
-      ];
+      const headIds = ['111111' + '0'.repeat(122), '222222' + '0'.repeat(122)];
       const wcCommitIds = {
         default: '333333' + '0'.repeat(122),
-        other: '444444' + '0'.repeat(122)
+        other: '444444' + '0'.repeat(122),
       };
 
       await viewStore.writeView(viewId, headIds, wcCommitIds);

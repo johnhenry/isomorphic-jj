@@ -1,0 +1,3 @@
+# Normalize line endings to LF on checkout across all platforms so that
+# Prettier's `format:check` (which expects LF) passes on Windows CI too.
+* text=auto eol=lf

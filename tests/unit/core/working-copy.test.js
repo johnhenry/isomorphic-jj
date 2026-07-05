@@ -31,7 +31,7 @@ describe('WorkingCopy', () => {
   describe('initialization', () => {
     it('should initialize working copy state', async () => {
       await workingCopy.init(tid(1));
-      
+
       const state = await workingCopy.getState();
       expect(state.changeId).toBe(tid(1));
       expect(state.fileStates).toEqual({});
@@ -50,7 +50,7 @@ describe('WorkingCopy', () => {
   describe('getCurrentChangeId', () => {
     it('should return current change ID', async () => {
       await workingCopy.init(tid(2));
-      
+
       const changeId = workingCopy.getCurrentChangeId();
       expect(changeId).toBe(tid(2));
     });
@@ -63,7 +63,7 @@ describe('WorkingCopy', () => {
 
     it('should update current change ID', async () => {
       await workingCopy.setCurrentChange(tid(4));
-      
+
       const changeId = workingCopy.getCurrentChangeId();
       expect(changeId).toBe(tid(4));
     });

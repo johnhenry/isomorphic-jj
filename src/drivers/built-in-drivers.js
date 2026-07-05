@@ -8,10 +8,10 @@
  * Deep merge for JSON objects
  * Recursively merges objects, with theirs taking precedence on conflicts
  *
- * @param {Object} base - Base object
- * @param {Object} ours - Our changes
- * @param {Object} theirs - Their changes
- * @returns {Object} Merged object
+ * @param {any} base - Base object
+ * @param {any} ours - Our changes
+ * @param {any} theirs - Their changes
+ * @returns {Record<string, any>|null} Merged object
  */
 function deepMergeJSON(base, ours, theirs) {
   // If all are identical, return any
@@ -30,7 +30,12 @@ function deepMergeJSON(base, ours, theirs) {
   }
 
   // Both sides changed - need smart merge
-  if (typeof ours !== 'object' || typeof theirs !== 'object' || Array.isArray(ours) || Array.isArray(theirs)) {
+  if (
+    typeof ours !== 'object' ||
+    typeof theirs !== 'object' ||
+    Array.isArray(ours) ||
+    Array.isArray(theirs)
+  ) {
     // Primitives or arrays - conflict
     return null;
   }
@@ -61,7 +66,12 @@ function deepMergeJSON(base, ours, theirs) {
       result[key] = oursVal;
     } else {
       // Both changed differently
-      if (typeof oursVal === 'object' && typeof theirsVal === 'object' && !Array.isArray(oursVal) && !Array.isArray(theirsVal)) {
+      if (
+        typeof oursVal === 'object' &&
+        typeof theirsVal === 'object' &&
+        !Array.isArray(oursVal) &&
+        !Array.isArray(theirsVal)
+      ) {
         // Recurse for nested objects
         const merged = deepMergeJSON(baseVal || {}, oursVal, theirsVal);
         if (merged === null) {
@@ -83,6 +93,8 @@ function deepMergeJSON(base, ours, theirs) {
  *
  * Attempts to merge JSON files intelligently by merging objects.
  * Falls back to conflict markers if merge isn't possible.
+ *
+ * @param {{ path?: string, content: { base?: string, ours?: string, theirs?: string } }} args
  */
 export async function jsonDriver({ content }) {
   const { base, ours, theirs } = content;
@@ -106,10 +118,12 @@ export async function jsonDriver({ content }) {
       return {
         content: conflictContent,
         hasConflict: true,
-        conflicts: [{
-          type: 'json-merge-conflict',
-          message: 'Both sides modified the same field with different values',
-        }],
+        conflicts: [
+          {
+            type: 'json-merge-conflict',
+            message: 'Both sides modified the same field with different values',
+          },
+        ],
       };
     }
   } catch (error) {
@@ -118,10 +132,12 @@ export async function jsonDriver({ content }) {
     return {
       content: conflictContent,
       hasConflict: true,
-      conflicts: [{
-        type: 'json-parse-error',
-        message: `JSON parsing failed: ${error.message}`,
-      }],
+      conflicts: [
+        {
+          type: 'json-parse-error',
+          message: `JSON parsing failed: ${error.message}`,
+        },
+      ],
     };
   }
 }
@@ -133,6 +149,8 @@ export async function jsonDriver({ content }) {
  * - Union merge for dependencies/devDependencies
  * - Take theirs for version (semver conflicts are hard)
  * - Merge other fields intelligently
+ *
+ * @param {{ path?: string, content: { base?: string, ours?: string, theirs?: string } }} args
  */
 export async function packageJsonDriver({ content }) {
   const { base, ours, theirs } = content;
@@ -147,12 +165,17 @@ export async function packageJsonDriver({ content }) {
 
     // Merge top-level fields
     for (const key of Object.keys({ ...oursObj, ...theirsObj })) {
-      if (key === 'dependencies' || key === 'devDependencies' || key === 'peerDependencies' || key === 'optionalDependencies') {
+      if (
+        key === 'dependencies' ||
+        key === 'devDependencies' ||
+        key === 'peerDependencies' ||
+        key === 'optionalDependencies'
+      ) {
         // Union merge dependencies
         merged[key] = {
           ...baseObj[key],
           ...oursObj[key],
-          ...theirsObj[key],  // theirs wins on conflicts
+          ...theirsObj[key], // theirs wins on conflicts
         };
       } else if (key === 'version') {
         // Version conflicts are tricky - take theirs
@@ -162,7 +185,7 @@ export async function packageJsonDriver({ content }) {
         merged[key] = {
           ...baseObj[key],
           ...oursObj[key],
-          ...theirsObj[key],  // theirs wins
+          ...theirsObj[key], // theirs wins
         };
       } else {
         // Other fields - use standard logic
@@ -198,10 +221,12 @@ export async function packageJsonDriver({ content }) {
     return {
       content: conflictContent,
       hasConflict: true,
-      conflicts: [{
-        type: 'parse-error',
-        message: `package.json parsing failed: ${error.message}`,
-      }],
+      conflicts: [
+        {
+          type: 'parse-error',
+          message: `package.json parsing failed: ${error.message}`,
+        },
+      ],
     };
   }
 }
@@ -237,10 +262,12 @@ export async function yamlDriver({ content }) {
   return {
     content: conflictContent,
     hasConflict: true,
-    conflicts: [{
-      type: 'yaml-conflict',
-      message: 'YAML files modified on both sides',
-    }],
+    conflicts: [
+      {
+        type: 'yaml-conflict',
+        message: 'YAML files modified on both sides',
+      },
+    ],
   };
 }
 
@@ -276,10 +303,12 @@ export async function markdownDriver({ content }) {
   return {
     content: conflictContent,
     hasConflict: true,
-    conflicts: [{
-      type: 'markdown-conflict',
-      message: 'Markdown files modified on both sides',
-    }],
+    conflicts: [
+      {
+        type: 'markdown-conflict',
+        message: 'Markdown files modified on both sides',
+      },
+    ],
   };
 }
 

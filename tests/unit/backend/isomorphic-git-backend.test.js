@@ -75,12 +75,12 @@ describe('IsomorphicGitBackend', () => {
     });
 
     test('should throw NOT_FOUND for non-existent object', async () => {
-      await expect(
-        backend.getObject('0000000000000000000000000000000000000000')
-      ).rejects.toThrow(JJError);
-      await expect(
-        backend.getObject('0000000000000000000000000000000000000000')
-      ).rejects.toThrow('not found');
+      await expect(backend.getObject('0000000000000000000000000000000000000000')).rejects.toThrow(
+        JJError
+      );
+      await expect(backend.getObject('0000000000000000000000000000000000000000')).rejects.toThrow(
+        'not found'
+      );
     });
 
     test('should deduplicate identical objects', async () => {
@@ -203,17 +203,17 @@ describe('IsomorphicGitBackend', () => {
 
   describe('fetch (network operations)', () => {
     test('should throw error if http not provided', async () => {
-      await expect(
-        backend.fetch({ remote: 'origin', refs: ['main'] })
-      ).rejects.toThrow('HTTP client not provided');
+      await expect(backend.fetch({ remote: 'origin', refs: ['main'] })).rejects.toThrow(
+        'HTTP client not provided'
+      );
     });
   });
 
   describe('push (network operations)', () => {
     test('should throw error if http not provided', async () => {
-      await expect(
-        backend.push({ remote: 'origin', refs: ['main'] })
-      ).rejects.toThrow('HTTP client not provided');
+      await expect(backend.push({ remote: 'origin', refs: ['main'] })).rejects.toThrow(
+        'HTTP client not provided'
+      );
     });
   });
 });

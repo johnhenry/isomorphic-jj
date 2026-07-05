@@ -51,7 +51,8 @@ export function createBrowserFS(opts = {}) {
   } catch (error) {
     throw new Error(
       'LightningFS not found. Install it with: npm install @isomorphic-git/lightning-fs\n' +
-      'Original error: ' + error.message
+        'Original error: ' +
+        error.message
     );
   }
 }
@@ -182,7 +183,10 @@ export function detectCapabilities() {
     environment: 'browser',
     indexedDB: typeof indexedDB !== 'undefined',
     serviceWorker: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
-    persistentStorage: typeof navigator !== 'undefined' && navigator.storage && typeof navigator.storage.persist === 'function',
+    persistentStorage:
+      typeof navigator !== 'undefined' &&
+      navigator.storage &&
+      typeof navigator.storage.persist === 'function',
     sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
     webWorker: typeof Worker !== 'undefined',
   };

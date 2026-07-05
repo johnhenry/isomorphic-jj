@@ -15,7 +15,7 @@ import path from 'path';
 export class WorkspaceManager {
   /**
    * @param {Storage} storage - Storage manager instance
-   * @param {Object} fs - Filesystem implementation
+   * @param {any} fs - Filesystem implementation
    * @param {string} repoDir - Repository directory
    */
   constructor(storage, fs, repoDir) {

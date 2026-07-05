@@ -41,9 +41,7 @@ describe('Unsupported Feature Stubs', () => {
         await jj.write({ path: 'test.txt', data: 'test' });
         const change = await jj.describe({ message: 'Test' });
 
-        await expect(
-          jj.diffedit({ revision: change.changeId })
-        ).rejects.toMatchObject({
+        await expect(jj.diffedit({ revision: change.changeId })).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
           message: expect.stringContaining('interactive'),
         });
@@ -76,9 +74,7 @@ describe('Unsupported Feature Stubs', () => {
 
     describe('Interactive squash', () => {
       it('should throw error for squash({ interactive: true })', async () => {
-        await expect(
-          jj.squash({ interactive: true })
-        ).rejects.toMatchObject({
+        await expect(jj.squash({ interactive: true })).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
           message: expect.stringContaining('Interactive'),
         });
@@ -87,9 +83,7 @@ describe('Unsupported Feature Stubs', () => {
 
     describe('resolve() with external tool', () => {
       it('should throw error when tool specified', async () => {
-        await expect(
-          jj.resolve({ path: 'file.txt', tool: 'vimdiff' })
-        ).rejects.toMatchObject({
+        await expect(jj.resolve({ path: 'file.txt', tool: 'vimdiff' })).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
           message: expect.stringContaining('External merge tool'),
         });
@@ -109,9 +103,7 @@ describe('Unsupported Feature Stubs', () => {
   describe('External Tool Integration', () => {
     describe('fix()', () => {
       it('should throw error explaining formatters not supported', async () => {
-        await expect(
-          jj.fix({ source: '@' })
-        ).rejects.toMatchObject({
+        await expect(jj.fix({ source: '@' })).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
           message: expect.stringContaining('formatting'),
         });
@@ -130,34 +122,26 @@ describe('Unsupported Feature Stubs', () => {
 
     describe('util commands', () => {
       it('should throw error for util.completion()', async () => {
-        await expect(
-          jj.util.completion()
-        ).rejects.toMatchObject({
+        await expect(jj.util.completion()).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
           message: expect.stringContaining('CLI-specific'),
         });
       });
 
       it('should throw error for util.gc()', async () => {
-        await expect(
-          jj.util.gc()
-        ).rejects.toMatchObject({
+        await expect(jj.util.gc()).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
         });
       });
 
       it('should throw error for util.exec()', async () => {
-        await expect(
-          jj.util.exec({ command: 'echo test' })
-        ).rejects.toMatchObject({
+        await expect(jj.util.exec({ command: 'echo test' })).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
         });
       });
 
       it('should throw error for util.configSchema()', async () => {
-        await expect(
-          jj.util.configSchema()
-        ).rejects.toMatchObject({
+        await expect(jj.util.configSchema()).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
         });
       });
@@ -167,9 +151,7 @@ describe('Unsupported Feature Stubs', () => {
   describe('Platform-Specific Features', () => {
     describe('gerrit', () => {
       it('should throw error for gerrit.upload()', async () => {
-        await expect(
-          jj.gerrit.upload({ change: 'abc' })
-        ).rejects.toMatchObject({
+        await expect(jj.gerrit.upload({ change: 'abc' })).rejects.toMatchObject({
           code: 'UNSUPPORTED_OPERATION',
           message: expect.stringContaining('Gerrit'),
         });

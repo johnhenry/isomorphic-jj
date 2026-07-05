@@ -46,12 +46,10 @@ function isBinaryContent(content) {
   if (content.indexOf('\0') !== -1) return true;
 
   // Check for high ratio of non-printable characters
-  const nonPrintable = content.split('').filter(
-    (char) => {
-      const code = char.charCodeAt(0);
-      return code < 32 && code !== 9 && code !== 10 && code !== 13;
-    }
-  ).length;
+  const nonPrintable = content.split('').filter((char) => {
+    const code = char.charCodeAt(0);
+    return code < 32 && code !== 9 && code !== 10 && code !== 13;
+  }).length;
 
   const ratio = nonPrintable / content.length;
   return ratio > 0.3;
@@ -60,8 +58,8 @@ function isBinaryContent(content) {
 /**
  * Default merge driver - standard three-way text merge
  *
- * @param {MergeContext} context
- * @returns {Promise<MergeResult>}
+ * @param {{ content: { base?: string, ours?: string, theirs?: string } }} context
+ * @returns {Promise<Record<string, any>>}
  */
 async function defaultMergeDriver(context) {
   const { content } = context;
@@ -88,10 +86,12 @@ async function defaultMergeDriver(context) {
   return {
     content: conflictMarkers,
     hasConflict: true,
-    conflicts: [{
-      type: 'content',
-      sides: ['ours', 'theirs'],
-    }],
+    conflicts: [
+      {
+        type: 'content',
+        sides: ['ours', 'theirs'],
+      },
+    ],
   };
 }
 
@@ -102,14 +102,14 @@ async function defaultMergeDriver(context) {
  * @param {Object} options - Wrapper options
  * @param {number} [options.timeout=5000] - Timeout in ms
  * @param {boolean} [options.strict=false] - Throw on error instead of falling back
- * @param {Object} [options.jj] - JJ instance for event emission
+ * @param {any} [options.jj] - JJ instance for event emission
  * @param {string} [options.pattern] - Pattern that matched this driver
  * @returns {Function} Wrapped driver
  */
 function wrapDriver(driver, options = {}) {
   const { timeout = 5000, strict = false, jj = null, pattern = null } = options;
 
-  return async (context) => {
+  return async (/** @type {any} */ context) => {
     let timeoutId;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => reject(new Error('Driver timeout')), timeout);
@@ -120,10 +120,7 @@ function wrapDriver(driver, options = {}) {
     });
 
     try {
-      const result = await Promise.race([
-        driver(context),
-        timeoutPromise,
-      ]);
+      const result = await Promise.race([driver(context), timeoutPromise]);
 
       // Clear timeout if driver completed successfully
       clearTimeout(timeoutId);
@@ -140,14 +137,16 @@ function wrapDriver(driver, options = {}) {
 
       // Emit driver:failed event if jj instance available
       if (jj && jj.dispatchEvent) {
-        jj.dispatchEvent(new CustomEvent('driver:failed', {
-          detail: {
-            path: context.path,
-            pattern: pattern,
-            error: error.message,
-            timestamp: new Date().toISOString(),
-          },
-        }));
+        jj.dispatchEvent(
+          new CustomEvent('driver:failed', {
+            detail: {
+              path: context.path,
+              pattern: pattern,
+              error: error.message,
+              timestamp: new Date().toISOString(),
+            },
+          })
+        );
       }
 
       // In strict mode, throw the error
@@ -170,16 +169,20 @@ function wrapDriver(driver, options = {}) {
  * MergeDriverRegistry manages custom merge drivers
  */
 export class MergeDriverRegistry {
+  /**
+   * @param {any} [jj]
+   */
   constructor(jj = null) {
-    /** @type {Array<{pattern: string, driver: Function, accepts: Object, strict: boolean}>} */
+    /** @type {Array<{pattern: string, driver: Function, accepts: any, strict: boolean}>} */
     this.drivers = [];
+    /** @type {any} */
     this.jj = jj; // JJ instance for event emission
   }
 
   /**
    * Register one or more merge drivers
    *
-   * @param {Object<string, Function|Object>} drivers - Pattern -> driver map
+   * @param {Record<string, any>} drivers - Pattern -> driver map
    *
    * @example
    * registry.register({
@@ -206,11 +209,9 @@ export class MergeDriverRegistry {
       }
 
       if (typeof driver !== 'function') {
-        throw new JJError(
-          'INVALID_DRIVER',
-          `Driver for pattern "${pattern}" must be a function`,
-          { pattern }
-        );
+        throw new JJError('INVALID_DRIVER', `Driver for pattern "${pattern}" must be a function`, {
+          pattern,
+        });
       }
 
       // Wrap driver with error handling
@@ -325,7 +326,7 @@ export class MergeDriverRegistry {
    * @param {string|Buffer|null} context.theirs - Their content
    * @param {Object} context.metadata - Metadata
    * @param {boolean} isBinary - Whether content is binary
-   * @returns {Promise<MergeResult>}
+   * @returns {Promise<Record<string, any>>}
    */
   async executeDriver(driver, context, isBinary) {
     const { base, ours, theirs, ...rest } = context;
@@ -381,11 +382,30 @@ export class MergeDriverRegistry {
   isBinaryFile(path, content) {
     // Check by extension first
     const binaryExtensions = [
-      '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico',
-      '.zip', '.tar', '.gz', '.bz2', '.7z',
-      '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-      '.exe', '.dll', '.so', '.dylib',
-      '.mp3', '.mp4', '.avi', '.mov',
+      '.png',
+      '.jpg',
+      '.jpeg',
+      '.gif',
+      '.bmp',
+      '.ico',
+      '.zip',
+      '.tar',
+      '.gz',
+      '.bz2',
+      '.7z',
+      '.pdf',
+      '.doc',
+      '.docx',
+      '.xls',
+      '.xlsx',
+      '.exe',
+      '.dll',
+      '.so',
+      '.dylib',
+      '.mp3',
+      '.mp4',
+      '.avi',
+      '.mov',
     ];
 
     const ext = path.substring(path.lastIndexOf('.')).toLowerCase();
@@ -412,11 +432,30 @@ export class MergeDriverRegistry {
  */
 export function isBinaryFile(path, content) {
   const binaryExtensions = [
-    '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico',
-    '.zip', '.tar', '.gz', '.bz2', '.7z',
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-    '.exe', '.dll', '.so', '.dylib',
-    '.mp3', '.mp4', '.avi', '.mov',
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.gif',
+    '.bmp',
+    '.ico',
+    '.zip',
+    '.tar',
+    '.gz',
+    '.bz2',
+    '.7z',
+    '.pdf',
+    '.doc',
+    '.docx',
+    '.xls',
+    '.xlsx',
+    '.exe',
+    '.dll',
+    '.so',
+    '.dylib',
+    '.mp3',
+    '.mp4',
+    '.avi',
+    '.mov',
   ];
 
   const ext = path.substring(path.lastIndexOf('.')).toLowerCase();

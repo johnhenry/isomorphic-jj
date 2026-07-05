@@ -31,7 +31,7 @@ describe('BookmarkStore', () => {
   describe('initialization', () => {
     it('should initialize empty bookmark store', async () => {
       await bookmarks.init();
-      
+
       const all = await bookmarks.list();
       expect(all).toEqual([]);
     });
@@ -53,14 +53,14 @@ describe('BookmarkStore', () => {
 
     it('should set a bookmark', async () => {
       await bookmarks.set('main', tid(1));
-      
+
       const target = await bookmarks.get('main');
       expect(target).toBe(tid(1));
     });
 
     it('should throw if bookmark already exists', async () => {
       await bookmarks.set('main', tid(1));
-      
+
       await expect(bookmarks.set('main', tid(2))).rejects.toMatchObject({
         code: 'BOOKMARK_EXISTS',
       });
@@ -68,11 +68,11 @@ describe('BookmarkStore', () => {
 
     it('should persist bookmark to storage', async () => {
       await bookmarks.set('feature-x', tid(5));
-      
+
       // Create new instance and load
       const bookmarks2 = new BookmarkStore(storage);
       await bookmarks2.load();
-      
+
       const target = await bookmarks2.get('feature-x');
       expect(target).toBe(tid(5));
     });
@@ -86,7 +86,7 @@ describe('BookmarkStore', () => {
     it('should move existing bookmark', async () => {
       await bookmarks.set('main', tid(1));
       await bookmarks.move('main', tid(2));
-      
+
       const target = await bookmarks.get('main');
       expect(target).toBe(tid(2));
     });
@@ -106,7 +106,7 @@ describe('BookmarkStore', () => {
     it('should delete bookmark', async () => {
       await bookmarks.set('feature-x', tid(1));
       await bookmarks.delete('feature-x');
-      
+
       const target = await bookmarks.get('feature-x');
       expect(target).toBeNull();
     });
@@ -127,7 +127,7 @@ describe('BookmarkStore', () => {
       await bookmarks.set('main', tid(1));
       await bookmarks.set('develop', tid(2));
       await bookmarks.set('feature-x', tid(3));
-      
+
       const all = await bookmarks.list();
 
       expect(all).toHaveLength(3);
@@ -149,7 +149,7 @@ describe('BookmarkStore', () => {
 
     it('should get bookmark target', async () => {
       await bookmarks.set('main', tid(5));
-      
+
       const target = await bookmarks.get('main');
       expect(target).toBe(tid(5));
     });
@@ -167,7 +167,7 @@ describe('BookmarkStore', () => {
 
     it('should set remote bookmark', async () => {
       await bookmarks.setRemote('origin', 'main', tid(10));
-      
+
       const target = await bookmarks.getRemote('origin', 'main');
       expect(target).toBe(tid(10));
     });
@@ -176,9 +176,9 @@ describe('BookmarkStore', () => {
       await bookmarks.setRemote('origin', 'main', tid(1));
       await bookmarks.setRemote('origin', 'develop', tid(2));
       await bookmarks.setRemote('upstream', 'main', tid(3));
-      
+
       const all = await bookmarks.list();
-      
+
       const remoteBms = all.filter((b) => b.remote !== null);
       expect(remoteBms).toHaveLength(3);
     });

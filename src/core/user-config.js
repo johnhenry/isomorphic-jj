@@ -80,6 +80,8 @@ export class UserConfig {
 
   /**
    * Deep merge two config objects (workspace overrides global)
+   * @param {any} target - Base config object
+   * @param {any} source - Overriding config object
    * @private
    */
   _deepMerge(target, source) {
@@ -171,7 +173,7 @@ export class UserConfig {
     }
 
     const parts = key.split('.');
-    const lastPart = parts.pop();
+    const lastPart = /** @type {string} */ (parts.pop());
     let target = this.config;
 
     for (const part of parts) {

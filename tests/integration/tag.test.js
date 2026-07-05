@@ -71,24 +71,18 @@ describe('Tag Management', () => {
 
       await jj.tag.create({ name: 'v1.0.0' });
 
-      await expect(
-        jj.tag.create({ name: 'v1.0.0' })
-      ).rejects.toMatchObject({
+      await expect(jj.tag.create({ name: 'v1.0.0' })).rejects.toMatchObject({
         code: 'TAG_EXISTS',
         message: expect.stringContaining('already exists'),
       });
     });
 
     it('should validate tag name format', async () => {
-      await expect(
-        jj.tag.create({ name: 'invalid name with spaces' })
-      ).rejects.toMatchObject({
+      await expect(jj.tag.create({ name: 'invalid name with spaces' })).rejects.toMatchObject({
         code: 'INVALID_TAG_NAME',
       });
 
-      await expect(
-        jj.tag.create({ name: '' })
-      ).rejects.toMatchObject({
+      await expect(jj.tag.create({ name: '' })).rejects.toMatchObject({
         code: 'INVALID_TAG_NAME',
       });
     });
@@ -116,11 +110,7 @@ describe('Tag Management', () => {
       const tags = await jj.tag.list();
 
       expect(tags).toHaveLength(3);
-      expect(tags.map((t) => t.name).sort()).toEqual([
-        'v1.0.0',
-        'v1.1.0',
-        'v2.0.0',
-      ]);
+      expect(tags.map((t) => t.name).sort()).toEqual(['v1.0.0', 'v1.1.0', 'v2.0.0']);
     });
 
     it('should include changeId for each tag', async () => {
@@ -179,9 +169,7 @@ describe('Tag Management', () => {
     });
 
     it('should throw error when deleting nonexistent tag', async () => {
-      await expect(
-        jj.tag.delete({ name: 'nonexistent' })
-      ).rejects.toMatchObject({
+      await expect(jj.tag.delete({ name: 'nonexistent' })).rejects.toMatchObject({
         code: 'TAG_NOT_FOUND',
         message: expect.stringContaining('not found'),
       });

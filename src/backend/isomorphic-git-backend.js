@@ -15,16 +15,16 @@ import crypto from 'crypto';
 
 /**
  * Backend adapter for isomorphic-git
- * 
+ *
  * @class IsomorphicGitBackend
  */
 export class IsomorphicGitBackend {
   /**
    * Create isomorphic-git backend
-   * 
+   *
    * @param {Object} options - Backend options
-   * @param {Object} options.fs - Filesystem implementation (Node fs or LightningFS)
-   * @param {Object} [options.http] - HTTP client for network operations
+   * @param {any} options.fs - Filesystem implementation (Node fs or LightningFS)
+   * @param {any} [options.http] - HTTP client for network operations
    * @param {string} options.dir - Repository directory path
    */
   constructor({ fs, http, dir }) {
@@ -36,11 +36,9 @@ export class IsomorphicGitBackend {
       );
     }
     if (!dir) {
-      throw new JJError(
-        'INVALID_BACKEND_CONFIG',
-        'Repository directory (dir) is required',
-        { suggestion: 'Provide dir option with repository path' }
-      );
+      throw new JJError('INVALID_BACKEND_CONFIG', 'Repository directory (dir) is required', {
+        suggestion: 'Provide dir option with repository path',
+      });
     }
 
     this.fs = fs;
@@ -65,21 +63,19 @@ export class IsomorphicGitBackend {
 
       // Create .jj/repo structure for jj CLI compatibility
       await this._createJJRepoStructure();
-
     } catch (error) {
-      throw new JJError(
-        'INIT_FAILED',
-        `Failed to initialize Git repository: ${error.message}`,
-        { dir: this.dir, originalError: error }
-      );
+      throw new JJError('INIT_FAILED', `Failed to initialize Git repository: ${error.message}`, {
+        dir: this.dir,
+        originalError: error,
+      });
     }
   }
 
   /**
    * Read Git object from storage
-   * 
+   *
    * @param {string} oid - Git object SHA-1 hash (40-char hex)
-   * @returns {Promise<{type: string, data: Uint8Array}>} Git object
+   * @returns {Promise<{type: string, data: any}>} Git object
    */
   async getObject(oid) {
     try {
@@ -91,23 +87,21 @@ export class IsomorphicGitBackend {
       return { type, data: object };
     } catch (error) {
       if (error.code === 'NotFoundError' || error.code === 'ReadObjectFail') {
-        throw new JJError(
-          'NOT_FOUND',
-          `Git object ${oid} not found`,
-          { oid, suggestion: 'Ensure object exists in repository' }
-        );
+        throw new JJError('NOT_FOUND', `Git object ${oid} not found`, {
+          oid,
+          suggestion: 'Ensure object exists in repository',
+        });
       }
-      throw new JJError(
-        'STORAGE_READ_FAILED',
-        `Failed to read Git object: ${error.message}`,
-        { oid, originalError: error }
-      );
+      throw new JJError('STORAGE_READ_FAILED', `Failed to read Git object: ${error.message}`, {
+        oid,
+        originalError: error,
+      });
     }
   }
 
   /**
    * Write Git object to storage
-   * 
+   *
    * @param {string} type - Object type ('blob', 'tree', 'commit', 'tag')
    * @param {Uint8Array} data - Object data
    * @returns {Promise<string>} Object SHA-1 hash
@@ -117,22 +111,22 @@ export class IsomorphicGitBackend {
       const oid = await git.writeObject({
         fs: this.fs,
         dir: this.dir,
-        type,
+        type: /** @type {any} */ (type),
         object: data,
       });
       return oid;
     } catch (error) {
-      throw new JJError(
-        'STORAGE_WRITE_FAILED',
-        `Failed to write Git object: ${error.message}`,
-        { type, dataSize: data.length, originalError: error }
-      );
+      throw new JJError('STORAGE_WRITE_FAILED', `Failed to write Git object: ${error.message}`, {
+        type,
+        dataSize: data.length,
+        originalError: error,
+      });
     }
   }
 
   /**
    * Read Git reference
-   * 
+   *
    * @param {string} name - Full ref name (e.g., 'refs/heads/main')
    * @returns {Promise<string|null>} Commit SHA-1 or null if not found
    */
@@ -148,17 +142,16 @@ export class IsomorphicGitBackend {
       if (error.code === 'NotFoundError' || error.code === 'ResolveRefError') {
         return null;
       }
-      throw new JJError(
-        'STORAGE_READ_FAILED',
-        `Failed to read Git ref: ${error.message}`,
-        { ref: name, originalError: error }
-      );
+      throw new JJError('STORAGE_READ_FAILED', `Failed to read Git ref: ${error.message}`, {
+        ref: name,
+        originalError: error,
+      });
     }
   }
 
   /**
    * Create, update, or delete Git reference
-   * 
+   *
    * @param {string} name - Full ref name
    * @param {string|null} oid - Commit SHA-1 or null to delete
    * @returns {Promise<void>}
@@ -187,17 +180,17 @@ export class IsomorphicGitBackend {
         });
       }
     } catch (error) {
-      throw new JJError(
-        'STORAGE_WRITE_FAILED',
-        `Failed to update Git ref: ${error.message}`,
-        { ref: name, oid, originalError: error }
-      );
+      throw new JJError('STORAGE_WRITE_FAILED', `Failed to update Git ref: ${error.message}`, {
+        ref: name,
+        oid,
+        originalError: error,
+      });
     }
   }
 
   /**
    * List Git references
-   * 
+   *
    * @param {string} [prefix=''] - Ref prefix filter
    * @returns {Promise<Array<{name: string, oid: string}>>} List of refs
    */
@@ -206,22 +199,22 @@ export class IsomorphicGitBackend {
       // Use expandRef to get all possible refs
       const result = [];
       const refDirs = ['refs/heads', 'refs/tags', 'refs/remotes'];
-      
+
       for (const refDir of refDirs) {
         if (prefix && !refDir.startsWith(prefix) && !prefix.startsWith(refDir)) {
           continue;
         }
-        
+
         try {
           const dirPath = `${this.dir}/.git/${refDir}`;
           const entries = await this.fs.promises.readdir(dirPath, { recursive: true });
-          
+
           for (const entry of entries) {
             const refName = `${refDir}/${entry}`;
             if (prefix && !refName.startsWith(prefix)) {
               continue;
             }
-            
+
             try {
               const oid = await this.readRef(refName);
               if (oid) {
@@ -235,14 +228,13 @@ export class IsomorphicGitBackend {
           // Directory doesn't exist, skip
         }
       }
-      
+
       return result.sort((a, b) => a.name.localeCompare(b.name));
     } catch (error) {
-      throw new JJError(
-        'STORAGE_READ_FAILED',
-        `Failed to list Git refs: ${error.message}`,
-        { prefix, originalError: error }
-      );
+      throw new JJError('STORAGE_READ_FAILED', `Failed to list Git refs: ${error.message}`, {
+        prefix,
+        originalError: error,
+      });
     }
   }
 
@@ -255,7 +247,7 @@ export class IsomorphicGitBackend {
    * @param {string} opts.author.name - Author name
    * @param {string} opts.author.email - Author email
    * @param {number} [opts.author.timestamp] - Author timestamp (milliseconds since epoch)
-   * @param {Object} [opts.committer] - Committer info (defaults to author)
+   * @param {{name: string, email: string, timestamp?: number}} [opts.committer] - Committer info (defaults to author)
    * @param {string[]} [opts.parents=[]] - Parent commit SHAs
    * @returns {Promise<string>} Commit SHA
    */
@@ -264,16 +256,22 @@ export class IsomorphicGitBackend {
       const author = {
         name: opts.author.name,
         email: opts.author.email,
-        timestamp: opts.author.timestamp ? Math.floor(opts.author.timestamp / 1000) : Math.floor(Date.now() / 1000),
+        timestamp: opts.author.timestamp
+          ? Math.floor(opts.author.timestamp / 1000)
+          : Math.floor(Date.now() / 1000),
         timezoneOffset: 0,
       };
 
-      const committer = opts.committer ? {
-        name: opts.committer.name,
-        email: opts.committer.email,
-        timestamp: opts.committer.timestamp ? Math.floor(opts.committer.timestamp / 1000) : author.timestamp,
-        timezoneOffset: 0,
-      } : author;
+      const committer = opts.committer
+        ? {
+            name: opts.committer.name,
+            email: opts.committer.email,
+            timestamp: opts.committer.timestamp
+              ? Math.floor(opts.committer.timestamp / 1000)
+              : author.timestamp,
+            timezoneOffset: 0,
+          }
+        : author;
 
       const commitSha = await git.commit({
         fs: this.fs,
@@ -286,11 +284,10 @@ export class IsomorphicGitBackend {
 
       return commitSha;
     } catch (error) {
-      throw new JJError(
-        'COMMIT_FAILED',
-        `Failed to create Git commit: ${error.message}`,
-        { message: opts.message, originalError: error }
-      );
+      throw new JJError('COMMIT_FAILED', `Failed to create Git commit: ${error.message}`, {
+        message: opts.message,
+        originalError: error,
+      });
     }
   }
 
@@ -303,17 +300,17 @@ export class IsomorphicGitBackend {
     try {
       // Get the current staging area tree
       // This will create tree objects from the current working directory
-      const tree = await git.writeTree({
-        fs: this.fs,
-        dir: this.dir,
-      });
+      const tree = await git.writeTree(
+        /** @type {any} */ ({
+          fs: this.fs,
+          dir: this.dir,
+        })
+      );
       return tree;
     } catch (error) {
-      throw new JJError(
-        'TREE_READ_FAILED',
-        `Failed to get current tree: ${error.message}`,
-        { originalError: error }
-      );
+      throw new JJError('TREE_READ_FAILED', `Failed to get current tree: ${error.message}`, {
+        originalError: error,
+      });
     }
   }
 
@@ -347,11 +344,9 @@ export class IsomorphicGitBackend {
         }
       }
     } catch (error) {
-      throw new JJError(
-        'STAGE_FAILED',
-        `Failed to stage files: ${error.message}`,
-        { originalError: error }
-      );
+      throw new JJError('STAGE_FAILED', `Failed to stage files: ${error.message}`, {
+        originalError: error,
+      });
     }
   }
 
@@ -414,9 +409,9 @@ export class IsomorphicGitBackend {
    * @param {boolean} [opts.relative] - Depth measured from current shallow depth (v0.4)
    * @param {boolean} [opts.singleBranch] - Only fetch single branch (v0.4)
    * @param {boolean} [opts.noTags] - Don't fetch tags (v0.4)
-   * @param {Function} [opts.onProgress] - Progress callback
-   * @param {Function} [opts.onAuth] - Authentication callback
-   * @returns {Promise<{fetchedRefs: Array, updatedRefs: Array}>} Fetch result
+   * @param {any} [opts.onProgress] - Progress callback
+   * @param {any} [opts.onAuth] - Authentication callback
+   * @returns {Promise<{fetchedRefs: Array<any>, updatedRefs: Array<any>}>} Fetch result
    */
   async fetch(opts) {
     if (!this.http) {
@@ -440,8 +435,8 @@ export class IsomorphicGitBackend {
           dir: this.dir,
           remote: opts.remote,
           ref,
-          depth: opts.depth,           // v0.4: Shallow clone support
-          relative: opts.relative,     // v0.4: Relative depth
+          depth: opts.depth, // v0.4: Shallow clone support
+          relative: opts.relative, // v0.4: Relative depth
           singleBranch: opts.singleBranch, // v0.4: Single branch only
           tags: opts.noTags === true ? false : undefined, // v0.4: Skip tags
           onProgress: opts.onProgress,
@@ -460,37 +455,34 @@ export class IsomorphicGitBackend {
       return { fetchedRefs, updatedRefs };
     } catch (error) {
       if (error.code === 'HttpError' || error.code === 'NetworkError') {
-        throw new JJError(
-          'NETWORK_ERROR',
-          `Network error during fetch: ${error.message}`,
-          { remote: opts.remote, originalError: error }
-        );
+        throw new JJError('NETWORK_ERROR', `Network error during fetch: ${error.message}`, {
+          remote: opts.remote,
+          originalError: error,
+        });
       }
       if (error.code === 'AuthError') {
-        throw new JJError(
-          'AUTH_FAILED',
-          `Authentication failed: ${error.message}`,
-          { remote: opts.remote, originalError: error }
-        );
+        throw new JJError('AUTH_FAILED', `Authentication failed: ${error.message}`, {
+          remote: opts.remote,
+          originalError: error,
+        });
       }
-      throw new JJError(
-        'FETCH_FAILED',
-        `Fetch failed: ${error.message}`,
-        { remote: opts.remote, originalError: error }
-      );
+      throw new JJError('FETCH_FAILED', `Fetch failed: ${error.message}`, {
+        remote: opts.remote,
+        originalError: error,
+      });
     }
   }
 
   /**
    * Push objects and refs to remote repository
-   * 
+   *
    * @param {Object} opts - Push options
    * @param {string} opts.remote - Remote name or URL
    * @param {string[]} [opts.refs] - Ref specs to push
    * @param {boolean} [opts.force] - Allow non-fast-forward
-   * @param {Function} [opts.onProgress] - Progress callback
-   * @param {Function} [opts.onAuth] - Authentication callback
-   * @returns {Promise<{pushedRefs: Array, rejectedRefs: Array}>} Push result
+   * @param {any} [opts.onProgress] - Progress callback
+   * @param {any} [opts.onAuth] - Authentication callback
+   * @returns {Promise<{pushedRefs: Array<any>, rejectedRefs: Array<any>}>} Push result
    */
   async push(opts) {
     if (!this.http) {
@@ -534,31 +526,28 @@ export class IsomorphicGitBackend {
       return { pushedRefs, rejectedRefs };
     } catch (error) {
       if (error.code === 'HttpError' || error.code === 'NetworkError') {
-        throw new JJError(
-          'NETWORK_ERROR',
-          `Network error during push: ${error.message}`,
-          { remote: opts.remote, originalError: error }
-        );
+        throw new JJError('NETWORK_ERROR', `Network error during push: ${error.message}`, {
+          remote: opts.remote,
+          originalError: error,
+        });
       }
       if (error.code === 'AuthError') {
-        throw new JJError(
-          'AUTH_FAILED',
-          `Authentication failed: ${error.message}`,
-          { remote: opts.remote, originalError: error }
-        );
+        throw new JJError('AUTH_FAILED', `Authentication failed: ${error.message}`, {
+          remote: opts.remote,
+          originalError: error,
+        });
       }
       if (error.code === 'PushRejectedError') {
-        throw new JJError(
-          'PUSH_REJECTED',
-          `Push rejected (non-fast-forward): ${error.message}`,
-          { remote: opts.remote, suggestion: 'Use force option or pull first', originalError: error }
-        );
+        throw new JJError('PUSH_REJECTED', `Push rejected (non-fast-forward): ${error.message}`, {
+          remote: opts.remote,
+          suggestion: 'Use force option or pull first',
+          originalError: error,
+        });
       }
-      throw new JJError(
-        'PUSH_FAILED',
-        `Push failed: ${error.message}`,
-        { remote: opts.remote, originalError: error }
-      );
+      throw new JJError('PUSH_FAILED', `Push failed: ${error.message}`, {
+        remote: opts.remote,
+        originalError: error,
+      });
     }
   }
 
@@ -637,17 +626,17 @@ export class IsomorphicGitBackend {
     const metadata = {
       start_time: {
         millis_since_epoch: Date.now(),
-        tz_offset: new Date().getTimezoneOffset()
+        tz_offset: new Date().getTimezoneOffset(),
       },
       end_time: {
         millis_since_epoch: Date.now(),
-        tz_offset: new Date().getTimezoneOffset()
+        tz_offset: new Date().getTimezoneOffset(),
       },
       description: 'initialize repo',
       hostname: 'localhost',
       username: 'user',
       is_snapshot: false,
-      tags: {}
+      tags: {},
     };
     await opStore.writeOperation(operationId, viewId, [], metadata);
 
@@ -676,7 +665,7 @@ export class IsomorphicGitBackend {
 
     // Check if .jj is already in .gitignore
     const lines = content.split('\n');
-    const hasJJ = lines.some(line => line.trim() === '.jj' || line.trim() === '.jj/');
+    const hasJJ = lines.some((line) => line.trim() === '.jj' || line.trim() === '.jj/');
 
     if (!hasJJ) {
       // Add .jj to .gitignore

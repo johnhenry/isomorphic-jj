@@ -24,11 +24,11 @@ describe('RevsetEngine', () => {
     fs = new MockFS();
     storage = new Storage(fs, '/test/repo');
     await storage.init();
-    
+
     graph = new ChangeGraph(storage);
     workingCopy = new WorkingCopy(storage, fs, '/test/repo');
     revset = new RevsetEngine(graph, workingCopy);
-    
+
     await graph.init();
     await workingCopy.init(tid(1));
   });
@@ -40,15 +40,15 @@ describe('RevsetEngine', () => {
   describe('@', () => {
     it('should resolve @ to working copy change', async () => {
       const result = await revset.evaluate('@');
-      
+
       expect(result).toEqual([tid(1)]);
     });
 
     it('should update when working copy changes', async () => {
       await workingCopy.setCurrentChange(tid(5));
-      
+
       const result = await revset.evaluate('@');
-      
+
       expect(result).toEqual([tid(5)]);
     });
   });
@@ -62,7 +62,11 @@ describe('RevsetEngine', () => {
         parents: [],
         tree: '0000000000000000000000000000000000000000',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Change 1',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -73,7 +77,11 @@ describe('RevsetEngine', () => {
         parents: [tid(1)],
         tree: '0000000000000000000000000000000000000000',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:01:00.000Z',
+        },
         description: 'Change 2',
         timestamp: '2025-10-30T12:01:00.000Z',
       };
@@ -84,7 +92,11 @@ describe('RevsetEngine', () => {
         parents: [tid(2)],
         tree: '0000000000000000000000000000000000000000',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:02:00.000Z',
+        },
         description: 'Change 3',
         timestamp: '2025-10-30T12:02:00.000Z',
       };
@@ -94,7 +106,7 @@ describe('RevsetEngine', () => {
       await graph.addChange(change3);
 
       const result = await revset.evaluate('all()');
-      
+
       expect(result).toHaveLength(3);
       expect(result).toContain(tid(1));
       expect(result).toContain(tid(2));
@@ -103,7 +115,7 @@ describe('RevsetEngine', () => {
 
     it('should return empty array for empty graph', async () => {
       const result = await revset.evaluate('all()');
-      
+
       expect(result).toEqual([]);
     });
   });
@@ -116,7 +128,11 @@ describe('RevsetEngine', () => {
         parents: [],
         tree: '0000000000000000000000000000000000000000',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Change 10',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -124,7 +140,7 @@ describe('RevsetEngine', () => {
       await graph.addChange(change);
 
       const result = await revset.evaluate(tid(10));
-      
+
       expect(result).toEqual([tid(10)]);
     });
   });
@@ -137,7 +153,11 @@ describe('RevsetEngine', () => {
         parents: [],
         tree: '0000000000000000000000000000000000000000',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Change 1',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -148,7 +168,11 @@ describe('RevsetEngine', () => {
         parents: [tid(1)],
         tree: '0000000000000000000000000000000000000000',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:01:00.000Z',
+        },
         description: 'Change 2',
         timestamp: '2025-10-30T12:01:00.000Z',
       };
@@ -159,7 +183,11 @@ describe('RevsetEngine', () => {
         parents: [tid(2)],
         tree: '0000000000000000000000000000000000000000',
         author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
-        committer: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:02:00.000Z',
+        },
         description: 'Change 3',
         timestamp: '2025-10-30T12:02:00.000Z',
       };
@@ -169,7 +197,7 @@ describe('RevsetEngine', () => {
       await graph.addChange(change3);
 
       const result = await revset.evaluate('ancestors(' + tid(3) + ')');
-      
+
       expect(result).toContain(tid(3));
       expect(result).toContain(tid(2));
       expect(result).toContain(tid(1));
@@ -184,8 +212,16 @@ describe('RevsetEngine', () => {
         commitId: '0000000000000000000000000000000000000001',
         parents: [],
         tree: '0000000000000000000000000000000000000000',
-        author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-        committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        author: {
+          name: 'Alice',
+          email: 'alice@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
+        committer: {
+          name: 'Alice',
+          email: 'alice@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
         description: 'Add feature X',
         timestamp: '2025-10-30T12:00:00.000Z',
       };
@@ -206,8 +242,16 @@ describe('RevsetEngine', () => {
         commitId: '0000000000000000000000000000000000000003',
         parents: [tid(2)],
         tree: '0000000000000000000000000000000000000000',
-        author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
-        committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+        author: {
+          name: 'Alice',
+          email: 'alice@example.com',
+          timestamp: '2025-10-30T12:02:00.000Z',
+        },
+        committer: {
+          name: 'Alice',
+          email: 'alice@example.com',
+          timestamp: '2025-10-30T12:02:00.000Z',
+        },
         description: 'Add feature Y',
         timestamp: '2025-10-30T12:02:00.000Z',
       };
@@ -219,7 +263,7 @@ describe('RevsetEngine', () => {
 
     it('should filter by author', async () => {
       const result = await revset.evaluate('author(Alice)');
-      
+
       expect(result).toHaveLength(2);
       expect(result).toContain(tid(1));
       expect(result).toContain(tid(3));
@@ -228,7 +272,7 @@ describe('RevsetEngine', () => {
 
     it('should filter by description', async () => {
       const result = await revset.evaluate('description(feature)');
-      
+
       expect(result).toHaveLength(3); // All 3 contain "feature"
       expect(result).toContain(tid(1));
       expect(result).toContain(tid(2));
@@ -262,8 +306,16 @@ describe('RevsetEngine', () => {
           commitId: '0000000000000000000000000000000000000001',
           parents: [],
           tree: '0000000000000000000000000000000000000000',
-          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
-          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+          author: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:00:00.000Z',
+          },
+          committer: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:00:00.000Z',
+          },
           description: 'Root',
           timestamp: '2025-10-30T12:00:00.000Z',
         },
@@ -272,8 +324,16 @@ describe('RevsetEngine', () => {
           commitId: '0000000000000000000000000000000000000002',
           parents: [tid(1)],
           tree: '0000000000000000000000000000000000000000',
-          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
-          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:01:00.000Z' },
+          author: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:01:00.000Z',
+          },
+          committer: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:01:00.000Z',
+          },
           description: 'Branch A',
           timestamp: '2025-10-30T12:01:00.000Z',
         },
@@ -283,7 +343,11 @@ describe('RevsetEngine', () => {
           parents: [tid(1)],
           tree: '0000000000000000000000000000000000000000',
           author: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
-          committer: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:02:00.000Z' },
+          committer: {
+            name: 'Bob',
+            email: 'bob@example.com',
+            timestamp: '2025-10-30T12:02:00.000Z',
+          },
           description: 'Branch B',
           timestamp: '2025-10-30T12:02:00.000Z',
         },
@@ -292,8 +356,16 @@ describe('RevsetEngine', () => {
           commitId: '0000000000000000000000000000000000000004',
           parents: [tid(2)],
           tree: '0000000000000000000000000000000000000000',
-          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:03:00.000Z' },
-          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:03:00.000Z' },
+          author: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:03:00.000Z',
+          },
+          committer: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:03:00.000Z',
+          },
           description: 'Feature A1',
           timestamp: '2025-10-30T12:03:00.000Z',
         },
@@ -303,7 +375,11 @@ describe('RevsetEngine', () => {
           parents: [tid(2)],
           tree: '0000000000000000000000000000000000000000',
           author: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:04:00.000Z' },
-          committer: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:04:00.000Z' },
+          committer: {
+            name: 'Bob',
+            email: 'bob@example.com',
+            timestamp: '2025-10-30T12:04:00.000Z',
+          },
           description: 'Feature A2',
           timestamp: '2025-10-30T12:04:00.000Z',
         },
@@ -313,7 +389,11 @@ describe('RevsetEngine', () => {
           parents: [tid(3)],
           tree: '0000000000000000000000000000000000000000',
           author: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:05:00.000Z' },
-          committer: { name: 'Bob', email: 'bob@example.com', timestamp: '2025-10-30T12:05:00.000Z' },
+          committer: {
+            name: 'Bob',
+            email: 'bob@example.com',
+            timestamp: '2025-10-30T12:05:00.000Z',
+          },
           description: 'Feature B1',
           timestamp: '2025-10-30T12:05:00.000Z',
         },
@@ -322,8 +402,16 @@ describe('RevsetEngine', () => {
           commitId: '0000000000000000000000000000000000000007',
           parents: [tid(5)],
           tree: '0000000000000000000000000000000000000000',
-          author: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:06:00.000Z' },
-          committer: { name: 'Alice', email: 'alice@example.com', timestamp: '2025-10-30T12:06:00.000Z' },
+          author: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:06:00.000Z',
+          },
+          committer: {
+            name: 'Alice',
+            email: 'alice@example.com',
+            timestamp: '2025-10-30T12:06:00.000Z',
+          },
           description: 'Feature A2.1',
           timestamp: '2025-10-30T12:06:00.000Z',
         },

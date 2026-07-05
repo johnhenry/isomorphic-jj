@@ -50,14 +50,14 @@ describe('JJ CLI Parity Features', () => {
 
       const result = await jj.bookmark.create({
         name: 'new-feature',
-        changeId: change.changeId
+        changeId: change.changeId,
       });
 
       expect(result.name).toBe('new-feature');
       expect(result.changeId).toBe(change.changeId);
 
       const bookmarks = await jj.bookmark.list();
-      expect(bookmarks.some(b => b.name === 'new-feature')).toBe(true);
+      expect(bookmarks.some((b) => b.name === 'new-feature')).toBe(true);
     });
 
     it('should fail if bookmark already exists', async () => {
@@ -74,9 +74,9 @@ describe('JJ CLI Parity Features', () => {
 
     it('should throw error if name is missing', async () => {
       const change = await jj.new({ message: 'Test' });
-      await expect(
-        jj.bookmark.create({ changeId: change.changeId })
-      ).rejects.toThrow('Missing name');
+      await expect(jj.bookmark.create({ changeId: change.changeId })).rejects.toThrow(
+        'Missing name'
+      );
     });
 
     it('should default to working copy if changeId is missing (JJ CLI behavior)', async () => {
@@ -100,7 +100,7 @@ describe('JJ CLI Parity Features', () => {
 
       const result = await jj.bookmark.rename({
         oldName: 'old-feature',
-        newName: 'new-feature'
+        newName: 'new-feature',
       });
 
       expect(result.oldName).toBe('old-feature');
@@ -108,8 +108,8 @@ describe('JJ CLI Parity Features', () => {
       expect(result.changeId).toBe(change.changeId);
 
       const bookmarks = await jj.bookmark.list();
-      expect(bookmarks.some(b => b.name === 'new-feature')).toBe(true);
-      expect(bookmarks.some(b => b.name === 'old-feature')).toBe(false);
+      expect(bookmarks.some((b) => b.name === 'new-feature')).toBe(true);
+      expect(bookmarks.some((b) => b.name === 'old-feature')).toBe(false);
     });
   });
 
@@ -149,15 +149,18 @@ describe('JJ CLI Parity Features', () => {
       expect(remotes[0].url).toBe('https://github.com/example/repo.git');
 
       // Set URL
-      await jj.git.remote.setUrl({ name: 'origin', url: 'https://github.com/example/new-repo.git' });
+      await jj.git.remote.setUrl({
+        name: 'origin',
+        url: 'https://github.com/example/new-repo.git',
+      });
       remotes = await jj.git.remote.list();
       expect(remotes[0].url).toBe('https://github.com/example/new-repo.git');
 
       // Rename remote
       await jj.git.remote.rename({ oldName: 'origin', newName: 'upstream' });
       remotes = await jj.git.remote.list();
-      expect(remotes.some(r => r.name === 'upstream')).toBe(true);
-      expect(remotes.some(r => r.name === 'origin')).toBe(false);
+      expect(remotes.some((r) => r.name === 'upstream')).toBe(true);
+      expect(remotes.some((r) => r.name === 'origin')).toBe(false);
 
       // Remove remote
       await jj.git.remote.remove({ name: 'upstream' });
@@ -215,12 +218,12 @@ describe('JJ CLI Parity Features', () => {
       expect(diff.to).toBe(change2);
       expect(diff.files.length).toBe(2);
 
-      const file1Diff = diff.files.find(f => f.path === 'file1.txt');
+      const file1Diff = diff.files.find((f) => f.path === 'file1.txt');
       expect(file1Diff.status).toBe('modified');
       expect(file1Diff.fromContent).toBe('original content');
       expect(file1Diff.toContent).toBe('modified content');
 
-      const file2Diff = diff.files.find(f => f.path === 'file2.txt');
+      const file2Diff = diff.files.find((f) => f.path === 'file2.txt');
       expect(file2Diff.status).toBe('added');
     });
   });
@@ -369,7 +372,7 @@ describe('JJ CLI Parity Features', () => {
     it('should provide convenient aliases to git operations', async () => {
       await jj.remote.add({ name: 'origin', url: 'https://github.com/example/repo.git' });
       const remotes = await jj.git.remote.list();
-      expect(remotes.some(r => r.name === 'origin')).toBe(true);
+      expect(remotes.some((r) => r.name === 'origin')).toBe(true);
     });
   });
 
@@ -421,10 +424,13 @@ describe('JJ CLI Parity Features', () => {
 
       // Verify workspace is removed from tracking
       const workspaces = await jj.workspace.list();
-      expect(workspaces.find(w => w.id === workspace.id)).toBeUndefined();
+      expect(workspaces.find((w) => w.id === workspace.id)).toBeUndefined();
 
       // Verify files still exist
-      const fileExists = await fs.promises.access(testFile).then(() => true).catch(() => false);
+      const fileExists = await fs.promises
+        .access(testFile)
+        .then(() => true)
+        .catch(() => false);
       expect(fileExists).toBe(true);
 
       // Cleanup
@@ -432,7 +438,9 @@ describe('JJ CLI Parity Features', () => {
     });
 
     it('should not forget default workspace', async () => {
-      await expect(jj.workspace.forget({ id: 'default' })).rejects.toThrow('Cannot forget default workspace');
+      await expect(jj.workspace.forget({ id: 'default' })).rejects.toThrow(
+        'Cannot forget default workspace'
+      );
     });
   });
 
@@ -440,7 +448,9 @@ describe('JJ CLI Parity Features', () => {
   // File Chmod Operation
   // ========================================
 
-  describe('file.chmod()', () => {
+  // chmod cannot set POSIX permission bits on Windows (NTFS has no Unix modes),
+  // so these assertions are POSIX-only.
+  (process.platform === 'win32' ? describe.skip : describe)('file.chmod()', () => {
     it('should change file permissions', async () => {
       await jj.write({ path: 'script.sh', data: '#!/bin/bash\necho "test"' });
 
@@ -487,7 +497,7 @@ describe('JJ CLI Parity Features', () => {
 
       // Parallelize change2 and change3
       const result = await jj.parallelize({
-        changes: [change2.changeId, change3.changeId]
+        changes: [change2.changeId, change3.changeId],
       });
 
       expect(result.parallelized.length).toBe(2);
@@ -521,7 +531,9 @@ describe('JJ CLI Parity Features', () => {
     it('should throw error with less than 2 changes', async () => {
       const change = await jj.new({ message: 'Single change' });
 
-      await expect(jj.parallelize({ changes: [change.changeId] })).rejects.toThrow('At least 2 changes are required');
+      await expect(jj.parallelize({ changes: [change.changeId] })).rejects.toThrow(
+        'At least 2 changes are required'
+      );
     });
 
     it('should throw error if changes array is missing', async () => {
@@ -555,18 +567,22 @@ describe('JJ CLI Parity Features', () => {
 
       // Verify bookmark was removed
       const bookmarks = await jj.bookmark.list();
-      expect(bookmarks.find(b => b.name === 'test-bookmark')).toBeUndefined();
+      expect(bookmarks.find((b) => b.name === 'test-bookmark')).toBeUndefined();
     });
 
     it('should not revert the first operation', async () => {
       const ops = await jj.operations.list();
       const firstOp = ops[ops.length - 1]; // First operation is at the end
 
-      await expect(jj.operations.revert({ operation: firstOp.id })).rejects.toThrow('Cannot revert the first operation');
+      await expect(jj.operations.revert({ operation: firstOp.id })).rejects.toThrow(
+        'Cannot revert the first operation'
+      );
     });
 
     it('should throw error if operation not found', async () => {
-      await expect(jj.operations.revert({ operation: 'nonexistent' })).rejects.toThrow('Operation nonexistent not found');
+      await expect(jj.operations.revert({ operation: 'nonexistent' })).rejects.toThrow(
+        'Operation nonexistent not found'
+      );
     });
 
     it('should throw error if operation ID is missing', async () => {
@@ -610,10 +626,10 @@ describe('JJ CLI Parity Features', () => {
       // Verify operation was removed
       const allOpsAfter = await jj.operations.list();
       expect(allOpsAfter.length).toBe(countBefore); // +1 for abandon operation, -1 for removed = same
-      expect(allOpsAfter.find(op => op.id === op2.id)).toBeUndefined();
+      expect(allOpsAfter.find((op) => op.id === op2.id)).toBeUndefined();
 
       // Verify child was relinked
-      const childOp = allOpsAfter.find(op => op.id === op3.id);
+      const childOp = allOpsAfter.find((op) => op.id === op3.id);
       expect(childOp).toBeTruthy();
       // Child should now point to op1 as parent (or its grandparent)
       expect(childOp.parents).not.toContain(op2.id);
@@ -634,7 +650,7 @@ describe('JJ CLI Parity Features', () => {
 
       // Verify it's gone
       const allOps = await jj.operations.list();
-      expect(allOps.find(op => op.id === leafOp.id)).toBeUndefined();
+      expect(allOps.find((op) => op.id === leafOp.id)).toBeUndefined();
     });
 
     it('should update head when abandoning the head operation', async () => {
@@ -689,8 +705,8 @@ describe('JJ CLI Parity Features', () => {
 
       // Verify children don't reference abandoned operation
       const allOps = await jj.operations.list();
-      const updatedChild1 = allOps.find(op => op.id === child1Op.id);
-      const updatedChild2 = allOps.find(op => op.id === child2Op.id);
+      const updatedChild1 = allOps.find((op) => op.id === child1Op.id);
+      const updatedChild2 = allOps.find((op) => op.id === child2Op.id);
 
       if (updatedChild1) {
         expect(updatedChild1.parents).not.toContain(middleOp.id);
@@ -726,9 +742,9 @@ describe('JJ CLI Parity Features', () => {
       const oldestOp = remainingOps[remainingOps.length - 1];
 
       // This should fail
-      await expect(
-        jj.operations.abandon({ operation: oldestOp.id })
-      ).rejects.toThrow('Cannot abandon the only operation');
+      await expect(jj.operations.abandon({ operation: oldestOp.id })).rejects.toThrow(
+        'Cannot abandon the only operation'
+      );
     });
 
     it('should record abandonment in operation log', async () => {
@@ -772,12 +788,12 @@ describe('JJ CLI Parity Features', () => {
 
       it('should throw UNSUPPORTED_OPERATION error code', async () => {
         await expect(jj.resolve()).rejects.toMatchObject({
-          code: 'UNSUPPORTED_OPERATION'
+          code: 'UNSUPPORTED_OPERATION',
         });
       });
 
       it('should provide helpful suggestions for alternatives', async () => {
-        const error = await jj.resolve().catch(e => e);
+        const error = await jj.resolve().catch((e) => e);
         expect(error.suggestion).toContain('jj.conflicts.list()');
         expect(error.suggestion).toContain('jj.conflicts.resolve');
         expect(error.suggestion).toContain('programmatic conflict API');
@@ -793,12 +809,12 @@ describe('JJ CLI Parity Features', () => {
 
       it('should throw UNSUPPORTED_OPERATION error code', async () => {
         await expect(jj.file.track({ path: 'test.txt' })).rejects.toMatchObject({
-          code: 'UNSUPPORTED_OPERATION'
+          code: 'UNSUPPORTED_OPERATION',
         });
       });
 
       it('should provide helpful suggestions for alternatives', async () => {
-        const error = await jj.file.track({ path: 'test.txt' }).catch(e => e);
+        const error = await jj.file.track({ path: 'test.txt' }).catch((e) => e);
         expect(error.suggestion).toContain('jj.file.write');
         expect(error.suggestion).toContain('automatically tracked');
       });
@@ -813,12 +829,12 @@ describe('JJ CLI Parity Features', () => {
 
       it('should throw UNSUPPORTED_OPERATION error code', async () => {
         await expect(jj.file.untrack({ path: 'test.txt' })).rejects.toMatchObject({
-          code: 'UNSUPPORTED_OPERATION'
+          code: 'UNSUPPORTED_OPERATION',
         });
       });
 
       it('should provide helpful suggestions for alternatives', async () => {
-        const error = await jj.file.untrack({ path: 'test.txt' }).catch(e => e);
+        const error = await jj.file.untrack({ path: 'test.txt' }).catch((e) => e);
         expect(error.suggestion).toContain('jj.file.remove');
         expect(error.suggestion).toContain('jj.remove');
       });

@@ -19,6 +19,10 @@ const protoDir = inDist
   : path.join(__dirname, '..', 'protos');
 
 export class JJViewStore {
+  /**
+   * @param {any} fs - File system module (isomorphic-git compatible)
+   * @param {any} dir - Repository directory path
+   */
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
@@ -38,9 +42,10 @@ export class JJViewStore {
     const View = root.lookupType('simple_op_store.View');
 
     // Convert hex IDs to bytes
-    const headBuffers = headIds.map(id => Buffer.from(id, 'hex'));
+    const headBuffers = headIds.map((id) => Buffer.from(id, 'hex'));
 
     // Convert wcCommitIds object to map
+    /** @type {Record<string, any>} */
     const wcCommitIdsMap = {};
     for (const [workspace, commitId] of Object.entries(wcCommitIds)) {
       wcCommitIdsMap[workspace] = Buffer.from(commitId, 'hex');
@@ -55,7 +60,7 @@ export class JJViewStore {
       remoteViews: [],
       gitRefs: [],
       gitHead: null,
-      hasGitRefsMigratedToRemoteTags: false
+      hasGitRefsMigratedToRemoteTags: false,
     });
 
     // Verify the message
@@ -76,7 +81,7 @@ export class JJViewStore {
    * Read view file
    *
    * @param {string} viewId - View ID as hex string (128 characters)
-   * @returns {Object} Decoded view data
+   * @returns {Promise<Record<string, any>>} Decoded view data
    */
   async readView(viewId) {
     // Read from .jj/repo/op_store/views/VIEWID
@@ -88,9 +93,10 @@ export class JJViewStore {
     const View = root.lookupType('simple_op_store.View');
 
     // Decode
-    const message = View.decode(buffer);
+    const message = /** @type {any} */ (View.decode(buffer));
 
     // Convert wcCommitIds map back to object
+    /** @type {Record<string, any>} */
     const wcCommitIds = {};
     for (const [workspace, commitIdBuffer] of Object.entries(message.wcCommitIds || {})) {
       wcCommitIds[workspace] = commitIdBuffer;
@@ -105,7 +111,7 @@ export class JJViewStore {
       remote_views: message.remoteViews,
       git_refs: message.gitRefs,
       git_head: message.gitHead,
-      has_git_refs_migrated_to_remote_tags: message.hasGitRefsMigratedToRemoteTags
+      has_git_refs_migrated_to_remote_tags: message.hasGitRefsMigratedToRemoteTags,
     };
   }
 }

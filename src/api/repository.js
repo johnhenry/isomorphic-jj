@@ -23,13 +23,13 @@ import path from 'path';
  * Create and initialize a JJ repository instance
  *
  * @param {Object} options - Configuration options
- * @param {Object} options.fs - Filesystem implementation (Node fs or LightningFS)
+ * @param {any} options.fs - Filesystem implementation (Node fs or LightningFS)
  * @param {string} options.dir - Repository directory path
- * @param {Object} [options.git] - isomorphic-git instance (enables Git backend)
- * @param {Object} [options.http] - HTTP client for network operations
- * @param {string|Object} [options.backend] - Backend name ('isomorphic-git', 'memory') or backend instance
+ * @param {any} [options.git] - isomorphic-git instance (enables Git backend)
+ * @param {any} [options.http] - HTTP client for network operations
+ * @param {string|any} [options.backend] - Backend name ('isomorphic-git', 'memory') or backend instance
  *
- * @returns {Promise<Object>} Initialized JJ instance
+ * @returns {Promise<Record<string, any>>} Initialized JJ instance
  */
 export async function createJJ(options) {
   if (!options) {
@@ -57,7 +57,7 @@ export async function createJJ(options) {
   }
 
   // Create core components
-  const storage = new Storage(fs, dir);
+  const storage = /** @type {any} */ (new Storage(fs, dir));
   const baseGraph = new ChangeGraph(storage);
   const workingCopy = new WorkingCopy(storage, fs, dir);
   const oplog = new OperationLog(storage);
@@ -74,7 +74,7 @@ export async function createJJ(options) {
    */
   const getUserOplogInfo = async () => {
     await userConfig.load();
-    const user = userConfig.getUser();
+    const user = /** @type {any} */ (userConfig.getUser());
     return { name: user.name, email: user.email, hostname: 'localhost' };
   };
 
@@ -127,11 +127,11 @@ export async function createJJ(options) {
   /**
    * Helper to dispatch events with async listener support and error handling
    * Store listener errors in detail so we can check them after dispatch
-   * @param {EventTarget} eventTarget
+   * @param {any} eventTarget
    * @param {string} eventName
    * @param {any} detail
    * @param {{ cancelable?: boolean }} [options]
-   * @returns {Promise<void>}
+   * @returns {Promise<any>}
    */
   const dispatchEventAsync = async (eventTarget, eventName, detail, options = {}) => {
     // Extend detail to track errors from listeners
@@ -159,11 +159,10 @@ export async function createJJ(options) {
 
     // Check if event was prevented (only relevant for cancelable events)
     if (!notCancelled && options.cancelable !== false) {
-      throw new JJError(
-        'EVENT_CANCELLED',
-        `Operation cancelled by ${eventName} event listener`,
-        { eventName, detail }
-      );
+      throw new JJError('EVENT_CANCELLED', `Operation cancelled by ${eventName} event listener`, {
+        eventName,
+        detail,
+      });
     }
 
     return event;
@@ -171,6 +170,7 @@ export async function createJJ(options) {
 
   // Helper to sync a JJ change to a Git commit
   // In JJ, every change has a corresponding Git commit
+  /** @param {any} change */
   const syncChangeToGit = async (change) => {
     if (!gitBackend || !gitBackend.createCommit) {
       return; // No Git backend, skip
@@ -186,8 +186,12 @@ export async function createJJ(options) {
       const parentCommitIds = [];
       await baseGraph.load();
       for (const parentChangeId of change.parents) {
-        const parentChange = await baseGraph.getChange(parentChangeId);
-        if (parentChange && parentChange.commitId && parentChange.commitId !== '0000000000000000000000000000000000000000') {
+        const parentChange = /** @type {any} */ (await baseGraph.getChange(parentChangeId));
+        if (
+          parentChange &&
+          parentChange.commitId &&
+          parentChange.commitId !== '0000000000000000000000000000000000000000'
+        ) {
           parentCommitIds.push(parentChange.commitId);
         }
       }
@@ -229,31 +233,31 @@ export async function createJJ(options) {
    * Create a middleware-wrapped graph that intercepts add/update operations
    * This allows pluggable backends without modifying core ChangeGraph logic
    */
-  const createGraphWithMiddleware = (baseGraph, hooks) => {
+  const createGraphWithMiddleware = (/** @type {any} */ baseGraph, /** @type {any} */ hooks) => {
     return {
       // Delegate all read operations directly to base graph
       load: () => baseGraph.load(),
-      getChange: (changeId) => baseGraph.getChange(changeId),
+      getChange: (/** @type {any} */ changeId) => baseGraph.getChange(changeId),
       getAllChanges: () => baseGraph.getAll(), // Alias for compatibility
-      getAll: () => baseGraph.getAll(),  // Used by revset engine
-      getAncestors: (changeId) => baseGraph.getAncestors(changeId),
-      getDescendants: (changeId) => baseGraph.getDescendants(changeId),
-      getParents: (changeId) => baseGraph.getParents(changeId),
-      getChildren: (changeId) => baseGraph.getChildren(changeId),
-      findChangeByCommitId: async (commitId) => {
+      getAll: () => baseGraph.getAll(), // Used by revset engine
+      getAncestors: (/** @type {any} */ changeId) => baseGraph.getAncestors(changeId),
+      getDescendants: (/** @type {any} */ changeId) => baseGraph.getDescendants(changeId),
+      getParents: (/** @type {any} */ changeId) => baseGraph.getParents(changeId),
+      getChildren: (/** @type {any} */ changeId) => baseGraph.getChildren(changeId),
+      findChangeByCommitId: async (/** @type {any} */ commitId) => {
         const changeId = baseGraph.findByCommitId(commitId);
         return changeId ? await baseGraph.getChange(changeId) : null;
       },
 
       // Wrap write operations with middleware hooks
-      async addChange(change) {
+      async addChange(/** @type {any} */ change) {
         await baseGraph.addChange(change);
         if (hooks.onAddChange) {
           await hooks.onAddChange(change);
         }
       },
 
-      async updateChange(change) {
+      async updateChange(/** @type {any} */ change) {
         await baseGraph.updateChange(change);
         if (hooks.onUpdateChange) {
           await hooks.onUpdateChange(change);
@@ -267,6 +271,7 @@ export async function createJJ(options) {
 
   // Create Git backend if specified
   // Auto-detect: if git instance provided, use isomorphic-git backend
+  /** @type {any} */
   let gitBackend = null;
   if (git || backend === 'isomorphic-git' || backend === 'git') {
     gitBackend = new IsomorphicGitBackend({
@@ -282,11 +287,11 @@ export async function createJJ(options) {
   // Wrap the base graph with middleware that syncs to Git
   // This allows us to support different backends in the future
   const graph = createGraphWithMiddleware(baseGraph, {
-    onAddChange: async (change) => {
+    onAddChange: async (/** @type {any} */ change) => {
       // Sync new change to Git backend
       await syncChangeToGit(change);
     },
-    onUpdateChange: async (change) => {
+    onUpdateChange: async (/** @type {any} */ change) => {
       // Sync updated change to Git backend
       await syncChangeToGit(change);
     },
@@ -298,7 +303,7 @@ export async function createJJ(options) {
   /**
    * Helper to resolve conflicts with different strategies (v0.5)
    *
-   * @param {Object} conflict - Conflict object
+   * @param {any} conflict - Conflict object
    * @param {string} strategy - Resolution strategy ('ours', 'theirs', 'union')
    * @returns {string} Resolved content
    */
@@ -323,31 +328,31 @@ export async function createJJ(options) {
   }
 
   // Create JJ instance (backgroundOps will be initialized after jj object is created)
-  const jj = {
+  const jj = /** @type {any} */ ({
     storage,
     graph,
     workingCopy,
     oplog,
     bookmarks,
     revset,
-    tags,  // TagStore instance (raw); public API is the `tag` namespace below
+    tags, // TagStore instance (raw); public API is the `tag` namespace below
     // NOTE: the raw ConflictModel is intentionally not exposed here because the
     // public `conflicts` namespace (defined below) uses the same key. It remains
     // accessible internally via the module closure.
-    conflictModel: conflicts,  // v1.5: advanced access to the raw ConflictModel
+    conflictModel: conflicts, // v1.5: advanced access to the raw ConflictModel
     workspaces,
     userConfig,
-    mergeDrivers,  // v0.5: expose merge driver registry
-    backgroundOps: null,  // Will be initialized below
-    backend: gitBackend,  // Expose backend for advanced users
-    
+    mergeDrivers, // v0.5: expose merge driver registry
+    backgroundOps: null, // Will be initialized below
+    backend: gitBackend, // Expose backend for advanced users
+
     /**
      * Initialize a new JJ repository
      *
      * NOTE: This is a convenience alias. For Git-backed repos, prefer jj.git.init()
      * to match the JJ CLI semantics.
      */
-    async init(opts = {}) {
+    async init(/** @type {Record<string, any>} */ opts = {}) {
       // If Git backend is available, delegate to jj.git.init()
       if (gitBackend) {
         return await jj.git.init(opts);
@@ -371,7 +376,7 @@ export async function createJJ(options) {
 
       // Create root change
       const rootChangeId = generateChangeId();
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
       const rootChange = {
         changeId: rootChangeId,
         commitId: '0000000000000000000000000000000000000000',
@@ -416,9 +421,7 @@ export async function createJJ(options) {
     /**
      * Write a file to the working copy
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.path - File path relative to repo root
-     * @param {string|Uint8Array} args.data - File contents
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} File information including path, size, and mode
      */
     async write(args) {
@@ -445,9 +448,7 @@ export async function createJJ(options) {
       }
 
       // Write the file
-      const data = typeof args.data === 'string'
-        ? args.data
-        : args.data;
+      const data = typeof args.data === 'string' ? args.data : args.data;
       await fs.promises.writeFile(fullPath, data, 'utf8');
 
       // Track the file in working copy
@@ -472,10 +473,7 @@ export async function createJJ(options) {
     /**
      * Read a file from the working copy or from a specific change
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.path - File path relative to repo root
-     * @param {string} [args.changeId] - Change ID to read from (defaults to working copy)
-     * @param {string} [args.encoding='utf-8'] - File encoding ('utf-8' or 'binary')
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<string|Uint8Array>} File contents
      */
     async read(args) {
@@ -494,7 +492,8 @@ export async function createJJ(options) {
         if (!workingCopy.matchesSparsePatterns(args.path)) {
           throw new JJError('FILE_NOT_IN_SPARSE', `File ${args.path} not in sparse checkout`, {
             path: args.path,
-            suggestion: 'Add pattern to sparse checkout: jj.sparse.add({ patterns: ["' + args.path + '"] })',
+            suggestion:
+              'Add pattern to sparse checkout: jj.sparse.add({ patterns: ["' + args.path + '"] })',
           });
         }
 
@@ -534,7 +533,11 @@ export async function createJJ(options) {
       }
 
       // Fallback: read from Git if we have a commitId
-      if (gitBackend && change.commitId && change.commitId !== '0000000000000000000000000000000000000000') {
+      if (
+        gitBackend &&
+        change.commitId &&
+        change.commitId !== '0000000000000000000000000000000000000000'
+      ) {
         try {
           const git = (await import('isomorphic-git')).default;
           const { blob } = await git.readBlob({
@@ -549,25 +552,33 @@ export async function createJJ(options) {
           }
           return blob;
         } catch (error) {
-          throw new JJError('FILE_NOT_FOUND', `File ${args.path} not found in change ${args.changeId}`, {
-            path: args.path,
-            changeId: args.changeId,
-            originalError: error,
-          });
+          throw new JJError(
+            'FILE_NOT_FOUND',
+            `File ${args.path} not found in change ${args.changeId}`,
+            {
+              path: args.path,
+              changeId: args.changeId,
+              originalError: error,
+            }
+          );
         }
       }
 
-      throw new JJError('FILE_NOT_FOUND', `File ${args.path} not found in change ${args.changeId}`, {
-        path: args.path,
-        changeId: args.changeId,
-        suggestion: 'File not in snapshot cache and no Git commit available',
-      });
+      throw new JJError(
+        'FILE_NOT_FOUND',
+        `File ${args.path} not found in change ${args.changeId}`,
+        {
+          path: args.path,
+          changeId: args.changeId,
+          suggestion: 'File not in snapshot cache and no Git commit available',
+        }
+      );
     },
 
     /**
      * Alias for read() - matches jj CLI 'cat' command
      *
-     * @param {Object} args - Arguments (same as read())
+     * @param {Record<string, any>} args - Arguments (same as read())
      * @returns {Promise<string|Uint8Array>} File contents
      */
     async cat(args) {
@@ -577,9 +588,7 @@ export async function createJJ(options) {
     /**
      * List files in the working copy or in a specific change
      *
-     * @param {Object} [args={}] - Arguments
-     * @param {string} [args.changeId] - Change ID to list files from (defaults to working copy)
-     * @param {boolean} [args.recursive=false] - Include files in subdirectories (for future use)
+     * @param {Record<string, any>} [args={}] - Arguments
      * @returns {Promise<Array<string>>} Array of file paths
      */
     async listFiles(args = {}) {
@@ -604,7 +613,11 @@ export async function createJJ(options) {
       }
 
       // Fallback: read from Git tree
-      if (gitBackend && change.commitId && change.commitId !== '0000000000000000000000000000000000000000') {
+      if (
+        gitBackend &&
+        change.commitId &&
+        change.commitId !== '0000000000000000000000000000000000000000'
+      ) {
         try {
           const git = (await import('isomorphic-git')).default;
           const { tree } = await git.readTree({
@@ -613,9 +626,7 @@ export async function createJJ(options) {
             oid: change.commitId,
           });
 
-          return tree
-            .filter(entry => entry.type === 'blob')
-            .map(entry => entry.path);
+          return tree.filter((entry) => entry.type === 'blob').map((entry) => entry.path);
         } catch (error) {
           throw new JJError('TREE_READ_FAILED', `Failed to read tree for change ${args.changeId}`, {
             changeId: args.changeId,
@@ -632,10 +643,7 @@ export async function createJJ(options) {
      *
      * For large files, use streaming to avoid loading entire file into memory.
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.path - File path relative to repo root
-     * @param {string} [args.changeId] - Change ID to read from (defaults to working copy)
-     * @param {string} [args.encoding] - Optional encoding ('utf-8', etc.)
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<ReadableStream>} Readable stream
      * @throws {JJError} If not in Node.js environment or file not found
      */
@@ -657,7 +665,10 @@ export async function createJJ(options) {
       if (!args.changeId) {
         const fullPath = path.join(dir, args.path);
         try {
-          const stream = fs.createReadStream(fullPath, args.encoding ? { encoding: args.encoding } : {});
+          const stream = fs.createReadStream(
+            fullPath,
+            args.encoding ? { encoding: args.encoding } : {}
+          );
           return stream;
         } catch (error) {
           throw new JJError('FILE_NOT_FOUND', `File ${args.path} not found in working copy`, {
@@ -669,9 +680,14 @@ export async function createJJ(options) {
 
       // Reading from a specific change - for historical data, fall back to read()
       // Streaming from Git objects requires more complex implementation
-      throw new JJError('UNSUPPORTED_OPERATION', 'Streaming from historical changes not yet supported', {
-        suggestion: 'Use read({ path, changeId }) for historical file access, or readStream({ path }) for working copy',
-      });
+      throw new JJError(
+        'UNSUPPORTED_OPERATION',
+        'Streaming from historical changes not yet supported',
+        {
+          suggestion:
+            'Use read({ path, changeId }) for historical file access, or readStream({ path }) for working copy',
+        }
+      );
     },
 
     /**
@@ -679,9 +695,7 @@ export async function createJJ(options) {
      *
      * For large files, use streaming to avoid loading entire file into memory.
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.path - File path relative to repo root
-     * @param {string} [args.encoding] - Optional encoding ('utf-8', etc.)
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<WritableStream>} Writable stream
      * @throws {JJError} If not in Node.js environment
      */
@@ -710,7 +724,10 @@ export async function createJJ(options) {
       }
 
       // Create writable stream
-      const stream = fs.createWriteStream(fullPath, args.encoding ? { encoding: args.encoding } : {});
+      const stream = fs.createWriteStream(
+        fullPath,
+        args.encoding ? { encoding: args.encoding } : {}
+      );
 
       // Track file when stream finishes
       stream.on('finish', async () => {
@@ -752,20 +769,13 @@ export async function createJJ(options) {
      * - Presence of only `from` and `to` → file operation
      * - Change IDs are 32-character hex strings; file paths are not
      *
-     * @param {Object} args - Arguments
-     * @param {string} [args.from] - Source path or change ID
-     * @param {string} [args.to] - Destination path or change ID
-     * @param {string} [args.changeId] - Change ID to move (for history operations)
-     * @param {string} [args.newParent] - New parent change ID (for history operations)
-     * @param {string[]} [args.paths] - Paths to move between changes (for history operations)
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} Returns change object for history operations, file info for file operations
      */
     /**
      * Move a file in the working copy
      *
-     * @param {Object} args - Move file arguments
-     * @param {string} args.from - Source file path
-     * @param {string} args.to - Destination file path
+     * @param {Record<string, any>} args - Move file arguments
      * @returns {Promise<Object>} Operation result including from, to paths and file stats
      */
     async moveFile(args) {
@@ -825,10 +835,14 @@ export async function createJJ(options) {
       try {
         await fs.promises.mkdir(toDir, { recursive: true });
       } catch (error) {
-        throw new JJError('FILE_SYSTEM_ERROR', `Failed to create destination directory: ${error.message}`, {
-          path: toDir,
-          error: error.message,
-        });
+        throw new JJError(
+          'FILE_SYSTEM_ERROR',
+          `Failed to create destination directory: ${error.message}`,
+          {
+            path: toDir,
+            error: error.message,
+          }
+        );
       }
 
       // Move the file
@@ -864,9 +878,7 @@ export async function createJJ(options) {
     /**
      * Move (rebase) a change to a new parent
      *
-     * @param {Object} args - Move change arguments
-     * @param {string} args.changeId - Change ID to move (also accepts 'from' or 'source')
-     * @param {string} args.newParent - New parent change ID (also accepts 'to' or 'destination')
+     * @param {Record<string, any>} args - Move change arguments (changeId/from/source, newParent/to/destination)
      * @returns {Promise<Object>} Updated change object
      */
     async moveChange(args) {
@@ -900,10 +912,14 @@ export async function createJJ(options) {
       }
 
       if (!changeIdPattern.test(newParent)) {
-        throw new JJError('INVALID_CHANGE_ID', `Invalid new parent change ID format: ${newParent}`, {
-          suggestion: 'Change IDs must be 32-character hex strings',
-          provided: newParent,
-        });
+        throw new JJError(
+          'INVALID_CHANGE_ID',
+          `Invalid new parent change ID format: ${newParent}`,
+          {
+            suggestion: 'Change IDs must be 32-character hex strings',
+            provided: newParent,
+          }
+        );
       }
 
       const change = await graph.getChange(changeId);
@@ -959,11 +975,13 @@ export async function createJJ(options) {
     /**
      * @deprecated Use moveFile() for files or moveChange() for history operations
      * Move operation - delegates to moveFile or moveChange based on arguments
+     * @param {Record<string, any>} args
      */
     async move(args) {
       if (!args || typeof args !== 'object') {
         throw new JJError('INVALID_ARGUMENT', 'Missing or invalid arguments', {
-          suggestion: 'Use moveFile({ from, to }) for files or moveChange({ changeId, newParent }) for history',
+          suggestion:
+            'Use moveFile({ from, to }) for files or moveChange({ changeId, newParent }) for history',
         });
       }
 
@@ -981,7 +999,7 @@ export async function createJJ(options) {
      * Detect if move operation is for history (rebase) or files
      *
      * @private
-     * @param {Object} args - Move arguments
+     * @param {Record<string, any>} args - Move arguments
      * @returns {boolean} True if history operation, false if file operation
      */
     _detectHistoryOperation(args) {
@@ -1002,11 +1020,15 @@ export async function createJJ(options) {
         // Users should use explicit { changeId, newParent } for clarity
         if (fromLooksLikeChangeId && toLooksLikeChangeId) {
           // This is ambiguous - throw a helpful error
-          throw new JJError('AMBIGUOUS_OPERATION',
-            'Ambiguous move operation: arguments look like change IDs', {
-            suggestion: 'Use { changeId, newParent } for history operations or ensure file paths don\'t match change ID pattern',
-            args,
-          });
+          throw new JJError(
+            'AMBIGUOUS_OPERATION',
+            'Ambiguous move operation: arguments look like change IDs',
+            {
+              suggestion:
+                "Use { changeId, newParent } for history operations or ensure file paths don't match change ID pattern",
+              args,
+            }
+          );
         }
 
         return false; // Treat as file operation
@@ -1018,8 +1040,7 @@ export async function createJJ(options) {
     /**
      * Remove a file from the working copy
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.path - File path to remove
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} Information about the removed file
      */
     async remove(args) {
@@ -1052,6 +1073,7 @@ export async function createJJ(options) {
 
     /**
      * Describe the working copy change
+     * @param {Record<string, any>} [args]
      */
     async describe(args = {}) {
       await graph.load();
@@ -1061,7 +1083,7 @@ export async function createJJ(options) {
       // Support describing specific revision (not just working copy)
       const targetChangeId = args.revision || workingCopy.getCurrentChangeId();
       const change = await graph.getChange(targetChangeId);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${targetChangeId} not found`, {
@@ -1097,6 +1119,7 @@ export async function createJJ(options) {
       if (isWorkingCopy && !args.preserveSnapshot) {
         // Snapshot current file contents for conflict detection
         // This allows us to load file contents during merge/rebase
+        /** @type {Record<string, any>} */
         const fileSnapshot = {};
         const trackedFiles = await workingCopy.listFiles();
 
@@ -1128,7 +1151,11 @@ export async function createJJ(options) {
             throw new JJError(
               'SNAPSHOT_FILE_FAILED',
               `Could not snapshot file ${filePath}: ${error.message}`,
-              { filePath, originalError: error.message, suggestion: 'File may be binary, deleted, or inaccessible' }
+              {
+                filePath,
+                originalError: error.message,
+                suggestion: 'File may be binary, deleted, or inaccessible',
+              }
             );
           }
         }
@@ -1158,12 +1185,17 @@ export async function createJJ(options) {
       });
 
       // Dispatch change:updated event (informational)
-      await dispatchEventAsync(jj, 'change:updated', {
-        operation: 'describe',
-        changeId: targetChangeId,
-        change,
-        timestamp: new Date().toISOString(),
-      }, { cancelable: false });
+      await dispatchEventAsync(
+        jj,
+        'change:updated',
+        {
+          operation: 'describe',
+          changeId: targetChangeId,
+          change,
+          timestamp: new Date().toISOString(),
+        },
+        { cancelable: false }
+      );
 
       return change;
     },
@@ -1174,18 +1206,7 @@ export async function createJJ(options) {
      * Allows updating author, committer, description, and optionally regenerating the change ID.
      * The file content and snapshot remain unchanged.
      *
-     * @param {Object} [args={}] - Arguments
-     * @param {string} [args.revision] - Change ID to edit (defaults to working copy @)
-     * @param {string} [args.change] - Alias for revision
-     * @param {string} [args.description] - Update the change description
-     * @param {string} [args.message] - Alias for description
-     * @param {Object} [args.author] - Author information to update
-     * @param {string} [args.author.name] - Author name
-     * @param {string} [args.author.email] - Author email
-     * @param {Object} [args.committer] - Committer information to update
-     * @param {string} [args.committer.name] - Committer name
-     * @param {string} [args.committer.email] - Committer email
-     * @param {boolean} [args.resetChangeId=false] - Generate new change ID
+     * @param {Record<string, any>} [args={}] - Arguments
      * @returns {Promise<Object>} Updated change object
      */
     async metaedit(args = {}) {
@@ -1206,7 +1227,7 @@ export async function createJJ(options) {
       // Determine which change to edit
       const changeId = args.revision || workingCopy.getCurrentChangeId();
       const change = await graph.getChange(changeId);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
@@ -1219,13 +1240,9 @@ export async function createJJ(options) {
       const hasDescription = args.description !== undefined;
 
       if (!hasAuthor && !hasCommitter && !hasResetChangeId && !hasDescription) {
-        throw new JJError(
-          'INVALID_ARGUMENT',
-          'No metadata provided to update',
-          {
-            suggestion: 'Provide author, committer, description, or resetChangeId: true',
-          }
-        );
+        throw new JJError('INVALID_ARGUMENT', 'No metadata provided to update', {
+          suggestion: 'Provide author, committer, description, or resetChangeId: true',
+        });
       }
 
       // Store old change ID for potential regeneration
@@ -1280,15 +1297,11 @@ export async function createJJ(options) {
         // - Updating all children to point to new change ID
         // - Updating all bookmarks pointing to old change ID
         // - Updating operation log references
-        throw new JJError(
-          'UNSUPPORTED_OPERATION',
-          'resetChangeId is not yet implemented',
-          {
-            feature: 'metaedit resetChangeId',
-            reason: 'Requires complex graph manipulation to update all references',
-            suggestion: 'Create a new change with desired metadata instead',
-          }
-        );
+        throw new JJError('UNSUPPORTED_OPERATION', 'resetChangeId is not yet implemented', {
+          feature: 'metaedit resetChangeId',
+          reason: 'Requires complex graph manipulation to update all references',
+          suggestion: 'Create a new change with desired metadata instead',
+        });
       }
 
       // Update the existing change
@@ -1314,12 +1327,7 @@ export async function createJJ(options) {
     /**
      * Create a new change
      *
-     * @param {Object} [args={}] - Arguments
-     * @param {string} [args.message] - Initial description for the new change
-     * @param {string|string[]} [args.parents] - Parent change ID(s), supports merge commits
-     * @param {string} [args.from] - Single parent (backward compat)
-     * @param {string} [args.insertAfter] - Insert after this change
-     * @param {string} [args.insertBefore] - Insert before this change
+     * @param {Record<string, any>} [args={}] - Arguments
      * @returns {Promise<Object>} The new change object including changeId, description, parents, author, and timestamp
      */
     async new(args = {}) {
@@ -1361,7 +1369,7 @@ export async function createJJ(options) {
       }
 
       const newChangeId = generateChangeId();
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       // Initialize with parent's file snapshot
       let initialSnapshot = {};
@@ -1402,7 +1410,7 @@ export async function createJJ(options) {
         timestamp: new Date().toISOString(),
       });
 
-      await graph.addChange(newChange);  // Middleware will sync to Git
+      await graph.addChange(newChange); // Middleware will sync to Git
 
       // Handle insertBefore: rebase target to have new change as parent
       if (args.insertBefore) {
@@ -1433,17 +1441,22 @@ export async function createJJ(options) {
       });
 
       // Dispatch change:created event (informational)
-      await dispatchEventAsync(jj, 'change:created', {
-        operation: 'new',
-        changeId: newChangeId,
-        parents: parents,
-        change: newChange,
-        timestamp: new Date().toISOString(),
-      }, { cancelable: false });
+      await dispatchEventAsync(
+        jj,
+        'change:created',
+        {
+          operation: 'new',
+          changeId: newChangeId,
+          parents: parents,
+          change: newChange,
+          timestamp: new Date().toISOString(),
+        },
+        { cancelable: false }
+      );
 
       return newChange;
     },
-    
+
     /**
      * Get working copy status
      */
@@ -1481,9 +1494,10 @@ export async function createJJ(options) {
 
       const all = graph.getAll();
       const ops = await oplog.list();
-      const currentUser = userConfig.getUser();
+      const currentUser = /** @type {any} */ (userConfig.getUser());
 
       // Count by author
+      /** @type {Record<string, any>} */
       const authorCounts = {};
       for (const change of all) {
         if (!change.abandoned && change.author) {
@@ -1503,26 +1517,30 @@ export async function createJJ(options) {
       }
 
       // Count merge commits
-      const mergeCommits = all.filter(c => c.parents && c.parents.length > 1).length;
+      const mergeCommits = all.filter(
+        (/** @type {any} */ c) => c.parents && c.parents.length > 1
+      ).length;
 
       // Count empty commits
-      const emptyCommits = all.filter(c =>
-        c.tree === '0000000000000000000000000000000000000000'
+      const emptyCommits = all.filter(
+        (/** @type {any} */ c) => c.tree === '0000000000000000000000000000000000000000'
       ).length;
 
       // Count abandoned
-      const abandonedCount = all.filter(c => c.abandoned).length;
+      const abandonedCount = all.filter((/** @type {any} */ c) => c.abandoned).length;
 
       // My commits
-      const myCommits = all.filter(c =>
-        c.author && !c.abandoned &&
-        (c.author.email === currentUser.email || c.author.name === currentUser.name)
+      const myCommits = all.filter(
+        (/** @type {any} */ c) =>
+          c.author &&
+          !c.abandoned &&
+          (c.author.email === currentUser.email || c.author.name === currentUser.name)
       ).length;
 
       // Get bookmark statistics
       const allBookmarks = await bookmarks.list();
-      const localBookmarks = allBookmarks.filter(b => !b.remote);
-      const remoteBookmarks = allBookmarks.filter(b => b.remote);
+      const localBookmarks = allBookmarks.filter((b) => !b.remote);
+      const remoteBookmarks = allBookmarks.filter((b) => b.remote);
 
       return {
         changes: {
@@ -1541,7 +1559,7 @@ export async function createJJ(options) {
         files: {
           total: allFiles.size,
           list: Array.from(allFiles).sort(),
-          byExtension: {},  // Add file extension breakdown
+          byExtension: {}, // Add file extension breakdown
         },
         bookmarks: {
           total: allBookmarks.length,
@@ -1562,11 +1580,8 @@ export async function createJJ(options) {
     /**
      * View change history
      *
-     * @param {Object} args - Arguments
-     * @param {string} [args.revset='all()'] - Revset expression to filter changes
-     * @param {number} [args.limit] - Maximum number of changes to return
-     * @param {boolean} [args.count=false] - If true, return count instead of changes (v0.36.0)
-     * @returns {Promise<Array|number>} Array of changes or count if args.count is true
+     * @param {Record<string, any>} args - Arguments
+     * @returns {Promise<Array<any>|number>} Array of changes or count if args.count is true
      */
     async log(args = {}) {
       await graph.load();
@@ -1595,7 +1610,7 @@ export async function createJJ(options) {
         const aIsParentOfB = b.parents && b.parents.includes(a.changeId);
         const bIsParentOfA = a.parents && a.parents.includes(b.changeId);
 
-        if (aIsParentOfB) return 1;  // a is parent of b, so b comes first
+        if (aIsParentOfB) return 1; // a is parent of b, so b comes first
         if (bIsParentOfA) return -1; // b is parent of a, so a comes first
 
         // Secondary: Sort by timestamp descending (newest first)
@@ -1615,14 +1630,13 @@ export async function createJJ(options) {
     /**
      * Show detailed information about a specific change
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.change - Change ID or revset to show
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} Detailed change information
      */
     async show(args) {
       if (!args || !args.change) {
         throw new JJError('INVALID_ARGUMENT', 'Missing change argument', {
-          suggestion: 'Provide { change: changeId }'
+          suggestion: 'Provide { change: changeId }',
         });
       }
 
@@ -1658,23 +1672,23 @@ export async function createJJ(options) {
       // Find bookmarks pointing to this change
       const allBookmarks = await bookmarks.list();
       const changeBookmarks = allBookmarks
-        .filter(b => b.target === change.changeId)
-        .map(b => b.name);
+        .filter((b) => b.target === change.changeId)
+        .map((b) => b.name);
 
       // Find operations that modified this change
       const ops = await oplog.list();
-      const relatedOps = ops.filter(op =>
-        op.view && (
-          op.view.workingCopy === change.changeId ||
-          (op.view.heads && op.view.heads.includes(change.changeId))
-        )
+      const relatedOps = ops.filter(
+        (op) =>
+          op.view &&
+          (op.view.workingCopy === change.changeId ||
+            (op.view.heads && op.view.heads.includes(change.changeId)))
       );
 
       return {
         ...change,
         children,
         bookmarks: changeBookmarks,
-        operations: relatedOps.map(op => ({
+        operations: relatedOps.map((op) => ({
           id: op.id,
           timestamp: op.timestamp,
           description: op.description,
@@ -1685,8 +1699,7 @@ export async function createJJ(options) {
     /**
      * Amend the working copy change
      *
-     * @param {Object} args - Arguments
-     * @param {string} [args.message] - New description message
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} Updated change
      */
     async amend(args = {}) {
@@ -1697,10 +1710,7 @@ export async function createJJ(options) {
     /**
      * Convenience: describe current change and create new one (jj commit)
      *
-     * @param {Object} [args={}] - Arguments
-     * @param {string} [args.message] - Description for current change
-     * @param {Object} [args.author] - Author for current change
-     * @param {Object} [args.metadata] - Metadata to attach to the change
+     * @param {Record<string, any>} [args={}] - Arguments
      * @returns {Promise<Object>} The newly created change
      */
     async commit(args = {}) {
@@ -1708,19 +1718,18 @@ export async function createJJ(options) {
         message: args.message,
         author: args.author,
         metadata: args.metadata,
-        preserveSnapshot: args.preserveSnapshot
+        preserveSnapshot: args.preserveSnapshot,
       });
       return await this.new({
         message: args.nextMessage,
-        preserveSnapshot: args.preserveSnapshot
+        preserveSnapshot: args.preserveSnapshot,
       });
     },
 
     /**
      * Edit a specific change (make it the working copy)
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.changeId - Change ID to edit
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} Information about the edited change including changeId, description, and file count
      */
     async edit(args) {
@@ -1740,7 +1749,7 @@ export async function createJJ(options) {
       await userConfig.load();
 
       const change = await graph.getChange(args.changeId);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`, {
           changeId: args.changeId,
@@ -1845,13 +1854,18 @@ export async function createJJ(options) {
       });
 
       // Dispatch workingcopy:switched event (informational)
-      await dispatchEventAsync(jj, 'workingcopy:switched', {
-        operation: 'edit',
-        fromChangeId: previousChangeId,
-        toChangeId: args.changeId,
-        change,
-        timestamp: new Date().toISOString(),
-      }, { cancelable: false });
+      await dispatchEventAsync(
+        jj,
+        'workingcopy:switched',
+        {
+          operation: 'edit',
+          fromChangeId: previousChangeId,
+          toChangeId: args.changeId,
+          change,
+          timestamp: new Date().toISOString(),
+        },
+        { cancelable: false }
+      );
 
       // Return information about the edited change
       return {
@@ -1862,7 +1876,7 @@ export async function createJJ(options) {
         timestamp: change.timestamp,
       };
     },
-    
+
     /**
      * Undo last operation
      *
@@ -1879,7 +1893,7 @@ export async function createJJ(options) {
       // Get the current operation (the one being undone) to restore its pre-state
       const currentOp = ops[ops.length - 1];
 
-      const previousView = await oplog.undo();
+      const previousView = /** @type {any} */ (await oplog.undo());
 
       // Restore state from previous view
       await workingCopy.setCurrentChange(previousView.workingCopy);
@@ -1917,7 +1931,9 @@ export async function createJJ(options) {
       if (currentOp && currentOp.conflictsSnapshot) {
         // Restore conflicts from the operation we're undoing (its pre-state)
         conflicts.conflicts = new Map(Object.entries(currentOp.conflictsSnapshot.conflicts || {}));
-        conflicts.fileConflicts = new Map(Object.entries(currentOp.conflictsSnapshot.fileConflicts || {}));
+        conflicts.fileConflicts = new Map(
+          Object.entries(currentOp.conflictsSnapshot.fileConflicts || {})
+        );
         await conflicts.save();
       } else {
         // No conflicts snapshot - clear conflicts
@@ -2020,8 +2036,12 @@ export async function createJJ(options) {
       // Restore conflicts to the state that existed after the redone operation.
       await conflicts.load();
       if (undoOp.undoneConflictsSnapshot) {
-        conflicts.conflicts = new Map(Object.entries(undoOp.undoneConflictsSnapshot.conflicts || {}));
-        conflicts.fileConflicts = new Map(Object.entries(undoOp.undoneConflictsSnapshot.fileConflicts || {}));
+        conflicts.conflicts = new Map(
+          Object.entries(undoOp.undoneConflictsSnapshot.conflicts || {})
+        );
+        conflicts.fileConflicts = new Map(
+          Object.entries(undoOp.undoneConflictsSnapshot.fileConflicts || {})
+        );
         await conflicts.save();
       }
 
@@ -2051,10 +2071,8 @@ export async function createJJ(options) {
     /**
      * View operation log (operation history)
      *
-     * @param {Object} [opts] - Options
-     * @param {number} [opts.limit] - Maximum number of operations to return
-     * @param {string} [opts.change] - Show operations for specific change
-     * @returns {Promise<Array>} Array of operations
+     * @param {Record<string, any>} [opts] - Options
+     * @returns {Promise<Array<any>>} Array of operations
      */
     async obslog(opts = {}) {
       await oplog.load();
@@ -2065,11 +2083,11 @@ export async function createJJ(options) {
 
       // Filter by change if specified
       if (changeId) {
-        operations = operations.filter(op =>
-          op.view && (
-            op.view.workingCopy === changeId ||
-            (op.view.heads && op.view.heads.includes(changeId))
-          )
+        operations = operations.filter(
+          (op) =>
+            op.view &&
+            (op.view.workingCopy === changeId ||
+              (op.view.heads && op.view.heads.includes(changeId)))
         );
       }
 
@@ -2079,10 +2097,10 @@ export async function createJJ(options) {
       }
 
       // Transform to evolution events with operation field
-      const events = operations.map(op => ({
+      const events = operations.map((op) => ({
         eventType: op.eventType || 'modify',
         description: op.description,
-        operation: op.id,  // Add operation ID
+        operation: op.id, // Add operation ID
         timestamp: op.timestamp,
         user: op.user,
       }));
@@ -2098,9 +2116,8 @@ export async function createJJ(options) {
       /**
        * List all operations
        *
-       * @param {Object} [opts] - Options
-       * @param {number} [opts.limit] - Maximum number to return
-       * @returns {Promise<Array>} Array of operations
+       * @param {Record<string, any>} [opts] - Options
+       * @returns {Promise<Array<any>>} Array of operations
        */
       async list(opts = {}) {
         await oplog.load();
@@ -2116,20 +2133,19 @@ export async function createJJ(options) {
       /**
        * View repository at a specific operation (time travel)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.operation - Operation ID to view at
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Read-only repository view at that operation
        */
       async at(args) {
         if (!args || !args.operation) {
           throw new JJError('INVALID_ARGUMENT', 'Missing operation ID', {
-            suggestion: 'Provide { operation: operationId }'
+            suggestion: 'Provide { operation: operationId }',
           });
         }
 
         await oplog.load();
         const ops = await oplog.list();
-        const targetOp = ops.find(op => op.id === args.operation);
+        const targetOp = ops.find((op) => op.id === args.operation);
 
         if (!targetOp) {
           throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
@@ -2144,10 +2160,10 @@ export async function createJJ(options) {
 
             // Filter to changes that existed before or at this operation
             const opIndex = ops.indexOf(targetOp);
-            const validChanges = allChanges.filter(change => {
+            const validChanges = allChanges.filter((/** @type {any} */ change) => {
               // Check if this change was created before this operation
-              const changeOps = ops.filter(op =>
-                op.view && op.view.heads && op.view.heads.includes(change.changeId)
+              const changeOps = ops.filter(
+                (op) => op.view && op.view.heads && op.view.heads.includes(change.changeId)
               );
               return changeOps.length > 0 && ops.indexOf(changeOps[0]) <= opIndex;
             });
@@ -2171,8 +2187,7 @@ export async function createJJ(options) {
       /**
        * Show changes in a specific operation (matches `jj operation show`)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.operation - Operation ID
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Operation details with changes made
        */
       async show(args) {
@@ -2184,7 +2199,7 @@ export async function createJJ(options) {
 
         await oplog.load();
         const ops = await oplog.list();
-        const op = ops.find(o => o.id === args.operation);
+        const op = ops.find((o) => o.id === args.operation);
 
         if (!op) {
           throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
@@ -2216,9 +2231,7 @@ export async function createJJ(options) {
       /**
        * Compare repository state between two operations (matches `jj operation diff`)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.from - Source operation ID
-       * @param {string} args.to - Target operation ID
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Differences between operations
        */
       async diff(args) {
@@ -2230,8 +2243,8 @@ export async function createJJ(options) {
 
         await oplog.load();
         const ops = await oplog.list();
-        const fromOp = ops.find(o => o.id === args.from);
-        const toOp = ops.find(o => o.id === args.to);
+        const fromOp = ops.find((o) => o.id === args.from);
+        const toOp = ops.find((o) => o.id === args.to);
 
         if (!fromOp) {
           throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.from} not found`);
@@ -2244,13 +2257,14 @@ export async function createJJ(options) {
         const fromHeads = new Set(fromOp.view?.heads || []);
         const toHeads = new Set(toOp.view?.heads || []);
 
-        const addedHeads = [...toHeads].filter(h => !fromHeads.has(h));
-        const removedHeads = [...fromHeads].filter(h => !toHeads.has(h));
+        const addedHeads = [...toHeads].filter((h) => !fromHeads.has(h));
+        const removedHeads = [...fromHeads].filter((h) => !toHeads.has(h));
 
         // Compare bookmarks
         const fromBookmarks = fromOp.view?.bookmarks || {};
         const toBookmarks = toOp.view?.bookmarks || {};
 
+        /** @type {Record<string, any>} */
         const bookmarkChanges = {};
         for (const name of new Set([...Object.keys(fromBookmarks), ...Object.keys(toBookmarks)])) {
           if (fromBookmarks[name] !== toBookmarks[name]) {
@@ -2276,8 +2290,7 @@ export async function createJJ(options) {
       /**
        * Restore repository to a specific operation (matches `jj operation restore`)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.operation - Operation ID to restore to
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Restore result
        */
       async restore(args) {
@@ -2289,7 +2302,7 @@ export async function createJJ(options) {
 
         await oplog.load();
         const ops = await oplog.list();
-        const targetOp = ops.find(o => o.id === args.operation);
+        const targetOp = ops.find((o) => o.id === args.operation);
 
         if (!targetOp) {
           throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
@@ -2338,8 +2351,7 @@ export async function createJJ(options) {
        * This creates a new operation that undoes the effects of the specified operation,
        * without affecting any operations that came after it.
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.operation - Operation ID to revert
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Revert result
        */
       async revert(args) {
@@ -2351,7 +2363,7 @@ export async function createJJ(options) {
 
         await oplog.load();
         const ops = await oplog.list();
-        const targetOp = ops.find(o => o.id === args.operation);
+        const targetOp = ops.find((o) => o.id === args.operation);
 
         if (!targetOp) {
           throw new JJError('OPERATION_NOT_FOUND', `Operation ${args.operation} not found`);
@@ -2368,10 +2380,10 @@ export async function createJJ(options) {
         const previousOp = ops[targetIndex - 1];
 
         // Compute the inverse changes
-        const inversChanges = {
+        const inversChanges = /** @type {Record<string, any>} */ ({
           bookmarks: {},
           heads: [],
-        };
+        });
 
         // Revert bookmark changes
         const prevBookmarks = previousOp.view?.bookmarks || {};
@@ -2445,8 +2457,7 @@ export async function createJJ(options) {
        * WARNING: This is a destructive operation that cannot be undone. Use with caution.
        * In most cases, you should use undo(), restore(), or revert() instead.
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.operation - Operation ID to abandon
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Abandon result with relinked children
        */
       async abandon(args) {
@@ -2459,7 +2470,7 @@ export async function createJJ(options) {
         await oplog.load();
 
         // Call the OperationLog abandon method
-        const result = await oplog.abandon(args.operation);
+        const result = /** @type {any} */ (await oplog.abandon(args.operation));
 
         // Record a new operation about the abandonment
         // Note: This creates a meta-record that an operation was abandoned
@@ -2476,7 +2487,7 @@ export async function createJJ(options) {
           },
           metadata: {
             abandonedOperation: args.operation,
-            relinkedChildren: result.relinkedChildren.map(c => c.operationId),
+            relinkedChildren: result.relinkedChildren.map((/** @type {any} */ c) => c.operationId),
           },
         });
 
@@ -2492,14 +2503,11 @@ export async function createJJ(options) {
     // ========================================
     // v0.2 FEATURES: History Editing
     // ========================================
-    
+
     /**
      * Squash source change into destination change
      *
-     * @param {Object} args - Arguments
-     * @param {string} [args.source] - Source change ID to squash (defaults to @ - working copy)
-     * @param {string} [args.dest] - Destination change ID (if source is @, defaults to parent)
-     * @param {string} [args.into] - Alias for dest (matches JJ CLI)
+     * @param {Record<string, any>} args - Arguments
      */
     async squash(args = {}) {
       // Check for interactive mode (not supported)
@@ -2530,7 +2538,11 @@ export async function createJJ(options) {
       let destChangeId = dest;
       if (!destChangeId && source === workingCopy.getCurrentChangeId()) {
         const workingCopyChange = await graph.getChange(source);
-        if (workingCopyChange && workingCopyChange.parents && workingCopyChange.parents.length > 0) {
+        if (
+          workingCopyChange &&
+          workingCopyChange.parents &&
+          workingCopyChange.parents.length > 0
+        ) {
           destChangeId = workingCopyChange.parents[0];
         } else {
           throw new JJError('INVALID_ARGUMENTS', 'Cannot squash working copy: no parent found');
@@ -2577,7 +2589,7 @@ export async function createJJ(options) {
 
       // If squashing the working copy, create a new empty working copy on top of dest
       if (isSquashingWorkingCopy) {
-        const user = userConfig.getUser();
+        const user = /** @type {any} */ (userConfig.getUser());
         const newChangeId = generateChangeId();
         const newChange = {
           changeId: newChangeId,
@@ -2599,7 +2611,7 @@ export async function createJJ(options) {
           fileSnapshot: {},
         };
 
-        await graph.addChange(newChange);  // Middleware will sync to Git
+        await graph.addChange(newChange); // Middleware will sync to Git
         await workingCopy.setCurrentChange(newChangeId);
         newWorkingCopyId = newChangeId;
       }
@@ -2619,27 +2631,29 @@ export async function createJJ(options) {
       });
 
       // Dispatch change:squashed event (informational)
-      await dispatchEventAsync(jj, 'change:squashed', {
-        operation: 'squash',
-        sourceChangeId: source,
-        destChangeId: destChangeId,
-        sourceChange,
-        destChange,
-        timestamp: new Date().toISOString(),
-      }, { cancelable: false });
+      await dispatchEventAsync(
+        jj,
+        'change:squashed',
+        {
+          operation: 'squash',
+          sourceChangeId: source,
+          destChangeId: destChangeId,
+          sourceChange,
+          destChange,
+          timestamp: new Date().toISOString(),
+        },
+        { cancelable: false }
+      );
 
       return destChange;
     },
-    
+
     /**
      * Rebase a change to a new parent (matches `jj rebase`)
      *
      * This is the proper JJ CLI semantic for moving changes in history.
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.changeId - Change ID to rebase (or use `from` for compatibility)
-     * @param {string} args.newParent - New parent change ID (or use `to` for compatibility)
-     * @param {Array<string>} [args.paths] - Optional: only rebase changes to specific paths
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} Updated change object
      *
      * @example
@@ -2660,8 +2674,7 @@ export async function createJJ(options) {
     /**
      * Abandon a change
      *
-     * @param {Object} [args] - Arguments
-     * @param {string} [args.changeId] - Change ID to abandon (defaults to @ - working copy)
+     * @param {Record<string, any>} [args] - Arguments
      * @returns {Promise<Object>} The abandoned change object including changeId, description, and abandoned flag
      */
     async abandon(args = {}) {
@@ -2673,7 +2686,7 @@ export async function createJJ(options) {
       const changeId = args.changeId || workingCopy.getCurrentChangeId();
 
       const change = await graph.getChange(changeId);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
@@ -2705,12 +2718,17 @@ export async function createJJ(options) {
       });
 
       // Dispatch change:abandoned event (informational)
-      await dispatchEventAsync(jj, 'change:abandoned', {
-        operation: 'abandon',
-        changeId: changeId,
-        change,
-        timestamp: new Date().toISOString(),
-      }, { cancelable: false });
+      await dispatchEventAsync(
+        jj,
+        'change:abandoned',
+        {
+          operation: 'abandon',
+          changeId: changeId,
+          change,
+          timestamp: new Date().toISOString(),
+        },
+        { cancelable: false }
+      );
 
       return change;
     },
@@ -2721,9 +2739,7 @@ export async function createJJ(options) {
      * Similar to `git revert`, this creates a new change that undoes the changes made
      * by the specified revision without modifying the original change.
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.revision - Change ID to back out
-     * @param {string} [args.message] - Custom description for the backout change
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} The new backout change including changeId, description, and backedOut field
      */
     async backout(args) {
@@ -2738,7 +2754,8 @@ export async function createJJ(options) {
 
       if (!args || !args.revision) {
         throw new JJError('INVALID_ARGUMENT', 'Missing revision argument', {
-          suggestion: 'Provide the change ID to back out: { revision: "abc123..." } (or use change/changeId/target)',
+          suggestion:
+            'Provide the change ID to back out: { revision: "abc123..." } (or use change/changeId/target)',
         });
       }
 
@@ -2747,7 +2764,7 @@ export async function createJJ(options) {
       await userConfig.load();
 
       const originalChange = await graph.getChange(args.revision);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       if (!originalChange) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.revision} not found`);
@@ -2824,9 +2841,7 @@ export async function createJJ(options) {
      * replaced `jj backout` in jj v0.35. `backout()` remains as a deprecated
      * alias for backward compatibility.
      *
-     * @param {Object} args - Revert arguments
-     * @param {string} args.revision - Change to revert (aliases: change/changeId/target)
-     * @param {string} [args.message] - Custom description for the revert change
+     * @param {Record<string, any>} args - Revert arguments
      * @returns {Promise<Object>} Result including `revertedFrom`
      */
     async revert(args) {
@@ -2849,17 +2864,15 @@ export async function createJJ(options) {
      * makes changes discoverable via the `signed()` revset and lets tooling
      * round-trip signature intent. Pass a real signer via `args.backend`/`args.key`.
      *
-     * @param {Object} [args] - Arguments
-     * @param {string} [args.revision] - Change to sign (aliases: change/changeId); defaults to @
-     * @param {string} [args.backend='none'] - Signing backend identifier (e.g. 'gpg', 'ssh')
-     * @param {string} [args.key] - Key identifier
+     * @param {Record<string, any>} [args] - Arguments
      * @returns {Promise<Object>} { changeId, signed, signature }
      */
     async sign(args = {}) {
       await graph.load();
       await workingCopy.load();
 
-      const revision = args.revision || args.change || args.changeId || workingCopy.getCurrentChangeId();
+      const revision =
+        args.revision || args.change || args.changeId || workingCopy.getCurrentChangeId();
       const change = await graph.getChange(revision);
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${revision} not found`);
@@ -2893,15 +2906,15 @@ export async function createJJ(options) {
     /**
      * Remove a signature from a change (matches `jj unsign`, jj v0.27)
      *
-     * @param {Object} [args] - Arguments
-     * @param {string} [args.revision] - Change to unsign (aliases: change/changeId); defaults to @
+     * @param {Record<string, any>} [args] - Arguments
      * @returns {Promise<Object>} { changeId, signed }
      */
     async unsign(args = {}) {
       await graph.load();
       await workingCopy.load();
 
-      const revision = args.revision || args.change || args.changeId || workingCopy.getCurrentChangeId();
+      const revision =
+        args.revision || args.change || args.changeId || workingCopy.getCurrentChangeId();
       const change = await graph.getChange(revision);
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${revision} not found`);
@@ -2941,8 +2954,7 @@ export async function createJJ(options) {
      * 4. Update each ancestor with its modifications
      * 5. Remove absorbed changes from working copy
      *
-     * @param {Object} [args] - Optional arguments
-     * @param {boolean} [args.dryRun] - Preview without making changes
+     * @param {Record<string, any>} [args] - Optional arguments
      * @returns {Promise<Object>} Result with affected changes
      */
     async absorb(args = {}) {
@@ -2952,7 +2964,7 @@ export async function createJJ(options) {
 
       const workingChangeId = workingCopy.getCurrentChangeId();
       const workingChange = await graph.getChange(workingChangeId);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       if (!workingChange) {
         // No working copy
@@ -2981,6 +2993,7 @@ export async function createJJ(options) {
       await graph.updateChange(workingChange);
 
       // Get parent snapshot to determine what's modified
+      /** @type {Record<string, any>} */
       let parentSnapshot = {};
       if (workingChange.parents && workingChange.parents.length > 0) {
         const parent = await graph.getChange(workingChange.parents[0]);
@@ -2990,6 +3003,7 @@ export async function createJJ(options) {
       }
 
       // Find modified files (existed in parent AND content is different)
+      /** @type {Record<string, any>} */
       const modifiedFiles = {};
       for (const [filePath, content] of Object.entries(currentSnapshot)) {
         // Only count as modified if file existed in parent (not a new file)
@@ -3006,6 +3020,7 @@ export async function createJJ(options) {
       }
 
       // Check if there are new files (not in parent)
+      /** @type {Record<string, any>} */
       const newFiles = {};
       for (const [filePath, content] of Object.entries(currentSnapshot)) {
         if (parentSnapshot[filePath] === undefined) {
@@ -3030,6 +3045,7 @@ export async function createJJ(options) {
 
       // For each modified file, use line-level tracking to find which ancestor
       // modified each line, then group modifications by ancestor
+      /** @type {Record<string, any>} */
       const ancestorModifications = {}; // ancestorId -> { filePath: content }
 
       for (const filePath of Object.keys(modifiedFiles)) {
@@ -3157,9 +3173,8 @@ export async function createJJ(options) {
       // Update working copy to reflect absorbed changes
       // Working copy should now match parent's new state (after absorption) plus any new files
       const updatedParent = await graph.getChange(workingChange.parents[0]);
-      const newWorkingSnapshot = updatedParent && updatedParent.fileSnapshot
-        ? { ...updatedParent.fileSnapshot }
-        : {};
+      const newWorkingSnapshot =
+        updatedParent && updatedParent.fileSnapshot ? { ...updatedParent.fileSnapshot } : {};
 
       // Add new files that weren't absorbed
       for (const [filePath, content] of Object.entries(newFiles)) {
@@ -3263,7 +3278,7 @@ export async function createJJ(options) {
      * @param {string} parentContent - Content from parent change
      * @param {string} currentContent - Current working copy content
      * @param {string[]} startingPoints - Change IDs to start search from (parent changeIds)
-     * @returns {Promise<Map>} Map of ancestorId -> { lines: Map(lineNum -> content), originalContent }
+     * @returns {Promise<Map<any, any>>} Map of ancestorId -> { lines: Map(lineNum -> content), originalContent }
      */
     async _findLineAncestors(filePath, parentContent, currentContent, startingPoints) {
       if (!startingPoints || startingPoints.length === 0) {
@@ -3417,7 +3432,11 @@ export async function createJJ(options) {
             continue;
           }
 
-          if (change.parents && change.parents.includes(currentId) && !visited.has(change.changeId)) {
+          if (
+            change.parents &&
+            change.parents.includes(currentId) &&
+            !visited.has(change.changeId)
+          ) {
             visited.add(change.changeId);
             queue.push(change.changeId);
             descendants.push(change.changeId);
@@ -3433,11 +3452,16 @@ export async function createJJ(options) {
      *
      * @private
      * @param {string[]} descendantIds - List of descendant IDs to rebuild
-     * @param {Map} originalStates - Map of changeId -> original state before absorb
+     * @param {Map<any, any>} originalStates - Map of changeId -> original state before absorb
      * @param {string} stopAtChangeId - Don't rebuild this change
-     * @param {Set} directlyModified - Set of changeIds that were directly modified by absorb
+     * @param {Set<any>} directlyModified - Set of changeIds that were directly modified by absorb
      */
-    async _rebuildDescendantsWithStates(descendantIds, originalStates, stopAtChangeId, directlyModified = new Set()) {
+    async _rebuildDescendantsWithStates(
+      descendantIds,
+      originalStates,
+      stopAtChangeId,
+      directlyModified = new Set()
+    ) {
       // Sort descendants by depth (parents before children)
       const sorted = await this._topologicalSort(descendantIds);
 
@@ -3483,6 +3507,7 @@ export async function createJJ(options) {
 
         // For each file, track which lines the descendant modified from original parent
         // then reapply those modifications to the updated parent
+        /** @type {Record<string, any>} */
         const newSnapshot = {};
 
         const allFiles = new Set([
@@ -3504,9 +3529,15 @@ export async function createJJ(options) {
           const resultLines = [...updatedParentLines];
 
           // Find lines that descendant modified
-          for (let i = 0; i < Math.max(originalDescendantLines.length, originalParentLines.length); i++) {
-            const originalDescendantLine = i < originalDescendantLines.length ? originalDescendantLines[i] : undefined;
-            const originalParentLine = i < originalParentLines.length ? originalParentLines[i] : undefined;
+          for (
+            let i = 0;
+            i < Math.max(originalDescendantLines.length, originalParentLines.length);
+            i++
+          ) {
+            const originalDescendantLine =
+              i < originalDescendantLines.length ? originalDescendantLines[i] : undefined;
+            const originalParentLine =
+              i < originalParentLines.length ? originalParentLines[i] : undefined;
 
             // If descendant modified this line from original parent, apply that modification
             if (originalDescendantLine !== originalParentLine) {
@@ -3570,7 +3601,11 @@ export async function createJJ(options) {
             continue;
           }
 
-          if (change.parents && change.parents.includes(currentId) && !visited.has(change.changeId)) {
+          if (
+            change.parents &&
+            change.parents.includes(currentId) &&
+            !visited.has(change.changeId)
+          ) {
             visited.add(change.changeId);
             queue.push(change.changeId);
             descendants.push(change.changeId);
@@ -3608,6 +3643,7 @@ export async function createJJ(options) {
 
         // For each file, track which lines the descendant modified from original parent
         // then reapply those modifications to the updated parent
+        /** @type {Record<string, any>} */
         const newSnapshot = {};
 
         const allFiles = new Set([
@@ -3631,7 +3667,8 @@ export async function createJJ(options) {
           // Find lines that descendant modified
           for (let i = 0; i < Math.max(descendantLines.length, originalParentLines.length); i++) {
             const descendantLine = i < descendantLines.length ? descendantLines[i] : undefined;
-            const originalParentLine = i < originalParentLines.length ? originalParentLines[i] : undefined;
+            const originalParentLine =
+              i < originalParentLines.length ? originalParentLines[i] : undefined;
 
             // If descendant modified this line from original parent, apply that modification
             if (descendantLine !== originalParentLine) {
@@ -3665,15 +3702,14 @@ export async function createJJ(options) {
      * @returns {Promise<string[]>} Sorted change IDs
      */
     async _topologicalSort(changeIds) {
-      const changes = await Promise.all(
-        changeIds.map(id => graph.getChange(id))
-      );
+      const changes = await Promise.all(changeIds.map((id) => graph.getChange(id)));
 
+      /** @type {any[]} */
       const sorted = [];
       const visited = new Set();
       const inProgress = new Set();
 
-      const visit = async (change) => {
+      const visit = async (/** @type {any} */ change) => {
         if (!change || visited.has(change.changeId)) {
           return;
         }
@@ -3713,8 +3749,7 @@ export async function createJJ(options) {
      * A parent is redundant if it's already an ancestor through another parent.
      * This operation optimizes the graph structure without changing the content.
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.revision - Change ID to simplify
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<{changeId: string, simplified: boolean, removedParents?: string[]}>}
      */
     async simplifyParents(args) {
@@ -3728,7 +3763,7 @@ export async function createJJ(options) {
       await userConfig.load();
 
       const change = await graph.getChange(args.revision);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.revision} not found`);
@@ -3744,6 +3779,7 @@ export async function createJJ(options) {
 
       // Find redundant parents
       // A parent P is redundant if there exists another parent Q such that P is an ancestor of Q
+      /** @type {any[]} */
       const redundantParents = [];
 
       for (let i = 0; i < change.parents.length; i++) {
@@ -3757,7 +3793,7 @@ export async function createJJ(options) {
 
           // Get all ancestors of parentQ
           const ancestorsQ = await this.log({ revisions: [parentQ] });
-          const ancestorIds = ancestorsQ.map(c => c.changeId);
+          const ancestorIds = ancestorsQ.map((/** @type {any} */ c) => c.changeId);
 
           // If parentP is in the ancestors of parentQ, then parentP is redundant
           if (ancestorIds.includes(parentP)) {
@@ -3778,7 +3814,9 @@ export async function createJJ(options) {
       }
 
       // Remove redundant parents
-      change.parents = change.parents.filter(p => !redundantParents.includes(p));
+      change.parents = change.parents.filter(
+        (/** @type {any} */ p) => !redundantParents.includes(p)
+      );
       await graph.updateChange(change);
 
       // Record operation
@@ -3805,8 +3843,7 @@ export async function createJJ(options) {
     /**
      * Un-abandon a change (restore from abandoned state)
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.changeId - Change ID to un-abandon
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} The un-abandoned change object including changeId, description, and abandoned flag (now false)
      */
     async unabandon(args) {
@@ -3831,7 +3868,7 @@ export async function createJJ(options) {
       await userConfig.load();
 
       const change = await graph.getChange(args.changeId);
-      const user = userConfig.getUser();
+      const user = /** @type {any} */ (userConfig.getUser());
 
       if (!change) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${args.changeId} not found`);
@@ -3863,24 +3900,25 @@ export async function createJJ(options) {
       });
 
       // Dispatch change:unabandoned event (informational)
-      await dispatchEventAsync(jj, 'change:unabandoned', {
-        operation: 'unabandon',
-        changeId: args.changeId,
-        change,
-        timestamp: new Date().toISOString(),
-      }, { cancelable: false });
+      await dispatchEventAsync(
+        jj,
+        'change:unabandoned',
+        {
+          operation: 'unabandon',
+          changeId: args.changeId,
+          change,
+          timestamp: new Date().toISOString(),
+        },
+        { cancelable: false }
+      );
 
       return change;
     },
-    
+
     /**
      * Split a change into multiple changes (simplified v0.2 implementation)
      *
-     * @param {Object} args - Arguments
-     * @param {string} args.changeId - Change ID to split
-     * @param {string} args.description1 - Description for first part
-     * @param {string} args.description2 - Description for second part
-     * @param {string[]} [args.paths] - Specific paths to include in first split (full implementation planned for future)
+     * @param {Record<string, any>} args - Arguments
      */
     async split(args) {
       // Normalize: accept common parameter aliases
@@ -3960,7 +3998,7 @@ export async function createJJ(options) {
 
       return { original: originalChange, new: newChange };
     },
-    
+
     // ========================================
     // v0.3 FEATURES: Git Integration
     // ========================================
@@ -3973,18 +4011,13 @@ export async function createJJ(options) {
        * Initialize a new Git-backed JJ repository
        * Matches `jj git init` CLI command
        *
-       * @param {Object} opts - Initialization options
-       * @param {string} [opts.userName] - User name for commits
-       * @param {string} [opts.userEmail] - User email for commits
-       * @param {string} [opts.defaultBranch] - Default branch name (default: 'main')
+       * @param {Record<string, any>} opts - Initialization options
        */
       async init(opts = {}) {
         if (!gitBackend) {
-          throw new JJError(
-            'BACKEND_NOT_AVAILABLE',
-            'Git backend not configured',
-            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-          );
+          throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+            suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+          });
         }
 
         // Initialize Git backend
@@ -4009,7 +4042,7 @@ export async function createJJ(options) {
 
         // Create root change
         const rootChangeId = generateChangeId();
-        const user = userConfig.getUser();
+        const user = /** @type {any} */ (userConfig.getUser());
         const rootChange = {
           changeId: rootChangeId,
           commitId: '0000000000000000000000000000000000000000',
@@ -4054,32 +4087,22 @@ export async function createJJ(options) {
       /**
        * Fetch changes from remote Git repository
        *
-       * @param {Object} args - Fetch arguments
-       * @param {string} args.remote - Remote name or URL
-       * @param {string[]} [args.refs] - Refs to fetch (default: all)
-       * @param {number} [args.depth] - Create shallow clone with history truncated to depth (v0.4)
-       * @param {boolean} [args.relative] - Depth measured from current shallow depth (v0.4)
-       * @param {boolean} [args.singleBranch] - Only fetch single branch (v0.4)
-       * @param {boolean} [args.noTags] - Don't fetch tags (v0.4)
-       * @param {Function} [args.onProgress] - Progress callback
-       * @param {Function} [args.onAuth] - Authentication callback
+       * @param {Record<string, any>} args - Fetch arguments
        */
       async fetch(args) {
         if (!gitBackend) {
-          throw new JJError(
-            'BACKEND_NOT_AVAILABLE',
-            'Git backend not configured',
-            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-          );
+          throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+            suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+          });
         }
 
         const result = await gitBackend.fetch({
           remote: args.remote,
           refs: args.refs,
-          depth: args.depth,           // v0.4: Shallow clone support
-          relative: args.relative,     // v0.4: Relative depth
+          depth: args.depth, // v0.4: Shallow clone support
+          relative: args.relative, // v0.4: Relative depth
           singleBranch: args.singleBranch, // v0.4: Single branch only
-          noTags: args.noTags,        // v0.4: Skip tags
+          noTags: args.noTags, // v0.4: Skip tags
           onProgress: args.onProgress,
           onAuth: args.onAuth,
         });
@@ -4104,20 +4127,13 @@ export async function createJJ(options) {
       /**
        * Push changes to remote Git repository
        *
-       * @param {Object} args - Push arguments
-       * @param {string} args.remote - Remote name or URL
-       * @param {string[]} [args.refs] - Refs to push (default: current bookmarks)
-       * @param {boolean} [args.force] - Allow non-fast-forward
-       * @param {Function} [args.onProgress] - Progress callback
-       * @param {Function} [args.onAuth] - Authentication callback
+       * @param {Record<string, any>} args - Push arguments
        */
       async push(args) {
         if (!gitBackend) {
-          throw new JJError(
-            'BACKEND_NOT_AVAILABLE',
-            'Git backend not configured',
-            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-          );
+          throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+            suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+          });
         }
 
         const result = await gitBackend.push({
@@ -4148,24 +4164,14 @@ export async function createJJ(options) {
       /**
        * Clone a Git repository (matches `jj git clone`)
        *
-       * @param {Object} args - Clone arguments
-       * @param {string} args.url - Repository URL to clone from
-       * @param {string} [args.dir] - Directory to clone into (defaults to repo name from URL)
-       * @param {number} [args.depth] - Create shallow clone with history truncated to depth
-       * @param {boolean} [args.singleBranch] - Only clone single branch
-       * @param {boolean} [args.noTags] - Don't clone tags
-       * @param {string} [args.ref] - Specific ref/branch to clone
-       * @param {Function} [args.onProgress] - Progress callback
-       * @param {Function} [args.onAuth] - Authentication callback
+       * @param {Record<string, any>} args - Clone arguments
        * @returns {Promise<Object>} Clone result with directory path
        */
       async clone(args) {
         if (!gitBackend) {
-          throw new JJError(
-            'BACKEND_NOT_AVAILABLE',
-            'Git backend not configured',
-            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-          );
+          throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+            suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+          });
         }
 
         if (!args || !args.url) {
@@ -4182,7 +4188,12 @@ export async function createJJ(options) {
 
         // Determine clone directory
         const git = (await import('isomorphic-git')).default;
-        const cloneDir = args.dir || args.url.split('/').pop().replace(/\.git$/, '');
+        const cloneDir =
+          args.dir ||
+          args.url
+            .split('/')
+            .pop()
+            .replace(/\.git$/, '');
         const fullCloneDir = path.join(dir, cloneDir);
 
         // Clone using isomorphic-git
@@ -4200,7 +4211,9 @@ export async function createJJ(options) {
         });
 
         // Initialize JJ repository structure in cloned directory
-        const clonedBackend = new IsomorphicGitBackend({ fs, http, dir: fullCloneDir });
+        const clonedBackend = /** @type {any} */ (
+          new IsomorphicGitBackend({ fs, http, dir: fullCloneDir })
+        );
         await clonedBackend._createJJRepoStructure();
 
         // Record operation
@@ -4231,11 +4244,9 @@ export async function createJJ(options) {
        */
       async import() {
         if (!gitBackend) {
-          throw new JJError(
-            'BACKEND_NOT_AVAILABLE',
-            'Git backend not configured',
-            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-          );
+          throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+            suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+          });
         }
 
         await graph.load();
@@ -4253,14 +4264,18 @@ export async function createJJ(options) {
           if (!change) {
             // Create a new change for this commit
             const changeId = generateChangeId();
-            const user = userConfig.getUser();
+            const user = /** @type {any} */ (userConfig.getUser());
             change = {
               changeId,
               commitId: ref.oid,
               parents: [],
               tree: ref.oid,
               author: { name: user.name, email: user.email, timestamp: new Date().toISOString() },
-              committer: { name: user.name, email: user.email, timestamp: new Date().toISOString() },
+              committer: {
+                name: user.name,
+                email: user.email,
+                timestamp: new Date().toISOString(),
+              },
               description: `Imported from Git ref ${ref.name}`,
               timestamp: new Date().toISOString(),
             };
@@ -4304,11 +4319,9 @@ export async function createJJ(options) {
        */
       async export() {
         if (!gitBackend) {
-          throw new JJError(
-            'BACKEND_NOT_AVAILABLE',
-            'Git backend not configured',
-            { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-          );
+          throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+            suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+          });
         }
 
         await graph.load();
@@ -4353,37 +4366,31 @@ export async function createJJ(options) {
         /**
          * List Git remotes (matches `jj git remote list`)
          *
-         * @returns {Promise<Array>} List of remotes with names and URLs
+         * @returns {Promise<Array<any>>} List of remotes with names and URLs
          */
         async list() {
           if (!gitBackend) {
-            throw new JJError(
-              'BACKEND_NOT_AVAILABLE',
-              'Git backend not configured',
-              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-            );
+            throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+              suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+            });
           }
 
           const git = (await import('isomorphic-git')).default;
           const remotes = await git.listRemotes({ fs, dir });
-          return remotes.map(r => ({ name: r.remote, url: r.url }));
+          return remotes.map((r) => ({ name: r.remote, url: r.url }));
         },
 
         /**
          * Add a Git remote (matches `jj git remote add`)
          *
-         * @param {Object} args - Remote arguments
-         * @param {string} args.name - Remote name
-         * @param {string} args.url - Remote URL
+         * @param {Record<string, any>} args - Remote arguments
          * @returns {Promise<Object>} Added remote info
          */
         async add(args) {
           if (!gitBackend) {
-            throw new JJError(
-              'BACKEND_NOT_AVAILABLE',
-              'Git backend not configured',
-              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-            );
+            throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+              suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+            });
           }
 
           if (!args || !args.name || !args.url) {
@@ -4420,17 +4427,14 @@ export async function createJJ(options) {
         /**
          * Remove a Git remote (matches `jj git remote remove`)
          *
-         * @param {Object} args - Remote arguments
-         * @param {string} args.name - Remote name to remove
+         * @param {Record<string, any>} args - Remote arguments
          * @returns {Promise<Object>} Removal result
          */
         async remove(args) {
           if (!gitBackend) {
-            throw new JJError(
-              'BACKEND_NOT_AVAILABLE',
-              'Git backend not configured',
-              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-            );
+            throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+              suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+            });
           }
 
           if (!args || !args.name) {
@@ -4466,18 +4470,14 @@ export async function createJJ(options) {
         /**
          * Rename a Git remote (matches `jj git remote rename`)
          *
-         * @param {Object} args - Remote arguments
-         * @param {string} args.oldName - Current remote name
-         * @param {string} args.newName - New remote name
+         * @param {Record<string, any>} args - Remote arguments
          * @returns {Promise<Object>} Rename result
          */
         async rename(args) {
           if (!gitBackend) {
-            throw new JJError(
-              'BACKEND_NOT_AVAILABLE',
-              'Git backend not configured',
-              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-            );
+            throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+              suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+            });
           }
 
           if (!args || !args.oldName || !args.newName) {
@@ -4490,7 +4490,7 @@ export async function createJJ(options) {
 
           // Get current URL
           const remotes = await git.listRemotes({ fs, dir });
-          const remote = remotes.find(r => r.remote === args.oldName);
+          const remote = remotes.find((r) => r.remote === args.oldName);
           if (!remote) {
             throw new JJError('NOT_FOUND', `Remote ${args.oldName} not found`);
           }
@@ -4519,18 +4519,14 @@ export async function createJJ(options) {
         /**
          * Set URL for a Git remote (matches `jj git remote set-url`)
          *
-         * @param {Object} args - Remote arguments
-         * @param {string} args.name - Remote name
-         * @param {string} args.url - New URL
+         * @param {Record<string, any>} args - Remote arguments
          * @returns {Promise<Object>} Updated remote info
          */
         async setUrl(args) {
           if (!gitBackend) {
-            throw new JJError(
-              'BACKEND_NOT_AVAILABLE',
-              'Git backend not configured',
-              { suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })' }
-            );
+            throw new JJError('BACKEND_NOT_AVAILABLE', 'Git backend not configured', {
+              suggestion: 'Provide git instance: createJJ({ fs, dir, git, http })',
+            });
           }
 
           if (!args || !args.name || !args.url) {
@@ -4543,7 +4539,7 @@ export async function createJJ(options) {
 
           // Check if remote exists
           const remotes = await git.listRemotes({ fs, dir });
-          const remote = remotes.find(r => r.remote === args.name);
+          const remote = remotes.find((r) => r.remote === args.name);
           if (!remote) {
             throw new JJError('NOT_FOUND', `Remote ${args.name} not found`);
           }
@@ -4597,8 +4593,7 @@ export async function createJJ(options) {
     /**
      * Merge changes from another change, detecting conflicts
      *
-     * @param {Object} args - Merge arguments
-     * @param {string} args.source - Source change ID to merge
+     * @param {Record<string, any>} args - Merge arguments
      * @returns {Promise<Object>} Merge result with conflicts
      */
     async merge(args) {
@@ -4681,9 +4676,9 @@ export async function createJJ(options) {
         baseFiles,
         leftFiles,
         rightFiles,
-        drivers: args.drivers || {},  // v0.5: custom merge drivers
-        workingCopyDir: args.dryRun ? null : dir,  // v0.5: skip file writes in dry-run
-        baseChange: baseChangeId,  // v0.5: metadata for drivers
+        drivers: args.drivers || {}, // v0.5: custom merge drivers
+        workingCopyDir: /** @type {any} */ (args.dryRun ? null : dir), // v0.5: skip file writes in dry-run
+        baseChange: baseChangeId, // v0.5: metadata for drivers
         leftChange: currentChangeId,
         rightChange: args.source,
       });
@@ -4736,8 +4731,7 @@ export async function createJJ(options) {
       /**
        * List active (unresolved) conflicts
        *
-       * @param {Object} opts - List options
-       * @param {boolean} [opts.includeResolved=false] - Include resolved conflicts
+       * @param {Record<string, any>} opts - List options
        */
       async list(opts = {}) {
         await conflicts.load();
@@ -4749,11 +4743,7 @@ export async function createJJ(options) {
       /**
        * Resolve a conflict (v0.5 enhanced)
        *
-       * @param {Object} args - Resolution arguments
-       * @param {string} args.conflictId - Conflict ID
-       * @param {string} [args.resolution] - Manual resolution content
-       * @param {string} [args.driver] - Merge driver to use
-       * @param {string} [args.strategy] - Resolution strategy ('ours', 'theirs', 'union')
+       * @param {Record<string, any>} args - Resolution arguments
        */
       async resolve(args) {
         if (!args || !args.conflictId) {
@@ -4783,12 +4773,12 @@ export async function createJJ(options) {
 
           const driverResult = await mergeDrivers.executeDriver(
             driver,
-            {
+            /** @type {any} */ ({
               path: conflict.path,
               base: conflict.sides.base,
               ours: conflict.sides.left,
               theirs: conflict.sides.right,
-            },
+            }),
             mergeDrivers.isBinaryFile(conflict.path, conflict.sides.left)
           );
 
@@ -4817,10 +4807,7 @@ export async function createJJ(options) {
       /**
        * Resolve all conflicts (v0.5)
        *
-       * @param {Object} args - Resolution arguments
-       * @param {string} args.strategy - Resolution strategy ('ours', 'theirs', 'union')
-       * @param {Object} [args.filter] - Optional filter
-       * @param {string} [args.filter.path] - Path pattern to filter
+       * @param {Record<string, any>} args - Resolution arguments
        */
       async resolveAll(args) {
         if (!args || !args.strategy) {
@@ -4834,7 +4821,7 @@ export async function createJJ(options) {
         let toResolve = allConflicts;
         if (args.filter && args.filter.path) {
           const pattern = args.filter.path;
-          toResolve = allConflicts.filter(c => {
+          toResolve = allConflicts.filter((c) => {
             // Simple pattern matching - exact match or glob
             if (pattern.includes('*')) {
               const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
@@ -4869,8 +4856,7 @@ export async function createJJ(options) {
       /**
        * Get conflict markers for a conflict (v0.5)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.conflictId - Conflict ID
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<string>} Conflict markers in standard format
        */
       async markers(args) {
@@ -4895,7 +4881,7 @@ export async function createJJ(options) {
       /**
        * Mark conflict as resolved
        */
-      async markResolved(args) {
+      async markResolved(/** @type {Record<string, any>} */ args) {
         if (!args || !args.conflictId) {
           throw new JJError('INVALID_ARGUMENT', 'Missing conflictId');
         }
@@ -4916,19 +4902,15 @@ export async function createJJ(options) {
      *
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
-    async resolve(args = {}) {
+    async resolve(/** @type {Record<string, any>} */ args = {}) {
       // Check for external merge tool usage
       if (args.tool) {
-        throw new JJError(
-          'UNSUPPORTED_OPERATION',
-          'External merge tools not supported',
-          {
-            feature: 'resolve --tool',
-            reason: 'External merge tools require system integration not available in library API',
-            alternative: 'Use jj.conflicts.resolve() with programmatic resolution',
-            suggestion: 'For conflict resolution, use the programmatic API or resolve files manually',
-          }
-        );
+        throw new JJError('UNSUPPORTED_OPERATION', 'External merge tools not supported', {
+          feature: 'resolve --tool',
+          reason: 'External merge tools require system integration not available in library API',
+          alternative: 'Use jj.conflicts.resolve() with programmatic resolution',
+          suggestion: 'For conflict resolution, use the programmatic API or resolve files manually',
+        });
       }
 
       throw new JJError(
@@ -4957,10 +4939,7 @@ export async function createJJ(options) {
       /**
        * Show file content (matches `jj file show`)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.path - File path to read
-       * @param {string} [args.changeId] - Change ID (defaults to working copy)
-       * @param {string} [args.encoding='utf-8'] - Encoding ('utf-8' or 'binary')
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<string|Uint8Array>} File contents
        */
       async show(args) {
@@ -4970,8 +4949,7 @@ export async function createJJ(options) {
       /**
        * List files (matches `jj file list`)
        *
-       * @param {Object} [args={}] - Arguments
-       * @param {string} [args.changeId] - Change ID (defaults to working copy)
+       * @param {Record<string, any>} [args={}] - Arguments
        * @returns {Promise<Array<string>>} Array of file paths
        */
       async list(args = {}) {
@@ -4986,11 +4964,7 @@ export async function createJJ(options) {
        * as a regular expression by default; pass `{ kind: 'substring' }` for a
        * literal search.
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.pattern - Pattern to search for
-       * @param {string} [args.changeId] - Change to search (defaults to @)
-       * @param {string} [args.kind='regex'] - 'regex' or 'substring'
-       * @param {string} [args.path] - Restrict search to a single file path
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Array<{path: string, lineNumber: number, line: string}>>}
        */
       async search(args) {
@@ -5010,7 +4984,7 @@ export async function createJJ(options) {
         const kind = args.kind || 'regex';
         let matcher;
         if (kind === 'substring') {
-          matcher = (line) => line.includes(args.pattern);
+          matcher = (/** @type {any} */ line) => line.includes(args.pattern);
         } else {
           let regex;
           try {
@@ -5020,10 +4994,11 @@ export async function createJJ(options) {
               pattern: args.pattern,
             });
           }
-          matcher = (line) => regex.test(line);
+          matcher = (/** @type {any} */ line) => regex.test(line);
         }
 
         const snapshot = change.fileSnapshot || {};
+        /** @type {any[]} */
         const results = [];
         for (const [filePath, content] of Object.entries(snapshot)) {
           if (args.path && filePath !== args.path) continue;
@@ -5041,9 +5016,7 @@ export async function createJJ(options) {
       /**
        * Write file content (organized file operation)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.path - File path to write
-       * @param {string|Uint8Array} args.data - File content
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Write result with file info
        */
       async write(args) {
@@ -5053,9 +5026,7 @@ export async function createJJ(options) {
       /**
        * Move/rename file (organized file operation)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.from - Source path
-       * @param {string} args.to - Destination path
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Move result
        */
       async move(args) {
@@ -5065,8 +5036,7 @@ export async function createJJ(options) {
       /**
        * Remove file (organized file operation)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.path - File path to remove
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Remove result with file info
        */
       async remove(args) {
@@ -5076,10 +5046,8 @@ export async function createJJ(options) {
       /**
        * Show which revision modified each line (matches `jj file annotate` / git blame)
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.path - File path to annotate
-       * @param {string} [args.changeId] - Change ID (defaults to working copy)
-       * @returns {Promise<Array>} Array of line annotations with changeId, author, timestamp, and content
+       * @param {Record<string, any>} args - Arguments
+       * @returns {Promise<Array<any>>} Array of line annotations with changeId, author, timestamp, and content
        */
       async annotate(args) {
         if (!args || !args.path) {
@@ -5121,7 +5089,8 @@ export async function createJJ(options) {
             }
 
             // Move to parent (simplified - takes first parent)
-            currentChangeId = change.parents && change.parents.length > 0 ? change.parents[0] : null;
+            currentChangeId =
+              change.parents && change.parents.length > 0 ? change.parents[0] : null;
           }
 
           annotations.push({
@@ -5140,9 +5109,7 @@ export async function createJJ(options) {
        * Change file permissions (matches `jj file chmod`)
        * Note: Only works in Node.js, not in browsers
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.path - File path
-       * @param {number|string} args.mode - File mode (e.g., 0o755 or '755')
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} chmod result
        */
       async chmod(args) {
@@ -5160,9 +5127,13 @@ export async function createJJ(options) {
 
         // Check if we're in a browser environment
         if (typeof process === 'undefined' || !fs.promises.chmod) {
-          throw new JJError('UNSUPPORTED_OPERATION', 'chmod is not supported in browser environments', {
-            suggestion: 'chmod only works in Node.js',
-          });
+          throw new JJError(
+            'UNSUPPORTED_OPERATION',
+            'chmod is not supported in browser environments',
+            {
+              suggestion: 'chmod only works in Node.js',
+            }
+          );
         }
 
         const fullPath = path.join(dir, args.path);
@@ -5188,8 +5159,7 @@ export async function createJJ(options) {
        * This is a stub method that throws an error explaining why explicit
        * file tracking is not needed in JavaScript environments.
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.path - File path to track
+       * @param {Record<string, any>} _args - Arguments
        * @throws {JJError} Always throws UNSUPPORTED_OPERATION
        */
       async track(_args) {
@@ -5219,8 +5189,7 @@ export async function createJJ(options) {
        * This is a stub method that throws an error explaining why explicit
        * file untracking is not needed in JavaScript environments.
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.path - File path to untrack
+       * @param {Record<string, any>} _args - Arguments
        * @throws {JJError} Always throws UNSUPPORTED_OPERATION
        */
       async untrack(_args) {
@@ -5253,10 +5222,7 @@ export async function createJJ(options) {
       /**
        * Add a new workspace
        *
-       * @param {Object} args - Workspace arguments
-       * @param {string} args.path - Path for the new workspace
-       * @param {string} [args.name] - Optional name
-       * @param {string} [args.changeId] - Change to check out
+       * @param {Record<string, any>} args - Workspace arguments
        */
       async add(args) {
         await workspaces.load();
@@ -5267,7 +5233,7 @@ export async function createJJ(options) {
           args = { ...args, changeId: currentChangeId };
         }
 
-        const workspace = await workspaces.add(args);
+        const workspace = /** @type {any} */ (await workspaces.add(/** @type {any} */ (args)));
 
         // If a change was specified, check it out in the new workspace
         if (args.changeId) {
@@ -5324,9 +5290,7 @@ export async function createJJ(options) {
       /**
        * Remove a workspace
        *
-       * @param {Object} args - Remove arguments
-       * @param {string} args.id - Workspace ID
-       * @param {boolean} [args.force=false] - Force removal
+       * @param {Record<string, any>} args - Remove arguments
        */
       async remove(args) {
         if (!args || !args.id) {
@@ -5356,8 +5320,7 @@ export async function createJJ(options) {
       /**
        * Forget a workspace without removing files (matches `jj workspace forget`)
        *
-       * @param {Object} args - Forget arguments
-       * @param {string} args.id - Workspace ID
+       * @param {Record<string, any>} args - Forget arguments
        */
       async forget(args) {
         if (!args || !args.id) {
@@ -5389,7 +5352,7 @@ export async function createJJ(options) {
        */
       async list() {
         await workspaces.load();
-        return workspaces.list();
+        return /** @type {any[]} */ (workspaces.list());
       },
 
       /**
@@ -5399,7 +5362,7 @@ export async function createJJ(options) {
        */
       async get(id) {
         await workspaces.load();
-        const workspace = workspaces.get(id);
+        const workspace = /** @type {any} */ (workspaces.get(id));
         if (!workspace) {
           throw new JJError('WORKSPACE_NOT_FOUND', `Workspace ${id} not found`);
         }
@@ -5409,9 +5372,7 @@ export async function createJJ(options) {
       /**
        * Rename a workspace (matches `jj workspace rename`)
        *
-       * @param {Object} args - Rename arguments
-       * @param {string} args.workspace - Current workspace name/id
-       * @param {string} args.newName - New name for the workspace
+       * @param {Record<string, any>} args - Rename arguments
        * @returns {Promise<Object>} Updated workspace
        */
       async rename(args) {
@@ -5420,7 +5381,7 @@ export async function createJJ(options) {
         }
 
         await workspaces.load();
-        const workspace = workspaces.get(args.workspace);
+        const workspace = /** @type {any} */ (workspaces.get(args.workspace));
         if (!workspace) {
           throw new JJError('WORKSPACE_NOT_FOUND', `Workspace ${args.workspace} not found`);
         }
@@ -5448,8 +5409,7 @@ export async function createJJ(options) {
       /**
        * Get workspace root directory (matches `jj workspace root`)
        *
-       * @param {Object} [args={}] - Arguments
-       * @param {string} [args.workspace] - Workspace name/id (defaults to current)
+       * @param {Record<string, any>} [args={}] - Arguments
        * @returns {Promise<string>} Root directory path
        */
       async root(args = {}) {
@@ -5461,10 +5421,10 @@ export async function createJJ(options) {
         await workspaces.load();
 
         // Try to get by ID first, then by name
-        let workspace = workspaces.get(args.workspace);
+        let workspace = /** @type {any} */ (workspaces.get(args.workspace));
         if (!workspace) {
           // Search by name
-          const allWorkspaces = workspaces.list();
+          const allWorkspaces = /** @type {any[]} */ (workspaces.list());
           workspace = allWorkspaces.find((ws) => ws.name === args.workspace);
         }
 
@@ -5478,15 +5438,14 @@ export async function createJJ(options) {
       /**
        * Update stale workspaces (matches `jj workspace update-stale`)
        *
-       * @param {Object} [args={}] - Arguments
-       * @param {string} [args.workspace] - Specific workspace to update (defaults to all stale)
+       * @param {Record<string, any>} [args={}] - Arguments
        * @returns {Promise<Object>} Update result
        */
       async updateStale(args = {}) {
         await workspaces.load();
         await graph.load();
 
-        const allWorkspaces = workspaces.list();
+        const allWorkspaces = /** @type {any[]} */ (workspaces.list());
         const staleWorkspaces = [];
 
         for (const ws of allWorkspaces) {
@@ -5509,9 +5468,9 @@ export async function createJJ(options) {
 
         if (args.workspace && toUpdate.length === 0) {
           // Look up the workspace to get its name for a better error message
-          let workspace = workspaces.get(args.workspace);
+          let workspace = /** @type {any} */ (workspaces.get(args.workspace));
           if (!workspace) {
-            const allWorkspaces = workspaces.list();
+            const allWorkspaces = /** @type {any[]} */ (workspaces.list());
             workspace = allWorkspaces.find((ws) => ws.name === args.workspace);
           }
           const workspaceName = workspace ? workspace.name : args.workspace;
@@ -5579,7 +5538,7 @@ export async function createJJ(options) {
        * Queue a background operation
        *
        * @param {Function} operation - Async operation
-       * @param {Object} [opts] - Options
+       * @param {Record<string, any>} [opts] - Options
        */
       async queue(operation, opts) {
         if (!jj.backgroundOps) {
@@ -5593,7 +5552,7 @@ export async function createJJ(options) {
       /**
        * List background operations
        *
-       * @param {Object} [opts] - Filter options
+       * @param {Record<string, any>} [opts] - Filter options
        */
       listOperations(opts) {
         if (!jj.backgroundOps) {
@@ -5605,7 +5564,7 @@ export async function createJJ(options) {
       /**
        * Enable auto-snapshot on file changes
        *
-       * @param {Object} [opts] - Options
+       * @param {Record<string, any>} [opts] - Options
        */
       async enableAutoSnapshot(opts) {
         if (!jj.backgroundOps) {
@@ -5647,7 +5606,7 @@ export async function createJJ(options) {
       /**
        * List all bookmarks
        *
-       * @returns {Promise<Array>} Array of bookmarks with name and changeId
+       * @returns {Promise<Array<any>>} Array of bookmarks with name and changeId
        */
       async list() {
         await bookmarks.load();
@@ -5657,9 +5616,7 @@ export async function createJJ(options) {
       /**
        * Set/create a bookmark (matches `jj bookmark set`)
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.name - Bookmark name
-       * @param {string} args.changeId - Change ID to point to
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Bookmark info
        */
       async set(args) {
@@ -5677,7 +5634,8 @@ export async function createJJ(options) {
         if (!args || !args.name || !args.changeId) {
           throw new JJError('INVALID_ARGUMENT', 'Missing name or changeId', {
             args,
-            suggestion: 'Provide both: { name: "main", changeId: "abc123..." } (or use target/change/revision instead of changeId)',
+            suggestion:
+              'Provide both: { name: "main", changeId: "abc123..." } (or use target/change/revision instead of changeId)',
           });
         }
 
@@ -5707,9 +5665,7 @@ export async function createJJ(options) {
        *
        * Unlike `set()`, this will fail if the bookmark already exists.
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.name - Bookmark name
-       * @param {string} [args.changeId] - Change ID to point to (default: working copy)
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Bookmark info
        */
       async create(args) {
@@ -5726,7 +5682,8 @@ export async function createJJ(options) {
 
         if (!args || !args.name) {
           throw new JJError('INVALID_ARGUMENT', 'Missing name argument', {
-            suggestion: 'Provide: { name: "main", changeId: "abc123..." } or { name: "main" } for working copy',
+            suggestion:
+              'Provide: { name: "main", changeId: "abc123..." } or { name: "main" } for working copy',
           });
         }
 
@@ -5743,7 +5700,8 @@ export async function createJJ(options) {
         const existingBookmark = await bookmarks.get(args.name);
         if (existingBookmark) {
           throw new JJError('BOOKMARK_EXISTS', `Bookmark ${args.name} already exists`, {
-            suggestion: 'Use bookmark.set() to update an existing bookmark, or bookmark.move() to move it',
+            suggestion:
+              'Use bookmark.set() to update an existing bookmark, or bookmark.move() to move it',
           });
         }
 
@@ -5770,9 +5728,7 @@ export async function createJJ(options) {
       /**
        * Move a bookmark to a different change (matches `jj bookmark move`)
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.name - Bookmark name
-       * @param {string} args.to - Target change ID
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Move result
        */
       async move(args) {
@@ -5792,7 +5748,8 @@ export async function createJJ(options) {
         if (!args || !args.name || !args.to) {
           throw new JJError('INVALID_ARGUMENT', 'Missing name or to', {
             args,
-            suggestion: 'Provide both: { name: "main", to: "abc123..." } (or use target/changeId/change/revision instead of to)',
+            suggestion:
+              'Provide both: { name: "main", to: "abc123..." } (or use target/changeId/change/revision instead of to)',
           });
         }
 
@@ -5827,9 +5784,7 @@ export async function createJJ(options) {
        * along the graph — the target must be a descendant of the bookmark's
        * current position (defaults to the working copy).
        *
-       * @param {Object} args - Arguments
-       * @param {string} args.name - Bookmark name to advance
-       * @param {string} [args.to] - Target change (aliases: target/changeId/change/revision); defaults to @
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} { name, from, to }
        */
       async advance(args) {
@@ -5856,9 +5811,11 @@ export async function createJJ(options) {
         // The target must be a descendant of (or equal to) the current position.
         const descendants = new Set(await revset.getDescendants(from));
         if (to !== from && !descendants.has(to)) {
-          throw new JJError('BOOKMARK_NOT_ADVANCEABLE',
+          throw new JJError(
+            'BOOKMARK_NOT_ADVANCEABLE',
             `Cannot advance bookmark ${args.name}: ${to.slice(0, 8)} is not a descendant of ${from.slice(0, 8)}`,
-            { suggestion: 'Use bookmark.move() to move a bookmark backward or sideways' });
+            { suggestion: 'Use bookmark.move() to move a bookmark backward or sideways' }
+          );
         }
 
         await bookmarks.move(args.name, to);
@@ -5882,8 +5839,7 @@ export async function createJJ(options) {
       /**
        * Delete a bookmark (matches `jj bookmark delete`)
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.name - Bookmark name to delete
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Deletion result
        */
       async delete(args) {
@@ -5922,9 +5878,7 @@ export async function createJJ(options) {
       /**
        * Rename a bookmark (matches `jj bookmark rename`)
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.oldName - Current bookmark name
-       * @param {string} args.newName - New bookmark name
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Rename result
        */
       async rename(args) {
@@ -5965,9 +5919,7 @@ export async function createJJ(options) {
       /**
        * Track a remote bookmark (matches `jj bookmark track`)
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.name - Bookmark name to track
-       * @param {string} [args.remote='origin'] - Remote name
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Track result
        */
       async track(args) {
@@ -5982,6 +5934,7 @@ export async function createJJ(options) {
 
         // Store tracking info in bookmarks metadata
         await bookmarks.load();
+        /** @type {Record<string, any>} */
         const tracking = bookmarks.tracking || {};
         tracking[args.name] = { remote, remoteName: args.name };
         bookmarks.tracking = tracking;
@@ -6007,8 +5960,7 @@ export async function createJJ(options) {
       /**
        * Untrack a remote bookmark (matches `jj bookmark untrack`)
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.name - Bookmark name to untrack
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Untrack result
        */
       async untrack(args) {
@@ -6020,6 +5972,7 @@ export async function createJJ(options) {
 
         // Remove tracking info
         await bookmarks.load();
+        /** @type {Record<string, any>} */
         const tracking = bookmarks.tracking || {};
         const wasTracking = tracking[args.name];
         delete tracking[args.name];
@@ -6046,9 +5999,7 @@ export async function createJJ(options) {
       /**
        * Forget a remote bookmark (matches `jj bookmark forget`)
        *
-       * @param {Object} args - Bookmark arguments
-       * @param {string} args.name - Bookmark name to forget
-       * @param {string} [args.remote='origin'] - Remote name
+       * @param {Record<string, any>} args - Bookmark arguments
        * @returns {Promise<Object>} Forget result
        */
       async forget(args) {
@@ -6062,6 +6013,7 @@ export async function createJJ(options) {
 
         // Untrack and remove local reference
         await bookmarks.load();
+        /** @type {Record<string, any>} */
         const tracking = bookmarks.tracking || {};
         delete tracking[args.name];
         bookmarks.tracking = tracking;
@@ -6108,16 +6060,15 @@ export async function createJJ(options) {
        * Tags are immutable references that cannot be moved once created.
        * Unlike bookmarks, tags are permanent markers typically used for releases.
        *
-       * @param {Object} args - Tag arguments
-       * @param {string} args.name - Tag name
-       * @param {string} [args.changeId] - Change ID to tag (default: working copy)
+       * @param {Record<string, any>} args - Tag arguments
        * @returns {Promise<{name: string, changeId: string}>} Created tag
        * @throws {JJError} If tag already exists or name is invalid
        */
       async create(args) {
         if (!args || args.name === undefined || args.name === null) {
           throw new JJError('INVALID_ARGUMENT', 'Missing name argument', {
-            suggestion: 'Provide: { name: "v1.0.0", changeId: "abc123..." } or { name: "v1.0.0" } for working copy',
+            suggestion:
+              'Provide: { name: "v1.0.0", changeId: "abc123..." } or { name: "v1.0.0" } for working copy',
           });
         }
 
@@ -6154,9 +6105,7 @@ export async function createJJ(options) {
        * Unlike create(), set() is an upsert: it will point an existing tag at a
        * new change instead of erroring.
        *
-       * @param {Object} args - Tag arguments
-       * @param {string} args.name - Tag name
-       * @param {string} [args.changeId] - Change ID to tag (default: working copy)
+       * @param {Record<string, any>} args - Tag arguments
        * @returns {Promise<{name: string, changeId: string, updated: boolean}>}
        */
       async set(args) {
@@ -6198,8 +6147,7 @@ export async function createJJ(options) {
       /**
        * List all tags
        *
-       * @param {Object} [args] - Optional filter arguments
-       * @param {string} [args.pattern] - Optional glob pattern (e.g., "v1*")
+       * @param {Record<string, any>} [args] - Optional filter arguments
        * @returns {Promise<Array<{name: string, changeId: string}>>} List of tags
        */
       async list(args) {
@@ -6210,8 +6158,7 @@ export async function createJJ(options) {
       /**
        * Delete a tag
        *
-       * @param {Object} args - Tag arguments
-       * @param {string} args.name - Tag name to delete
+       * @param {Record<string, any>} args - Tag arguments
        * @returns {Promise<{deleted: string}>} Deletion result
        * @throws {JJError} If tag doesn't exist
        */
@@ -6249,7 +6196,7 @@ export async function createJJ(options) {
       /**
        * Fetch from remote (alias to jj.git.fetch for convenience)
        *
-       * @param {Object} args - Fetch arguments
+       * @param {Record<string, any>} args - Fetch arguments
        * @returns {Promise<Object>} Fetch result
        */
       async fetch(args) {
@@ -6259,7 +6206,7 @@ export async function createJJ(options) {
       /**
        * Push to remote (alias to jj.git.push for convenience)
        *
-       * @param {Object} args - Push arguments
+       * @param {Record<string, any>} args - Push arguments
        * @returns {Promise<Object>} Push result
        */
       async push(args) {
@@ -6269,7 +6216,7 @@ export async function createJJ(options) {
       /**
        * Add a remote (alias to jj.git.remote.add for convenience)
        *
-       * @param {Object} args - Remote arguments
+       * @param {Record<string, any>} args - Remote arguments
        * @returns {Promise<Object>} Added remote info
        */
       async add(args) {
@@ -6284,8 +6231,7 @@ export async function createJJ(options) {
       /**
        * Get a configuration value (matches `jj config get`)
        *
-       * @param {Object} args - Config arguments
-       * @param {string} args.name - Config key (e.g., 'user.name')
+       * @param {Record<string, any>} args - Config arguments
        * @returns {Promise<any>} Config value
        */
       async get(args) {
@@ -6310,9 +6256,7 @@ export async function createJJ(options) {
       /**
        * Set a configuration value (matches `jj config set`)
        *
-       * @param {Object} args - Config arguments
-       * @param {string} args.name - Config key (e.g., 'user.name')
-       * @param {any} args.value - Config value
+       * @param {Record<string, any>} args - Config arguments
        * @returns {Promise<Object>} Set result
        */
       async set(args) {
@@ -6359,9 +6303,7 @@ export async function createJJ(options) {
        * v0.35.0: Loads workspace-config.json if present
        * v0.36.0: Accepts optional config object for programmatic configuration
        *
-       * @param {Object} [opts] - Optional config options
-       * @param {Object} [opts.workspace] - Workspace-specific config to merge (highest priority)
-       * @param {Object} [opts.override] - Config object to merge over loaded config
+       * @param {Record<string, any>} [opts] - Optional config options
        * @returns {Promise<void>}
        *
        * @example
@@ -6456,8 +6398,7 @@ export async function createJJ(options) {
       /**
        * Set sparse patterns (replaces all existing patterns)
        *
-       * @param {Object} args - Arguments
-       * @param {string[]} args.patterns - Array of glob patterns
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<{patterns: string[]}>} Result with current patterns
        */
       async set(args) {
@@ -6491,8 +6432,7 @@ export async function createJJ(options) {
       /**
        * Add patterns to sparse checkout
        *
-       * @param {Object} args - Arguments
-       * @param {string[]} args.patterns - Array of glob patterns to add
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<{patterns: string[]}>} Result with current patterns
        */
       async add(args) {
@@ -6536,8 +6476,7 @@ export async function createJJ(options) {
       /**
        * Remove patterns from sparse checkout
        *
-       * @param {Object} args - Arguments
-       * @param {string[]} args.patterns - Array of glob patterns to remove
+       * @param {Record<string, any>} args - Arguments
        * @returns {Promise<{patterns: string[]}>} Result with current patterns
        */
       async remove(args) {
@@ -6551,7 +6490,7 @@ export async function createJJ(options) {
         const currentPatterns = workingCopy.getSparsePatterns();
 
         // Remove specified patterns
-        const updatedPatterns = currentPatterns.filter(p => !args.patterns.includes(p));
+        const updatedPatterns = currentPatterns.filter((p) => !args.patterns.includes(p));
 
         await workingCopy.setSparsePatterns(updatedPatterns);
         await workingCopy.save();
@@ -6620,9 +6559,7 @@ export async function createJJ(options) {
       /**
        * Start bisect session
        *
-       * @param {Object} args - Bisect arguments
-       * @param {string} args.good - Known good change ID
-       * @param {string} args.bad - Known bad change ID
+       * @param {Record<string, any>} args - Bisect arguments
        * @returns {Promise<Object>} Bisect state
        */
       async start(args) {
@@ -6635,7 +6572,7 @@ export async function createJJ(options) {
         await graph.load();
 
         // Check if bisect is already active
-        const existingState = await storage.read('bisect/state.json');
+        const existingState = /** @type {any} */ (await storage.read('bisect/state.json'));
         if (existingState && existingState.active) {
           throw new JJError('BISECT_ALREADY_ACTIVE', 'Bisect session already in progress', {
             suggestion: 'Use bisect.reset() to end current session first',
@@ -6658,9 +6595,8 @@ export async function createJJ(options) {
 
         // Pick the middle change
         // If no candidates between good and bad, test bad itself
-        const current = candidates.length > 0
-          ? candidates[Math.floor(candidates.length / 2)]
-          : args.bad;
+        const current =
+          candidates.length > 0 ? candidates[Math.floor(candidates.length / 2)] : args.bad;
 
         const bisectState = {
           active: true,
@@ -6683,7 +6619,7 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Updated bisect state
        */
       async good() {
-        const bisectState = await storage.read('bisect/state.json');
+        const bisectState = /** @type {any} */ (await storage.read('bisect/state.json'));
 
         if (!bisectState || !bisectState.active) {
           throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
@@ -6708,7 +6644,7 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Updated bisect state
        */
       async bad() {
-        const bisectState = await storage.read('bisect/state.json');
+        const bisectState = /** @type {any} */ (await storage.read('bisect/state.json'));
 
         if (!bisectState || !bisectState.active) {
           throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
@@ -6733,7 +6669,7 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Updated bisect state
        */
       async skip() {
-        const bisectState = await storage.read('bisect/state.json');
+        const bisectState = /** @type {any} */ (await storage.read('bisect/state.json'));
 
         if (!bisectState || !bisectState.active) {
           throw new JJError('BISECT_NOT_ACTIVE', 'No active bisect session');
@@ -6741,7 +6677,9 @@ export async function createJJ(options) {
 
         // Remove current from candidates
         if (bisectState.current) {
-          bisectState.candidates = bisectState.candidates.filter(c => c !== bisectState.current);
+          bisectState.candidates = bisectState.candidates.filter(
+            (/** @type {any} */ c) => c !== bisectState.current
+          );
         }
 
         // Pick next candidate
@@ -6768,7 +6706,7 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Bisect state
        */
       async status() {
-        const bisectState = await storage.read('bisect/state.json');
+        const bisectState = /** @type {any} */ (await storage.read('bisect/state.json'));
         return bisectState || { active: false };
       },
 
@@ -6815,7 +6753,7 @@ export async function createJJ(options) {
        * Update bisect state after marking good/bad/skip
        *
        * @private
-       * @param {Object} bisectState - Current bisect state
+       * @param {any} bisectState - Current bisect state
        */
       async _updateBisectState(bisectState) {
         await graph.load();
@@ -6861,7 +6799,8 @@ export async function createJJ(options) {
         }
 
         bisectState.candidates = newCandidates;
-        bisectState.remaining = newCandidates.length > 0 ? Math.ceil(Math.log2(newCandidates.length + 1)) : 0;
+        bisectState.remaining =
+          newCandidates.length > 0 ? Math.ceil(Math.log2(newCandidates.length + 1)) : 0;
 
         // Pick the middle candidate
         if (newCandidates.length > 0) {
@@ -6874,7 +6813,7 @@ export async function createJJ(options) {
           // The first bad change is the one in the bad set that has no bad ancestors
           for (const badId of bisectState.bad) {
             const badAncestors = graph.getAncestors(badId);
-            const hasChildBad = bisectState.bad.some(otherId => {
+            const hasChildBad = bisectState.bad.some((/** @type {any} */ otherId) => {
               if (otherId === badId) return false;
               return badAncestors.includes(otherId);
             });
@@ -6891,10 +6830,7 @@ export async function createJJ(options) {
     /**
      * Show file differences between revisions (matches `jj diff`)
      *
-     * @param {Object} [args={}] - Diff arguments
-     * @param {string} [args.from] - Source revision (defaults to parent of working copy)
-     * @param {string} [args.to] - Target revision (defaults to working copy)
-     * @param {string[]} [args.paths] - Specific paths to diff
+     * @param {Record<string, any>} [args={}] - Diff arguments
      * @returns {Promise<Object>} Diff result with changed files
      */
     async diff(args = {}) {
@@ -6953,8 +6889,7 @@ export async function createJJ(options) {
     /**
      * Move working copy to next child revision (matches `jj next`)
      *
-     * @param {Object} [args={}] - Next arguments
-     * @param {number} [args.offset=1] - Number of generations to move forward
+     * @param {Record<string, any>} [args={}] - Next arguments
      * @returns {Promise<Object>} Updated working copy info
      */
     async next(args = {}) {
@@ -6972,7 +6907,9 @@ export async function createJJ(options) {
       // Find children
       await graph.load();
       const allChanges = await graph.getAllChanges();
-      const children = allChanges.filter(c => c.parents && c.parents.includes(currentChangeId));
+      const children = allChanges.filter(
+        (/** @type {any} */ c) => c.parents && c.parents.includes(currentChangeId)
+      );
 
       if (children.length === 0) {
         throw new JJError('NO_CHILDREN', 'No child revisions found');
@@ -6983,7 +6920,9 @@ export async function createJJ(options) {
 
       // Move forward 'offset' times
       for (let i = 1; i < offset; i++) {
-        const nextChildren = allChanges.filter(c => c.parents && c.parents.includes(targetChange.changeId));
+        const nextChildren = allChanges.filter(
+          (/** @type {any} */ c) => c.parents && c.parents.includes(targetChange.changeId)
+        );
         if (nextChildren.length === 0) {
           throw new JJError('INSUFFICIENT_CHILDREN', `Cannot move forward ${offset} generations`);
         }
@@ -7004,8 +6943,7 @@ export async function createJJ(options) {
     /**
      * Move working copy to previous parent revision (matches `jj prev`)
      *
-     * @param {Object} [args={}] - Prev arguments
-     * @param {number} [args.offset=1] - Number of generations to move backward
+     * @param {Record<string, any>} [args={}] - Prev arguments
      * @returns {Promise<Object>} Updated working copy info
      */
     async prev(args = {}) {
@@ -7044,9 +6982,7 @@ export async function createJJ(options) {
     /**
      * Create copies of changes (matches `jj duplicate`)
      *
-     * @param {Object} [args={}] - Duplicate arguments
-     * @param {string[]} [args.changes] - Change IDs to duplicate (defaults to working copy)
-     * @param {string} [args.destination] - Where to place duplicates
+     * @param {Record<string, any>} [args={}] - Duplicate arguments
      * @returns {Promise<Object>} Duplication result with new change IDs
      */
     async duplicate(args = {}) {
@@ -7055,8 +6991,8 @@ export async function createJJ(options) {
       await userConfig.load();
 
       // Support both changeId (singular) and changes (plural)
-      const changesToDup = args.changes ||
-                          (args.changeId ? [args.changeId] : [workingCopy.getCurrentChangeId()]);
+      const changesToDup =
+        args.changes || (args.changeId ? [args.changeId] : [workingCopy.getCurrentChangeId()]);
       const duplicatedChanges = [];
 
       for (const changeId of changesToDup) {
@@ -7067,7 +7003,7 @@ export async function createJJ(options) {
 
         // Create new change as a copy
         const newChangeId = generateChangeId();
-        const _user = userConfig.getUser();
+        const _user = /** @type {any} */ (userConfig.getUser());
         const newChange = {
           ...originalChange,
           changeId: newChangeId,
@@ -7092,7 +7028,7 @@ export async function createJJ(options) {
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: duplicatedChanges.map(d => d.duplicate),
+          heads: duplicatedChanges.map((d) => d.duplicate),
           workingCopy: workingCopy.getCurrentChangeId(),
         },
       });
@@ -7100,17 +7036,14 @@ export async function createJJ(options) {
       // Return both formats for compatibility
       return {
         duplicated: duplicatedChanges,
-        changeIds: duplicatedChanges.map(d => d.duplicate)
+        changeIds: duplicatedChanges.map((d) => d.duplicate),
       };
     },
 
     /**
      * Restore paths from another revision (matches `jj restore`)
      *
-     * @param {Object} args - Restore arguments
-     * @param {string} [args.from] - Source revision to restore from
-     * @param {string} [args.to] - Target revision to restore to (defaults to working copy)
-     * @param {string[]} [args.paths] - Specific paths to restore (defaults to all)
+     * @param {Record<string, any>} args - Restore arguments
      * @returns {Promise<Object>} Restore result
      */
     async restore(args = {}) {
@@ -7172,9 +7105,7 @@ export async function createJJ(options) {
      * This operation takes multiple changes and gives them the same parent,
      * making them siblings in the change graph instead of ancestors/descendants.
      *
-     * @param {Object} args - Arguments
-     * @param {Array<string>} args.changes - Change IDs to parallelize
-     * @param {string} [args.parent] - Optional parent to use (defaults to common ancestor)
+     * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} Operation result with parallelized changes
      *
      * @example
@@ -7291,7 +7222,7 @@ export async function createJJ(options) {
         parent: parentId,
       };
     },
-  };
+  });
 
   // ============================================================================
   // UNSUPPORTED FEATURE STUBS
@@ -7304,17 +7235,14 @@ export async function createJJ(options) {
    * @status UNSUPPORTED - Requires interactive diff editor
    * @throws {JJError} Always throws UNSUPPORTED_OPERATION
    */
-  jj.diffedit = async function (_args) {
-    throw new JJError(
-      'UNSUPPORTED_OPERATION',
-      'diffedit requires interactive diff editor',
-      {
-        feature: 'diffedit',
-        reason: 'Interactive tools not supported in library API',
-        alternative: 'Use jj.diff() to view changes, then jj.edit() to modify the change',
-        suggestion: 'For programmatic editing, use jj.write() to update files and jj.describe() to update the description',
-      }
-    );
+  jj.diffedit = async function (/** @type {any} */ _args) {
+    throw new JJError('UNSUPPORTED_OPERATION', 'diffedit requires interactive diff editor', {
+      feature: 'diffedit',
+      reason: 'Interactive tools not supported in library API',
+      alternative: 'Use jj.diff() to view changes, then jj.edit() to modify the change',
+      suggestion:
+        'For programmatic editing, use jj.write() to update files and jj.describe() to update the description',
+    });
   };
 
   /**
@@ -7323,17 +7251,13 @@ export async function createJJ(options) {
    * @status UNSUPPORTED - Requires external formatters
    * @throws {JJError} Always throws UNSUPPORTED_OPERATION
    */
-  jj.fix = async function (_args) {
-    throw new JJError(
-      'UNSUPPORTED_OPERATION',
-      'Automatic formatting requires external tools',
-      {
-        feature: 'fix',
-        reason: 'External formatters (prettier, eslint, etc.) must be integrated separately',
-        alternative: 'Run formatters separately, then use jj.write() to update files',
-        suggestion: 'Consider using pre-commit hooks to run formatters automatically',
-      }
-    );
+  jj.fix = async function (/** @type {any} */ _args) {
+    throw new JJError('UNSUPPORTED_OPERATION', 'Automatic formatting requires external tools', {
+      feature: 'fix',
+      reason: 'External formatters (prettier, eslint, etc.) must be integrated separately',
+      alternative: 'Run formatters separately, then use jj.write() to update files',
+      suggestion: 'Consider using pre-commit hooks to run formatters automatically',
+    });
   };
 
   // NOTE: jj.sign() / jj.unsign() are implemented as real (metadata-based)
@@ -7352,15 +7276,11 @@ export async function createJJ(options) {
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
     async completion() {
-      throw new JJError(
-        'UNSUPPORTED_OPERATION',
-        'Shell completion generation is CLI-specific',
-        {
-          feature: 'util.completion',
-          reason: 'Completions are for command-line shells, not library APIs',
-          alternative: 'Not applicable - use JJ CLI for shell completions',
-        }
-      );
+      throw new JJError('UNSUPPORTED_OPERATION', 'Shell completion generation is CLI-specific', {
+        feature: 'util.completion',
+        reason: 'Completions are for command-line shells, not library APIs',
+        alternative: 'Not applicable - use JJ CLI for shell completions',
+      });
     },
 
     /**
@@ -7368,31 +7288,23 @@ export async function createJJ(options) {
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
     async gc() {
-      throw new JJError(
-        'UNSUPPORTED_OPERATION',
-        'Garbage collection is a CLI utility',
-        {
-          feature: 'util.gc',
-          reason: 'Storage management handled automatically by isomorphic-jj',
-          alternative: 'Repository cleanup happens automatically',
-        }
-      );
+      throw new JJError('UNSUPPORTED_OPERATION', 'Garbage collection is a CLI utility', {
+        feature: 'util.gc',
+        reason: 'Storage management handled automatically by isomorphic-jj',
+        alternative: 'Repository cleanup happens automatically',
+      });
     },
 
     /**
      * exec - Execute command with JJ environment (STUB)
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
-    async exec(_args) {
-      throw new JJError(
-        'UNSUPPORTED_OPERATION',
-        'Command execution is a CLI utility',
-        {
-          feature: 'util.exec',
-          reason: 'Shell command execution not appropriate for library API',
-          alternative: 'Use Node.js child_process module directly if needed',
-        }
-      );
+    async exec(/** @type {any} */ _args) {
+      throw new JJError('UNSUPPORTED_OPERATION', 'Command execution is a CLI utility', {
+        feature: 'util.exec',
+        reason: 'Shell command execution not appropriate for library API',
+        alternative: 'Use Node.js child_process module directly if needed',
+      });
     },
 
     /**
@@ -7400,15 +7312,11 @@ export async function createJJ(options) {
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
     async configSchema() {
-      throw new JJError(
-        'UNSUPPORTED_OPERATION',
-        'Config schema output is a CLI utility',
-        {
-          feature: 'util.configSchema',
-          reason: 'Schema introspection not needed for programmatic usage',
-          alternative: 'See TypeScript types or API documentation for config structure',
-        }
-      );
+      throw new JJError('UNSUPPORTED_OPERATION', 'Config schema output is a CLI utility', {
+        feature: 'util.configSchema',
+        reason: 'Schema introspection not needed for programmatic usage',
+        alternative: 'See TypeScript types or API documentation for config structure',
+      });
     },
   };
 
@@ -7422,17 +7330,13 @@ export async function createJJ(options) {
      * upload - Upload changes to Gerrit (STUB)
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
-    async upload(_args) {
-      throw new JJError(
-        'UNSUPPORTED_OPERATION',
-        'Gerrit integration not supported',
-        {
-          feature: 'gerrit.upload',
-          reason: 'Gerrit-specific features not implemented',
-          alternative: 'Use jj.git.push() with appropriate Gerrit remote configuration',
-          suggestion: 'Configure Gerrit remote and use standard Git push with refs/for/ syntax',
-        }
-      );
+    async upload(/** @type {any} */ _args) {
+      throw new JJError('UNSUPPORTED_OPERATION', 'Gerrit integration not supported', {
+        feature: 'gerrit.upload',
+        reason: 'Gerrit-specific features not implemented',
+        alternative: 'Use jj.git.push() with appropriate Gerrit remote configuration',
+        suggestion: 'Configure Gerrit remote and use standard Git push with refs/for/ syntax',
+      });
     },
   };
 

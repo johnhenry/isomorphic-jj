@@ -181,13 +181,17 @@ describe('Merge Drivers', () => {
       await jj.new({ message: 'Feature' });
       await jj.write({
         path: 'package.json',
-        data: JSON.stringify({
-          ...base,
-          dependencies: {
-            ...base.dependencies,
-            'pkg-b': '^2.0.0',
+        data: JSON.stringify(
+          {
+            ...base,
+            dependencies: {
+              ...base.dependencies,
+              'pkg-b': '^2.0.0',
+            },
           },
-        }, null, 2),
+          null,
+          2
+        ),
       });
       await jj.describe({ message: 'Add pkg-b' });
       const featureChange = jj.workingCopy.getCurrentChangeId();
@@ -197,13 +201,17 @@ describe('Merge Drivers', () => {
       await jj.new({ message: 'Main' });
       await jj.write({
         path: 'package.json',
-        data: JSON.stringify({
-          ...base,
-          dependencies: {
-            ...base.dependencies,
-            'pkg-c': '^3.0.0',
+        data: JSON.stringify(
+          {
+            ...base,
+            dependencies: {
+              ...base.dependencies,
+              'pkg-c': '^3.0.0',
+            },
           },
-        }, null, 2),
+          null,
+          2
+        ),
       });
       await jj.describe({ message: 'Add pkg-c' });
 
@@ -234,7 +242,7 @@ describe('Merge Drivers', () => {
         name: 'test',
         version: '1.0.0',
         devDependencies: {
-          'eslint': '^8.0.0',
+          eslint: '^8.0.0',
         },
       };
 
@@ -249,13 +257,17 @@ describe('Merge Drivers', () => {
       await jj.new({ message: 'Feature' });
       await jj.write({
         path: 'package.json',
-        data: JSON.stringify({
-          ...base,
-          devDependencies: {
-            ...base.devDependencies,
-            'jest': '^29.0.0',
+        data: JSON.stringify(
+          {
+            ...base,
+            devDependencies: {
+              ...base.devDependencies,
+              jest: '^29.0.0',
+            },
           },
-        }, null, 2),
+          null,
+          2
+        ),
       });
       await jj.describe({ message: 'Add jest' });
       const featureChange = jj.workingCopy.getCurrentChangeId();
@@ -265,13 +277,17 @@ describe('Merge Drivers', () => {
       await jj.new({ message: 'Main' });
       await jj.write({
         path: 'package.json',
-        data: JSON.stringify({
-          ...base,
-          devDependencies: {
-            ...base.devDependencies,
-            'prettier': '^3.0.0',
+        data: JSON.stringify(
+          {
+            ...base,
+            devDependencies: {
+              ...base.devDependencies,
+              prettier: '^3.0.0',
+            },
           },
-        }, null, 2),
+          null,
+          2
+        ),
       });
       await jj.describe({ message: 'Add prettier' });
 
@@ -283,9 +299,9 @@ describe('Merge Drivers', () => {
       const content = await jj.read({ path: 'package.json' });
       const merged = JSON.parse(content);
       expect(merged.devDependencies).toEqual({
-        'eslint': '^8.0.0',
-        'jest': '^29.0.0',
-        'prettier': '^3.0.0',
+        eslint: '^8.0.0',
+        jest: '^29.0.0',
+        prettier: '^3.0.0',
       });
     });
   });
@@ -469,7 +485,7 @@ describe('Merge Drivers', () => {
 
       // Should have conflict with driver failure metadata
       expect(result.conflicts.length).toBeGreaterThan(0);
-      const conflict = result.conflicts.find(c => c.path === 'test.txt');
+      const conflict = result.conflicts.find((c) => c.path === 'test.txt');
       expect(conflict.driverFailed).toBe(true);
       expect(conflict.driverError).toBe('Custom driver error!');
     });

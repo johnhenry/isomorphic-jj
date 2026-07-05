@@ -1,15 +1,15 @@
 /**
  * ID Generation utilities for isomorphic-jj
- * 
+ *
  * Generates stable change IDs and operation IDs using cryptographically secure random values.
  */
 
 /**
  * Generate a stable change ID
- * 
+ *
  * Uses 128-bit cryptographically random value encoded as 32-character hex string.
  * Collision probability is negligible (2^128 space).
- * 
+ *
  * @returns {string} 32-character lowercase hex string
  */
 export function generateChangeId() {

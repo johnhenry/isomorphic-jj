@@ -1,18 +1,32 @@
 /**
  * RevsetEngine - Query language for finding changes
- * 
+ *
  * Implements a simplified revset language for querying the change graph.
  */
 
 import { JJError } from '../utils/errors.js';
 
+/**
+ * @typedef {object} ChangeGraph
+ * @property {() => Promise<any>} load
+ * @property {() => any[]} getAll
+ * @property {(id: string) => Promise<any>} getChange
+ * @property {(id: string) => string[]} getParents
+ * @property {(id: string) => string[]} getChildren
+ */
+
+/**
+ * @typedef {object} WorkingCopy
+ * @property {() => string} getCurrentChangeId
+ */
+
 export class RevsetEngine {
   /**
    * @param {ChangeGraph} graph - Change graph instance
    * @param {WorkingCopy} workingCopy - Working copy instance
-   * @param {UserConfig} userConfig - User configuration instance (optional)
-   * @param {BookmarkStore} bookmarkStore - Bookmark store instance (optional, v0.4)
-   * @param {TagStore} tagStore - Tag store instance (optional, v1.5)
+   * @param {any} [userConfig] - User configuration instance (optional)
+   * @param {any} [bookmarkStore] - Bookmark store instance (optional, v0.4)
+   * @param {any} [tagStore] - Tag store instance (optional, v1.5)
    */
   constructor(graph, workingCopy, userConfig = null, bookmarkStore = null, tagStore = null) {
     this.graph = graph;
@@ -24,7 +38,7 @@ export class RevsetEngine {
 
   /**
    * Evaluate a revset expression
-   * 
+   *
    * @param {string} expression - Revset expression
    * @returns {Promise<Array<string>>} Array of matching change IDs
    */
@@ -79,11 +93,12 @@ export class RevsetEngine {
     if (trimmed === 'root()') {
       await this.graph.load();
       const allChanges = this.graph.getAll();
-      const rootCommits = allChanges.filter(c => !c.parents || c.parents.length === 0);
+      const rootCommits = allChanges.filter((c) => !c.parents || c.parents.length === 0);
       if (rootCommits.length === 0) return [];
       // Return the oldest root by timestamp
-      const oldest = rootCommits.sort((a, b) =>
-        new Date(a.timestamp) - new Date(b.timestamp)
+      const oldest = rootCommits.sort(
+        (a, b) =>
+          /** @type {any} */ (new Date(a.timestamp)) - /** @type {any} */ (new Date(b.timestamp))
       )[0];
       return [oldest.changeId];
     }
@@ -92,7 +107,7 @@ export class RevsetEngine {
     if (trimmed === 'visible_heads()') {
       await this.graph.load();
       const allChanges = this.graph.getAll();
-      const changeIdSet = new Set(allChanges.map(c => c.changeId));
+      const changeIdSet = new Set(allChanges.map((c) => c.changeId));
       const hasChildren = new Set();
 
       // Mark all commits that have children
@@ -107,17 +122,15 @@ export class RevsetEngine {
       }
 
       // Return commits without children
-      return allChanges
-        .filter(c => !hasChildren.has(c.changeId))
-        .map(c => c.changeId);
+      return allChanges.filter((c) => !hasChildren.has(c.changeId)).map((c) => c.changeId);
     }
 
     // v1.0: git_refs() - all commits with bookmarks
     if (trimmed === 'git_refs()') {
       if (!this.bookmarkStore) return [];
       await this.bookmarkStore.load();
-      const allBookmarks = await this.bookmarkStore.list();
-      return allBookmarks.map(b => b.changeId);
+      const allBookmarks = /** @type {any[]} */ (await this.bookmarkStore.list());
+      return allBookmarks.map((b) => b.changeId);
     }
 
     // v1.0: git_head() - current working copy (Git HEAD equivalent)
@@ -135,18 +148,14 @@ export class RevsetEngine {
     if (trimmed === 'visible()') {
       await this.graph.load();
       const all = this.graph.getAll();
-      return all
-        .filter(c => !c.abandoned)
-        .map(c => c.changeId);
+      return all.filter((c) => !c.abandoned).map((c) => c.changeId);
     }
 
     // v0.36.0: hidden() - abandoned changes
     if (trimmed === 'hidden()') {
       await this.graph.load();
       const all = this.graph.getAll();
-      return all
-        .filter(c => c.abandoned === true)
-        .map(c => c.changeId);
+      return all.filter((c) => c.abandoned === true).map((c) => c.changeId);
     }
 
     // ancestors(revset[, depth]) - all ancestors including the change(s) itself
@@ -186,19 +195,35 @@ export class RevsetEngine {
     // committer_email (jj v0.26) - fine-grained signature filters.
     const authorNameMatch = trimmed.match(/^author_name\((.+?)\)$/);
     if (authorNameMatch) {
-      return await this.filterBySignatureField('author', 'name', authorNameMatch[1].replace(/['"]/g, ''));
+      return await this.filterBySignatureField(
+        'author',
+        'name',
+        authorNameMatch[1].replace(/['"]/g, '')
+      );
     }
     const authorEmailMatch = trimmed.match(/^author_email\((.+?)\)$/);
     if (authorEmailMatch) {
-      return await this.filterBySignatureField('author', 'email', authorEmailMatch[1].replace(/['"]/g, ''));
+      return await this.filterBySignatureField(
+        'author',
+        'email',
+        authorEmailMatch[1].replace(/['"]/g, '')
+      );
     }
     const committerNameMatch = trimmed.match(/^committer_name\((.+?)\)$/);
     if (committerNameMatch) {
-      return await this.filterBySignatureField('committer', 'name', committerNameMatch[1].replace(/['"]/g, ''));
+      return await this.filterBySignatureField(
+        'committer',
+        'name',
+        committerNameMatch[1].replace(/['"]/g, '')
+      );
     }
     const committerEmailMatch = trimmed.match(/^committer_email\((.+?)\)$/);
     if (committerEmailMatch) {
-      return await this.filterBySignatureField('committer', 'email', committerEmailMatch[1].replace(/['"]/g, ''));
+      return await this.filterBySignatureField(
+        'committer',
+        'email',
+        committerEmailMatch[1].replace(/['"]/g, '')
+      );
     }
     const committerMatch = trimmed.match(/^committer\((.+?)\)$/);
     if (committerMatch) {
@@ -211,7 +236,8 @@ export class RevsetEngine {
     // v1.5: signed() - cryptographically signed changes (jj v0.29)
     if (trimmed === 'signed()') {
       await this.graph.load();
-      return this.graph.getAll()
+      return this.graph
+        .getAll()
         .filter((c) => c.signed === true || (c.signature && c.signature.status))
         .map((c) => c.changeId);
     }
@@ -277,9 +303,8 @@ export class RevsetEngine {
           if (result.has(current)) break;
           result.add(current);
           const change = await this.graph.getChange(current);
-          current = change && change.parents && change.parents.length > 0
-            ? change.parents[0]
-            : null;
+          current =
+            change && change.parents && change.parents.length > 0 ? change.parents[0] : null;
         }
       }
       return Array.from(result);
@@ -306,9 +331,11 @@ export class RevsetEngine {
       const result = await this.evaluate(exactlyMatch[1].trim());
       const expected = parseInt(exactlyMatch[2], 10);
       if (result.length !== expected) {
-        throw new JJError('REVSET_EXACTLY_MISMATCH',
+        throw new JJError(
+          'REVSET_EXACTLY_MISMATCH',
           `exactly() expected ${expected} revision(s) but found ${result.length}`,
-          { expected, actual: result.length });
+          { expected, actual: result.length }
+        );
       }
       return result;
     }
@@ -329,6 +356,7 @@ export class RevsetEngine {
     const coalesceMatch = trimmed.match(/^coalesce\((.+)\)$/);
     if (coalesceMatch) {
       for (const part of this.splitTopLevelArgs(coalesceMatch[1])) {
+        /** @type {string[]} */
         let result = [];
         try {
           result = await this.evaluate(part.trim());
@@ -482,7 +510,9 @@ export class RevsetEngine {
     }
 
     // v0.5: common_ancestor(rev1, rev2) - common ancestor
-    const commonAncestorMatch = trimmed.match(/^common_ancestor\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/);
+    const commonAncestorMatch = trimmed.match(
+      /^common_ancestor\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/
+    );
     if (commonAncestorMatch) {
       const rev1 = commonAncestorMatch[1];
       const rev2 = commonAncestorMatch[2];
@@ -510,7 +540,7 @@ export class RevsetEngine {
     if (connectedMatch) {
       const rev1 = connectedMatch[1];
       const rev2 = connectedMatch[2];
-      return await this.checkConnected(rev1, rev2);
+      return /** @type {any} */ (await this.checkConnected(rev1, rev2));
     }
 
     // v1.0: x- operator (parents) - handles chaining like x-- for grandparents
@@ -564,7 +594,7 @@ export class RevsetEngine {
         const baseAncestors = new Set(await this.getAncestors(base));
 
         // Remove base's ancestors from tip's ancestors
-        const rangeChanges = [...tipAncestors].filter(id => !baseAncestors.has(id));
+        const rangeChanges = [...tipAncestors].filter((id) => !baseAncestors.has(id));
 
         return rangeChanges;
       }
@@ -575,8 +605,8 @@ export class RevsetEngine {
       await this.graph.load();
       const all = this.graph.getAll();
       return all
-        .filter(c => c.conflicts && Object.keys(c.conflicts).length > 0)
-        .map(c => c.changeId);
+        .filter((c) => c.conflicts && Object.keys(c.conflicts).length > 0)
+        .map((c) => c.changeId);
     }
 
     // reachable(heads) - all changes reachable from heads
@@ -616,8 +646,8 @@ export class RevsetEngine {
       await this.graph.load();
       const all = this.graph.getAll();
       return all
-        .filter(c => c.fileSnapshot && Object.keys(c.fileSnapshot).length > 0)
-        .map(c => c.changeId);
+        .filter((c) => c.fileSnapshot && Object.keys(c.fileSnapshot).length > 0)
+        .map((c) => c.changeId);
     }
 
     // untracked() - changes with no tracked files (empty changes)
@@ -625,8 +655,8 @@ export class RevsetEngine {
       await this.graph.load();
       const all = this.graph.getAll();
       return all
-        .filter(c => !c.fileSnapshot || Object.keys(c.fileSnapshot).length === 0)
-        .map(c => c.changeId);
+        .filter((c) => !c.fileSnapshot || Object.keys(c.fileSnapshot).length === 0)
+        .map((c) => c.changeId);
     }
 
     // remote_branches([pattern]) - remote branch targets
@@ -635,16 +665,16 @@ export class RevsetEngine {
       if (!this.bookmarkStore) return [];
 
       await this.bookmarkStore.load();
-      const allBookmarks = await this.bookmarkStore.list();
+      const allBookmarks = /** @type {any[]} */ (await this.bookmarkStore.list());
 
       // Filter for remote branches (bookmarks with '/' in the name)
-      let remoteBookmarks = allBookmarks.filter(bookmark => bookmark.name.includes('/'));
+      let remoteBookmarks = allBookmarks.filter((bookmark) => bookmark.name.includes('/'));
 
       // If pattern provided, filter by pattern
       if (remoteBranchesMatch && remoteBranchesMatch[1]) {
         const pattern = remoteBranchesMatch[1];
         const regex = new RegExp(pattern.replace(/\*/g, '.*'));
-        remoteBookmarks = remoteBookmarks.filter(bookmark => regex.test(bookmark.name));
+        remoteBookmarks = remoteBookmarks.filter((bookmark) => regex.test(bookmark.name));
       }
 
       // Get target change IDs
@@ -672,14 +702,16 @@ export class RevsetEngine {
 
     throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
       expression,
-      suggestion: 'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(revset[, depth]), author(name), author_name(x), author_email(x), committer(x), committer_name(x), committer_email(x), subject(pattern), description(text), change_id(prefix), commit_id(prefix), empty(), mine(), merge(), merges(), forks(), signed(), divergent(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), first_parent(revset), first_ancestors(revset), fork_point(revset), merge_point(revset), exactly(revset, n), present(revset), coalesce(a, b, ...), latest(revset, [count]), tags([pattern]), remote_tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
+      suggestion:
+        'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(revset[, depth]), author(name), author_name(x), author_email(x), committer(x), committer_name(x), committer_email(x), subject(pattern), description(text), change_id(prefix), commit_id(prefix), empty(), mine(), merge(), merges(), forks(), signed(), divergent(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), first_parent(revset), first_ancestors(revset), fork_point(revset), merge_point(revset), exactly(revset, n), present(revset), coalesce(a, b, ...), latest(revset, [count]), tags([pattern]), remote_tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
     });
   }
 
   /**
    * Get all ancestors of a change (including the change itself)
-   * 
+   *
    * @param {string} changeId - Change ID
+   * @param {number} [depth] - Optional depth limit
    * @returns {Promise<Array<string>>} Array of ancestor change IDs
    */
   async getAncestors(changeId, depth = undefined) {
@@ -690,7 +722,7 @@ export class RevsetEngine {
     const queue = [{ id: changeId, level: 0 }];
 
     while (queue.length > 0) {
-      const { id: current, level } = queue.shift();
+      const { id: current, level } = /** @type {{ id: string, level: number }} */ (queue.shift());
 
       if (visited.has(current)) {
         continue;
@@ -765,7 +797,8 @@ export class RevsetEngine {
   async filterByIdPrefix(prefix, field) {
     await this.graph.load();
     const lower = prefix.toLowerCase();
-    return this.graph.getAll()
+    return this.graph
+      .getAll()
       .filter((c) => (c[field] || '').toLowerCase().startsWith(lower))
       .map((c) => c.changeId);
   }
@@ -778,7 +811,8 @@ export class RevsetEngine {
    */
   async filterBySubject(text) {
     await this.graph.load();
-    return this.graph.getAll()
+    return this.graph
+      .getAll()
       .filter((c) => {
         const subject = (c.description || '').split('\n')[0];
         return subject.includes(text);
@@ -796,7 +830,8 @@ export class RevsetEngine {
    */
   async filterBySignatureField(role, field, pattern) {
     await this.graph.load();
-    return this.graph.getAll()
+    return this.graph
+      .getAll()
       .filter((c) => c[role] && c[role][field] && c[role][field].includes(pattern))
       .map((c) => c.changeId);
   }
@@ -812,12 +847,14 @@ export class RevsetEngine {
     if (changeIds.length === 0) return [];
 
     // Intersect the ancestor sets of every seed.
+    /** @type {Set<string> | null} */
     let common = null;
     for (const id of changeIds) {
-      const ancestors = new Set(await this.getAncestors(id));
-      common = common === null
-        ? ancestors
-        : new Set([...common].filter((a) => ancestors.has(a)));
+      const ancestors = /** @type {Set<string>} */ (new Set(await this.getAncestors(id)));
+      common =
+        common === null
+          ? ancestors
+          : new Set([.../** @type {Set<string>} */ (common)].filter((a) => ancestors.has(a)));
     }
     if (!common || common.size === 0) return [];
 
@@ -836,13 +873,15 @@ export class RevsetEngine {
     await this.graph.load();
     if (changeIds.length === 0) return [];
 
+    /** @type {Set<string>|null} */
     let common = null;
     for (const id of changeIds) {
-      const descendants = new Set(await this.getDescendants(id));
+      const descendants = /** @type {Set<string>} */ (new Set(await this.getDescendants(id)));
       descendants.add(id);
-      common = common === null
-        ? descendants
-        : new Set([...common].filter((d) => descendants.has(d)));
+      common =
+        common === null
+          ? descendants
+          : new Set([.../** @type {Set<string>} */ (common)].filter((d) => descendants.has(d)));
     }
     if (!common || common.size === 0) return [];
 
@@ -852,32 +891,28 @@ export class RevsetEngine {
 
   /**
    * Filter changes by author name (v0.2)
-   * 
+   *
    * @param {string} authorName - Author name to match
    * @returns {Promise<Array<string>>} Array of matching change IDs
    */
   async filterByAuthor(authorName) {
     await this.graph.load();
     const all = this.graph.getAll();
-    
-    return all
-      .filter((c) => c.author && c.author.name.includes(authorName))
-      .map((c) => c.changeId);
+
+    return all.filter((c) => c.author && c.author.name.includes(authorName)).map((c) => c.changeId);
   }
 
   /**
    * Filter changes by description text (v0.2)
-   * 
+   *
    * @param {string} text - Text to search for in description
    * @returns {Promise<Array<string>>} Array of matching change IDs
    */
   async filterByDescription(text) {
     await this.graph.load();
     const all = this.graph.getAll();
-    
-    return all
-      .filter((c) => c.description && c.description.includes(text))
-      .map((c) => c.changeId);
+
+    return all.filter((c) => c.description && c.description.includes(text)).map((c) => c.changeId);
   }
 
   /**
@@ -913,9 +948,10 @@ export class RevsetEngine {
     const currentUser = this.userConfig.getUser();
 
     return all
-      .filter((c) => c.author &&
-        (c.author.email === currentUser.email ||
-         c.author.name === currentUser.name))
+      .filter(
+        (c) =>
+          c.author && (c.author.email === currentUser.email || c.author.name === currentUser.name)
+      )
       .map((c) => c.changeId);
   }
 
@@ -928,9 +964,7 @@ export class RevsetEngine {
     await this.graph.load();
     const all = this.graph.getAll();
 
-    return all
-      .filter((c) => c.parents && c.parents.length > 1)
-      .map((c) => c.changeId);
+    return all.filter((c) => c.parents && c.parents.length > 1).map((c) => c.changeId);
   }
 
   /**
@@ -948,10 +982,8 @@ export class RevsetEngine {
     for (const change of all) {
       if (change.fileSnapshot) {
         const files = Object.keys(change.fileSnapshot);
-        const matches = files.some(file =>
-          file === pattern ||
-          file.includes(pattern) ||
-          this.globMatch(file, pattern)
+        const matches = files.some(
+          (file) => file === pattern || file.includes(pattern) || this.globMatch(file, pattern)
         );
         if (matches) {
           results.push(change.changeId);
@@ -970,10 +1002,7 @@ export class RevsetEngine {
    * @returns {boolean} True if matches
    */
   globMatch(str, pattern) {
-    const regexPattern = pattern
-      .replace(/\./g, '\\.')
-      .replace(/\*/g, '.*')
-      .replace(/\?/g, '.');
+    const regexPattern = pattern.replace(/\./g, '\\.').replace(/\*/g, '.*').replace(/\?/g, '.');
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(str);
   }
@@ -993,7 +1022,7 @@ export class RevsetEngine {
     for (const changeId of changeIds) {
       // A change is a root if none of its parents are in the set
       const parents = this.graph.getParents(changeId);
-      const hasParentInSet = parents.some(p => changeSet.has(p));
+      const hasParentInSet = parents.some((p) => changeSet.has(p));
 
       if (!hasParentInSet) {
         roots.push(changeId);
@@ -1018,7 +1047,7 @@ export class RevsetEngine {
     for (const changeId of changeIds) {
       // A change is a head if it has no children in the set
       const children = this.graph.getChildren(changeId);
-      const hasChildInSet = children.some(c => changeSet.has(c));
+      const hasChildInSet = children.some((c) => changeSet.has(c));
 
       if (!hasChildInSet) {
         heads.push(changeId);
@@ -1050,10 +1079,10 @@ export class RevsetEngine {
     changes.sort((a, b) => {
       const timeA = a.committer?.timestamp || a.timestamp || 0;
       const timeB = b.committer?.timestamp || b.timestamp || 0;
-      return new Date(timeB) - new Date(timeA);
+      return /** @type {any} */ (new Date(timeB)) - /** @type {any} */ (new Date(timeA));
     });
 
-    return changes.slice(0, count).map(c => c.changeId);
+    return changes.slice(0, count).map((c) => c.changeId);
   }
 
   /**
@@ -1157,7 +1186,7 @@ export class RevsetEngine {
       return timeB - timeA;
     });
 
-    return sorted.slice(0, count).map(c => c.changeId);
+    return sorted.slice(0, count).map((c) => c.changeId);
   }
 
   /**
@@ -1185,11 +1214,11 @@ export class RevsetEngine {
     const cutoffTime = now - milliseconds;
 
     return all
-      .filter(c => {
+      .filter((c) => {
         const timestamp = c.committer?.timestamp || 0;
         return timestamp >= cutoffTime;
       })
-      .map(c => c.changeId);
+      .map((c) => c.changeId);
   }
 
   /**
@@ -1205,11 +1234,11 @@ export class RevsetEngine {
     const sinceTime = new Date(dateStr).getTime();
 
     return all
-      .filter(c => {
+      .filter((c) => {
         const timestamp = c.committer?.timestamp || 0;
         return timestamp >= sinceTime;
       })
-      .map(c => c.changeId);
+      .map((c) => c.changeId);
   }
 
   /**
@@ -1227,11 +1256,11 @@ export class RevsetEngine {
     const endTime = new Date(endDateStr).getTime();
 
     return all
-      .filter(c => {
+      .filter((c) => {
         const timestamp = c.committer?.timestamp || 0;
         return timestamp >= startTime && timestamp <= endTime;
       })
-      .map(c => c.changeId);
+      .map((c) => c.changeId);
   }
 
   /**
@@ -1249,7 +1278,7 @@ export class RevsetEngine {
     const queue = [{ id: changeId, level: 0 }];
 
     while (queue.length > 0) {
-      const { id: current, level } = queue.shift();
+      const { id: current, level } = /** @type {{ id: string, level: number }} */ (queue.shift());
 
       if (visited.has(current)) {
         continue;
@@ -1399,7 +1428,7 @@ export class RevsetEngine {
     // Get all changes and check if their parents include any from our set
     const allChanges = this.graph.getAll();
     for (const change of allChanges) {
-      if (change.parents && change.parents.some((p) => changeIdSet.has(p))) {
+      if (change.parents && change.parents.some((/** @type {string} */ p) => changeIdSet.has(p))) {
         children.add(change.changeId);
       }
     }
@@ -1424,7 +1453,7 @@ export class RevsetEngine {
 
       for (let i = 1; i < parts.length; i++) {
         const partResult = new Set(await this.evaluate(parts[i]));
-        result = new Set([...result].filter(x => partResult.has(x)));
+        result = new Set([...result].filter((x) => partResult.has(x)));
       }
 
       return Array.from(result);
@@ -1437,7 +1466,7 @@ export class RevsetEngine {
 
       for (const part of parts) {
         const partResult = await this.evaluate(part);
-        partResult.forEach(id => result.add(id));
+        partResult.forEach((id) => result.add(id));
       }
 
       return Array.from(result);
@@ -1450,7 +1479,7 @@ export class RevsetEngine {
 
       for (let i = 1; i < parts.length; i++) {
         const partResult = new Set(await this.evaluate(parts[i]));
-        result = new Set([...result].filter(x => !partResult.has(x)));
+        result = new Set([...result].filter((x) => !partResult.has(x)));
       }
 
       return Array.from(result);
