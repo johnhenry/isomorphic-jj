@@ -43,15 +43,14 @@ describe('repository.js coverage — show/undo/redo files', () => {
   const currentId = async () => (await jj.status()).workingCopy.changeId;
 
   it('show returns a bookmarks array for the change', async () => {
-    // BUG: show() filters bookmarks with `b.target === change.changeId`, but
-    // bookmark objects expose `changeId` (not `target`), so show() never
-    // attributes any bookmark to a change. We assert the ACTUAL behavior (an
-    // empty array even though a bookmark points here).
+    // Fixed: show() used to filter bookmarks with `b.target === changeId`,
+    // but bookmark objects expose `changeId` (not `target`), so it never
+    // attributed any bookmark to a change. It now filters on `b.changeId`.
     const id = await currentId();
     await jj.bookmark.create({ name: 'bm', changeId: id });
     const shown = await jj.show({ change: id });
     expect(Array.isArray(shown.bookmarks)).toBe(true);
-    expect(shown.bookmarks).toEqual([]);
+    expect(shown.bookmarks).toEqual(['bm']);
   });
 
   it('undo restores working-copy files (including nested dirs)', async () => {

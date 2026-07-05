@@ -1768,7 +1768,7 @@ export async function createJJ(options) {
       // Find bookmarks pointing to this change
       const allBookmarks = await bookmarks.list();
       const changeBookmarks = allBookmarks
-        .filter((b) => b.target === change.changeId)
+        .filter((b) => b.changeId === change.changeId)
         .map((b) => b.name);
 
       // Find operations that modified this change
@@ -2492,8 +2492,9 @@ export async function createJJ(options) {
             await bookmarks.delete(name);
             inversChanges.bookmarks[name] = { action: 'deleted' };
           } else if (prevBookmarks[name] !== targetBookmarks[name]) {
-            // Bookmark was moved - move it back
-            await bookmarks.set(name, prevBookmarks[name]);
+            // Bookmark was moved - move it back (the bookmark still exists, so
+            // use move() rather than set(), which is create-only).
+            await bookmarks.move(name, prevBookmarks[name]);
             inversChanges.bookmarks[name] = {
               action: 'moved',
               from: targetBookmarks[name],
@@ -5952,7 +5953,7 @@ export async function createJJ(options) {
         }
 
         await bookmarks.load();
-        const bookmark = bookmarks.get(args.name);
+        const bookmark = await bookmarks.get(args.name);
         if (!bookmark) {
           throw new JJError('NOT_FOUND', `Bookmark ${args.name} not found`);
         }

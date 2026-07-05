@@ -165,14 +165,16 @@ describe('MergeDriverRegistry', () => {
       expect(await isMatch('dir/a.txt', '*.txt')).toBe(false);
     });
 
-    it('handles double-star patterns (documents dot-escaping bug)', async () => {
-      // BUG: matchesPattern escapes ALL dots last, which corrupts the `.*`
-      // produced by `**` into `\.*` (zero-or-more literal dots). As a result
-      // `**/*.txt` does NOT match `a/b/c.txt` as a real glob would.
-      expect(await isMatch('a/b/c.txt', '**/*.txt')).toBe(false);
-      // The `**` -> `.*` -> `\.*` corruption means `**` only matches a run of
-      // literal dots, so this contrived path DOES match.
-      expect(await isMatch('...b.txt', '**b.txt')).toBe(true);
+    it('handles double-star patterns', async () => {
+      // Fixed: literal dots are now escaped BEFORE the `**` -> `.*`
+      // substitution, so the inserted `.*` is a real "any characters" regex
+      // fragment instead of being corrupted into `\.*` (zero-or-more dots).
+      expect(await isMatch('a/b/c.txt', '**/*.txt')).toBe(true);
+      expect(await isMatch('deeply/nested/dir/file.txt', '**/file.txt')).toBe(true);
+      // Differentiator vs. the old bug: previously `**` could only match a run
+      // of literal dots (since it was corrupted into `\.*`), so a non-dot
+      // prefix like "xyz-" would NOT have matched.
+      expect(await isMatch('xyz-b.txt', '**b.txt')).toBe(true);
     });
 
     it('matches ? single char', async () => {

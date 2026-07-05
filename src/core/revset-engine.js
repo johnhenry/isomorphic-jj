@@ -1162,7 +1162,7 @@ export class RevsetEngine {
         continue;
       }
 
-      result.push(bookmark.target);
+      result.push(bookmark.changeId);
     }
 
     // Return unique changeIds

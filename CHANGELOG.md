@@ -4,6 +4,55 @@ All notable changes to isomorphic-jj are documented here. The project tracks the
 [Jujutsu (jj)](https://github.com/jj-vcs/jj) CLI; each release notes the upstream
 jj version whose semantics it targets.
 
+## [1.6.1] — Bugfix batch
+
+Fixes nine real, pre-existing defects that the v1.5/v1.6 coverage push
+surfaced and documented (each had a test asserting the buggy behavior with a
+`// BUG:` note — those tests now assert the corrected behavior instead).
+
+### Fixed
+
+- **`bookmarks([pattern])` revset returned `[undefined]`.** `filterBookmarks()`
+  read `bookmark.target`, but `BookmarkStore.list()` returns objects keyed
+  `changeId`. It now reads `bookmark.changeId`.
+- **`show()` never attributed bookmarks to a change**, for the same
+  `.target` vs. `.changeId` mismatch. Fixed the same way.
+- **`bookmark.delete()`'s not-found guard was dead code.** It called
+  `bookmarks.get(name)` without `await`, so the "truthy Promise" always
+  passed the guard; the store's own `BOOKMARK_NOT_FOUND` was reached
+  instead of the friendlier method-level `NOT_FOUND`. Added the missing
+  `await`.
+- **`operations.revert()` on a bookmark-move operation always threw
+  `BOOKMARK_EXISTS`.** Its "moved bookmark" branch called `bookmarks.set()`
+  (create-only) to move the bookmark back, but the bookmark still exists
+  during a move-revert. Changed to `bookmarks.move()`.
+- **`ChangeGraph.getAncestors()` returned duplicate ancestors on
+  diamond-shaped history** (e.g. `a<-b`, `a<-c`, `b,c<-d`). A node was only
+  marked visited when dequeued, so a shared ancestor reachable via two
+  parents could be enqueued twice. Nodes are now marked visited the moment
+  they're enqueued.
+- **`matchesPattern()` (merge driver registry) broke `**` glob patterns.**
+  Literal dots were escaped *after* `**` had already been converted to
+  `.*`, corrupting it into `\.*` (zero-or-more literal dots) instead of "any
+  characters". Dots are now escaped before the glob substitutions.
+- **`IsomorphicGitBackend.getCurrentTree()` always threw
+  `TREE_READ_FAILED`.** It called `git.writeTree({ fs, dir })` without the
+  library's required `tree` argument (`git.writeTree` writes a single,
+  already-built tree — it doesn't build one from the working directory).
+  Reimplemented to walk the git index (`STAGE`) and build the nested tree
+  bottom-up, verified to produce the same oid as an equivalent real commit.
+- **`ConflictModel._tryMergeDriver()`'s "no custom driver" guard never
+  matched.** It compared `driver === this.mergeDriverRegistry.defaultDriver`,
+  but `MergeDriverRegistry` never set a `defaultDriver` property (always
+  `undefined`), so every file was routed through the generic three-way
+  merge driver instead of falling back to the richer path-based conflict-type
+  detection. `MergeDriverRegistry` now exposes `defaultDriver`.
+- **`IsomorphicGitBackend.stageAll()` double-wrapped per-file errors.** A
+  specific `STAGE_FILE_FAILED` thrown for one file was immediately re-wrapped
+  by the surrounding `catch` as the generic `STAGE_FAILED`, hiding the more
+  useful code. The outer catch now re-throws an already-categorized
+  `JJError` as-is.
+
 ## [1.6.0] — Automatic working-copy snapshotting
 
 Closes a long-standing fidelity gap: the library now **walks the working

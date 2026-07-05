@@ -292,21 +292,72 @@ export class IsomorphicGitBackend {
   }
 
   /**
-   * Get the current tree SHA for the working directory
+   * Get the current tree SHA for the staging area (git index).
+   *
+   * `git.writeTree()` writes exactly the flat `TreeObject` array it's given —
+   * it does not build one from the working directory or index. To get "the
+   * tree that would be committed right now", walk the index (STAGE) to
+   * collect every staged blob's path/oid/mode, group them into a nested
+   * directory structure, and write each subtree bottom-up.
    *
    * @returns {Promise<string>} Tree SHA
    */
   async getCurrentTree() {
     try {
-      // Get the current staging area tree
-      // This will create tree objects from the current working directory
-      const tree = await git.writeTree(
-        /** @type {any} */ ({
+      /** @type {Array<{path: string, oid: string, mode: number}>} */
+      const flatEntries = (
+        await git.walk({
           fs: this.fs,
           dir: this.dir,
+          trees: [git.STAGE()],
+          map: async (filepath, [stage]) => {
+            if (!stage || filepath === '.') return undefined;
+            const type = await stage.type();
+            if (type !== 'blob') return undefined; // directory marker, not a leaf
+            return { path: filepath, oid: await stage.oid(), mode: await stage.mode() };
+          },
         })
-      );
-      return tree;
+      ).filter(Boolean);
+
+      // Group the flat, index-relative paths into a nested tree of
+      // directories, each holding its immediate file/subdirectory children.
+      /** @type {{dirs: Map<string, any>, files: Array<{name: string, oid: string, mode: string}>}} */
+      const root = { dirs: new Map(), files: [] };
+      for (const entry of flatEntries) {
+        const parts = entry.path.split('/');
+        let node = root;
+        for (let i = 0; i < parts.length - 1; i++) {
+          const segment = parts[i];
+          if (!node.dirs.has(segment)) {
+            node.dirs.set(segment, { dirs: new Map(), files: [] });
+          }
+          node = node.dirs.get(segment);
+        }
+        node.files.push({
+          name: parts[parts.length - 1],
+          oid: entry.oid,
+          // isomorphic-git expects an octal mode STRING (e.g. "100644"), but
+          // the walker returns the mode as a decimal number.
+          mode: entry.mode.toString(8),
+        });
+      }
+
+      const writeDir = async (/** @type {any} */ node) => {
+        /** @type {any[]} */
+        const treeEntries = [];
+        for (const [name, child] of node.dirs.entries()) {
+          const oid = await writeDir(child);
+          treeEntries.push({ mode: '040000', path: name, oid, type: 'tree' });
+        }
+        for (const file of node.files) {
+          treeEntries.push({ mode: file.mode, path: file.name, oid: file.oid, type: 'blob' });
+        }
+        return await git.writeTree(
+          /** @type {any} */ ({ fs: this.fs, dir: this.dir, tree: treeEntries })
+        );
+      };
+
+      return await writeDir(root);
     } catch (error) {
       throw new JJError('TREE_READ_FAILED', `Failed to get current tree: ${error.message}`, {
         originalError: error,
@@ -344,6 +395,13 @@ export class IsomorphicGitBackend {
         }
       }
     } catch (error) {
+      // A per-file STAGE_FILE_FAILED (thrown above) is already categorized —
+      // re-throw it as-is instead of losing its specific code by re-wrapping
+      // it in the more generic STAGE_FAILED (which is reserved for failures
+      // in _getAllFiles() itself, e.g. an unreadable directory).
+      if (error instanceof JJError) {
+        throw error;
+      }
       throw new JJError('STAGE_FAILED', `Failed to stage files: ${error.message}`, {
         originalError: error,
       });

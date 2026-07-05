@@ -313,15 +313,15 @@ describe('RevsetEngine branch coverage', () => {
   });
 
   describe('bookmarks() glob + remote handling', () => {
-    it('bookmarks(pattern) filters by glob (BUG: returns null targets)', async () => {
+    it('bookmarks(pattern) filters by glob and resolves the real changeId', async () => {
       await ctx.bookmarks.set('feature-x', A);
       await ctx.bookmarks.set('main', B);
-      // BUG: filterBookmarks pushes `bookmark.target`, but BookmarkStore.list()
-      // returns objects keyed `changeId` (no `target`), and the local bookmark's
-      // `remote` is null (not skipped). So the glob match succeeds but the value
-      // resolved is `undefined`, deduped to a single `null`/undefined entry.
+      // Fixed: filterBookmarks used to push `bookmark.target`, but
+      // BookmarkStore.list() returns objects keyed `changeId` (no `target`
+      // field), so the resolved value was always `undefined`. It now pushes
+      // `bookmark.changeId`.
       const result = await ctx.revset.evaluate('bookmarks(feature*)');
-      expect(result).toEqual([undefined]);
+      expect(result).toEqual([A]);
     });
   });
 

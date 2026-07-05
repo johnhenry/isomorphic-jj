@@ -21,12 +21,15 @@ function matchesPattern(path, pattern) {
 
   // Convert glob pattern to regex
   // Support: *, **, ?, [abc]
+  // Literal dots must be escaped BEFORE the ** -> '.*' substitution, otherwise
+  // the dot-escaping pass corrupts the inserted '.*' into the literal '\.*'
+  // (zero-or-more dots) instead of "any characters".
   const regexPattern = pattern
+    .replace(/\./g, '\\.')
     .replace(/\*\*/g, '__DOUBLESTAR__')
     .replace(/\*/g, '[^/]*')
     .replace(/__DOUBLESTAR__/g, '.*')
-    .replace(/\?/g, '[^/]')
-    .replace(/\./g, '\\.');
+    .replace(/\?/g, '[^/]');
 
   const regex = new RegExp(`^${regexPattern}$`);
   return regex.test(path);
@@ -177,6 +180,10 @@ export class MergeDriverRegistry {
     this.drivers = [];
     /** @type {any} */
     this.jj = jj; // JJ instance for event emission
+    // Expose the built-in fallback driver so callers (e.g. ConflictModel) can
+    // detect when findDriver() fell through to it rather than resolving a
+    // real custom driver, and skip driver execution in that case.
+    this.defaultDriver = defaultMergeDriver;
   }
 
   /**

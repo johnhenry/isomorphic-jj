@@ -422,14 +422,13 @@ describe('ConflictModel branch coverage', () => {
     });
   });
 
-  describe('KNOWN BUG: registry present but no custom driver', () => {
-    it('runs the default three-way driver instead of returning null', async () => {
-      // BUG: ConflictModel checks `driver === this.mergeDriverRegistry.defaultDriver`
-      // to skip when only the built-in default driver matched, but MergeDriverRegistry
-      // does not expose a `defaultDriver` property. The comparison is always false,
-      // so with a registry present every file is routed through the built-in
-      // three-way merge driver instead of ConflictModel._detectPathConflict.
-      // Asserting current (buggy) behavior; not fixing src.
+  describe('registry present but no custom driver', () => {
+    it('falls through to _detectPathConflict instead of running the default driver', async () => {
+      // Fixed: MergeDriverRegistry now exposes `defaultDriver` (the built-in
+      // fallback), so ConflictModel's `driver === this.mergeDriverRegistry.defaultDriver`
+      // check correctly recognizes when findDriver() only matched the generic
+      // fallback (no real custom driver registered) and skips executing it,
+      // instead deferring to the richer path-based conflict-type detection.
       const registry = new MergeDriverRegistry(); // nothing registered
       const model = new ConflictModel(storage, fs, registry);
 
@@ -440,9 +439,25 @@ describe('ConflictModel branch coverage', () => {
       });
 
       expect(detected).toHaveLength(1);
-      // The driver-produced conflict carries the driver's message, proving the
-      // default merge driver ran (rather than _detectPathConflict, which would
-      // set message 'Conflicting changes to file content').
+      // _detectPathConflict's message, proving the default merge driver did
+      // NOT run and the built-in conflict-type detection took over instead.
+      expect(detected[0].message).toBe('Conflicting changes to file content');
+    });
+
+    it('still runs a real custom driver when one is registered', async () => {
+      const registry = new MergeDriverRegistry();
+      registry.register({
+        '*.md': async () => ({ content: 'driver output', hasConflict: true }),
+      });
+      const model = new ConflictModel(storage, fs, registry);
+
+      const detected = await model.detectConflicts({
+        baseFiles: filesMap({ 'x.md': 'base' }),
+        leftFiles: filesMap({ 'x.md': 'ours' }),
+        rightFiles: filesMap({ 'x.md': 'theirs' }),
+      });
+
+      expect(detected).toHaveLength(1);
       expect(detected[0].message).toBe('Merge driver detected conflicts');
     });
   });
