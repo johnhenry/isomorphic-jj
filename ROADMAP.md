@@ -1,7 +1,13 @@
 # isomorphic-jj Roadmap
 
-**Current Version**: v1.5.0 ✅ (tracks jj through v0.43)
+**Current Version**: v1.6.0 ✅ (tracks jj through v0.43)
 **Last Updated**: 2026-07-05
+
+> **v1.6 automatic working-copy snapshotting:** the library now walks the working
+> directory on disk and reconciles tracked state before read/commit operations,
+> so files created/modified/deleted out-of-band are picked up (like jj). Adds
+> `WorkingCopy.walk()`/`snapshot()`, `jj.snapshot()`, and the
+> `createJJ({ autoSnapshot })` opt-out. See [CHANGELOG.md](./CHANGELOG.md).
 
 > **v1.5 parity refresh:** caught up with Jujutsu releases v0.31–v0.43. Added
 > revset functions (`change_id`, `commit_id`, `subject`, `author_name`/`email`,

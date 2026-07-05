@@ -93,11 +93,30 @@ describe('repository.js coverage — show/undo/redo files', () => {
   });
 
   it('describe throws SNAPSHOT_FILE_FAILED when a tracked file cannot be read', async () => {
-    await jj.write({ path: 'ghost.txt', data: 'boo' });
-    // Delete the underlying file directly, leaving it tracked in the working copy.
-    await fs.promises.unlink('/test/repo/ghost.txt');
-    await expect(jj.describe({ message: 'x' })).rejects.toMatchObject({
+    // With autoSnapshot disabled, a tracked-but-missing file still reaches the
+    // read in describe's snapshot loop. (With the default auto-snapshot on, the
+    // deleted file is untracked first — see the graceful-deletion test below.)
+    const noSnapFs = new MockFS();
+    const jj2 = await createJJ({
+      fs: noSnapFs,
+      dir: '/test/repo2',
+      backend: 'mock',
+      autoSnapshot: false,
+    });
+    await jj2.init({ userName: 'Test', userEmail: 't@e.com' });
+    await jj2.write({ path: 'ghost.txt', data: 'boo' });
+    await noSnapFs.promises.unlink('/test/repo2/ghost.txt');
+    await expect(jj2.describe({ message: 'x' })).rejects.toMatchObject({
       code: 'SNAPSHOT_FILE_FAILED',
     });
+  });
+
+  it('describe gracefully untracks a deleted file when auto-snapshot is on', async () => {
+    await jj.write({ path: 'ghost.txt', data: 'boo' });
+    await fs.promises.unlink('/test/repo/ghost.txt');
+    // Auto-snapshot (default) reconciles the deletion instead of throwing.
+    const change = await jj.describe({ message: 'x' });
+    expect(Object.prototype.hasOwnProperty.call(change.fileSnapshot, 'ghost.txt')).toBe(false);
+    expect(await jj.listFiles()).not.toContain('ghost.txt');
   });
 });
