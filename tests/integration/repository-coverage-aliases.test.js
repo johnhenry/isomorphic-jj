@@ -803,11 +803,12 @@ describe('repository.js coverage — aliases & optional params', () => {
       await expect(jj.bookmark.delete({})).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     });
 
-    it('bookmark.delete throws for a nonexistent bookmark', async () => {
-      // bookmarks.get() resolves to a truthy wrapper here, so the store's own
-      // delete raises BOOKMARK_NOT_FOUND rather than the method-level NOT_FOUND.
+    it('bookmark.delete throws NOT_FOUND for a nonexistent bookmark', async () => {
+      // Fixed: bookmark.delete() was missing an `await` on bookmarks.get(),
+      // so its not-found guard never fired. It now throws its own NOT_FOUND
+      // before ever reaching the store's BOOKMARK_NOT_FOUND.
       await expect(jj.bookmark.delete({ name: 'ghost' })).rejects.toMatchObject({
-        code: 'BOOKMARK_NOT_FOUND',
+        code: 'NOT_FOUND',
       });
     });
 

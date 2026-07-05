@@ -665,11 +665,10 @@ describe('repository.js coverage — namespaces & stubs', () => {
       await expect(jj.bookmark.delete({})).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     });
     it('delete rejects for unknown bookmark', async () => {
-      // NOTE: the public delete() guard is written to throw NOT_FOUND, but the
-      // underlying BookmarkStore.delete throws BOOKMARK_NOT_FOUND first (the
-      // store's get() returns a truthy value so the guard branch is skipped).
+      // Fixed: delete() was missing an `await` on bookmarks.get(), so its
+      // own NOT_FOUND guard never fired. It now throws NOT_FOUND directly.
       await expect(jj.bookmark.delete({ name: 'nope' })).rejects.toMatchObject({
-        code: 'BOOKMARK_NOT_FOUND',
+        code: 'NOT_FOUND',
       });
     });
     it('delete removes a bookmark', async () => {

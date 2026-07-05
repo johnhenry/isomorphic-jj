@@ -1,7 +1,14 @@
 # isomorphic-jj Roadmap
 
-**Current Version**: v1.6.0 ✅ (tracks jj through v0.43)
+**Current Version**: v1.6.1 ✅ (tracks jj through v0.43)
 **Last Updated**: 2026-07-05
+
+> **v1.6.1 bugfix batch:** fixed nine real defects surfaced by the coverage
+> push — broken `bookmarks()`/`show()` bookmark attribution, a dead-code
+> not-found guard, `operations.revert()` throwing on bookmark-move reverts, a
+> revset engine bug in the `**` glob, `getCurrentTree()` always throwing, a
+> conflict-driver fallback that never engaged, and double-wrapped `stageAll()`
+> errors. See [CHANGELOG.md](./CHANGELOG.md).
 
 > **v1.6 automatic working-copy snapshotting:** the library now walks the working
 > directory on disk and reconciles tracked state before read/commit operations,

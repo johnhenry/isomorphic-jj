@@ -106,7 +106,7 @@ describe('ChangeGraph - coverage', () => {
       expect(graph.getAncestors(tid(1))).toEqual([]);
     });
 
-    it('produces duplicate ancestors for a diamond (documents current behavior)', async () => {
+    it('de-duplicates a shared ancestor in a diamond', async () => {
       await graph.init();
       // a <- b, a <- c, b&c <- d
       await graph.addChange(makeChange(tid(1), []));
@@ -115,13 +115,13 @@ describe('ChangeGraph - coverage', () => {
       await graph.addChange(makeChange(tid(4), [tid(2), tid(3)]));
 
       const ancestors = graph.getAncestors(tid(4));
-      // BUG: getAncestors marks nodes visited only on dequeue, so a shared
-      // ancestor reachable via two paths (tid(1) via both tid(2) and tid(3))
-      // is pushed twice before being dequeued. Ideally ancestors would be
-      // de-duplicated. Asserting current behavior.
-      expect(ancestors.filter((a) => a === tid(1))).toHaveLength(2);
+      // Fixed: a node is now marked visited the moment it's enqueued (not
+      // when dequeued), so a shared ancestor reachable via two paths
+      // (tid(1) via both tid(2) and tid(3)) is only added once.
+      expect(ancestors.filter((a) => a === tid(1))).toHaveLength(1);
       expect(ancestors).toContain(tid(2));
       expect(ancestors).toContain(tid(3));
+      expect(ancestors).toHaveLength(3);
     });
   });
 

@@ -234,19 +234,58 @@ describe('IsomorphicGitBackend - coverage', () => {
   });
 
   describe('getCurrentTree', () => {
-    test('BUG: getCurrentTree always throws TREE_READ_FAILED because git.writeTree requires a "tree" param that is never passed', async () => {
-      // BUG: src/backend/isomorphic-git-backend.js getCurrentTree() calls
-      // git.writeTree({ fs, dir }) without the required `tree` argument, so it
-      // can never succeed with current isomorphic-git. Asserting current behavior.
+    test('returns the tree oid for a flat set of staged files', async () => {
+      // Fixed: getCurrentTree() used to call git.writeTree({ fs, dir })
+      // without the required `tree` argument (always throwing
+      // TREE_READ_FAILED). It now walks the index (STAGE) and builds the
+      // nested tree itself.
       const dir = freshDir('tree');
       await fs.promises.mkdir(dir, { recursive: true });
       const backend = new IsomorphicGitBackend({ fs, dir });
       await backend.init();
       await fs.promises.writeFile(path.join(dir, 'a.txt'), 'a');
       await backend.stageAll();
-      await expect(backend.getCurrentTree()).rejects.toMatchObject({
-        code: 'TREE_READ_FAILED',
+
+      const treeOid = await backend.getCurrentTree();
+      expect(treeOid).toMatch(/^[0-9a-f]{40}$/);
+
+      // Cross-check: it matches the tree oid isomorphic-git itself records
+      // when actually committing this exact staged state.
+      const sha = await backend.createCommit({
+        message: 'x',
+        author: { name: 'A', email: 'a@e.com' },
       });
+      const { commit } = await git.readCommit({ fs, dir, oid: sha });
+      expect(treeOid).toBe(commit.tree);
+    });
+
+    test('handles nested directories, matching the real commit tree oid', async () => {
+      const dir = freshDir('tree-nested');
+      await fs.promises.mkdir(path.join(dir, 'sub', 'deep'), { recursive: true });
+      const backend = new IsomorphicGitBackend({ fs, dir });
+      await backend.init();
+      await fs.promises.writeFile(path.join(dir, 'a.txt'), 'a');
+      await fs.promises.writeFile(path.join(dir, 'sub', 'b.txt'), 'b');
+      await fs.promises.writeFile(path.join(dir, 'sub', 'deep', 'c.txt'), 'c');
+      await backend.stageAll();
+
+      const treeOid = await backend.getCurrentTree();
+      const sha = await backend.createCommit({
+        message: 'x',
+        author: { name: 'A', email: 'a@e.com' },
+      });
+      const { commit } = await git.readCommit({ fs, dir, oid: sha });
+      expect(treeOid).toBe(commit.tree);
+    });
+
+    test('returns the canonical empty-tree oid when nothing is staged', async () => {
+      const dir = freshDir('tree-empty');
+      await fs.promises.mkdir(dir, { recursive: true });
+      const backend = new IsomorphicGitBackend({ fs, dir });
+      await backend.init();
+
+      const treeOid = await backend.getCurrentTree();
+      expect(treeOid).toBe('4b825dc642cb6eb9a060e54bf8d69288fbee4904');
     });
   });
 
@@ -568,10 +607,21 @@ describe('IsomorphicGitBackend - coverage', () => {
           },
         },
       };
-      // The inner non-ENOENT branch throws STAGE_FILE_FAILED, but stageAll's
-      // outer catch re-wraps any thrown error as STAGE_FAILED.
-      // BUG: the STAGE_FILE_FAILED code is never surfaced to callers because
-      // the surrounding try/catch re-wraps it. We assert the ACTUAL final code.
+      // Fixed: the inner non-ENOENT branch throws STAGE_FILE_FAILED; stageAll's
+      // outer catch used to re-wrap ANY thrown error as the more generic
+      // STAGE_FAILED, hiding the specific code. It now re-throws an already-
+      // categorized JJError as-is.
+      await expect(backend.stageAll()).rejects.toMatchObject({ code: 'STAGE_FILE_FAILED' });
+    });
+
+    test('a non-JJError failure in _getAllFiles is still wrapped in STAGE_FAILED', async () => {
+      const dir = freshDir('stage-getallfiles-failure');
+      await fs.promises.mkdir(dir, { recursive: true });
+      const backend = new IsomorphicGitBackend({ fs, dir });
+      await backend.init();
+      backend._getAllFiles = async () => {
+        throw new Error('boom');
+      };
       await expect(backend.stageAll()).rejects.toMatchObject({ code: 'STAGE_FAILED' });
     });
   });

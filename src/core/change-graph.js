@@ -214,20 +214,19 @@ export class ChangeGraph {
    */
   getAncestors(changeId) {
     const ancestors = [];
-    const visited = new Set();
+    // `visited` also doubles as "already enqueued" — mark a node the moment
+    // it's scheduled (not when dequeued), so a change reachable via two paths
+    // in a diamond-shaped history (a<-b, a<-c, b&c<-d) is only added once.
+    const visited = new Set([changeId]);
     const queue = [changeId];
 
     while (queue.length > 0) {
       const current = queue.shift();
 
-      if (visited.has(current)) {
-        continue;
-      }
-      visited.add(current);
-
       const parents = this.getParents(current);
       for (const parent of parents) {
         if (!visited.has(parent)) {
+          visited.add(parent);
           ancestors.push(parent);
           queue.push(parent);
         }

@@ -229,12 +229,11 @@ describe('repository.js coverage — deep paths', () => {
   // operations.revert — bookmark moved/restored + working copy branches
   // ------------------------------------------------------------------
   describe('operations.revert branches', () => {
-    it('reverting a bookmark-move operation throws BOOKMARK_EXISTS', async () => {
-      // BUG: operations.revert's "moved bookmark" branch calls bookmarks.set()
-      // to move the bookmark back, but set() throws BOOKMARK_EXISTS when the
-      // bookmark already exists (which it always does during a move-revert).
-      // It should call bookmarks.move() instead. We assert the ACTUAL behavior
-      // so the suite stays green.
+    it('reverting a bookmark-move operation moves it back', async () => {
+      // Fixed: operations.revert's "moved bookmark" branch used to call
+      // bookmarks.set() to move the bookmark back, but set() is create-only
+      // and throws BOOKMARK_EXISTS when the bookmark already exists (which it
+      // always does during a move-revert). It now calls bookmarks.move().
       const root = await currentId();
       await jj.new({ message: 'child' });
       const child = await currentId();
@@ -242,9 +241,14 @@ describe('repository.js coverage — deep paths', () => {
       await jj.bookmark.create({ name: 'mv', changeId: root }); // op: bookmarks {mv: root}
       await jj.bookmark.move({ name: 'mv', to: child }); // op: bookmarks {mv: child}
       const ops = await jj.operations.list();
-      await expect(jj.operations.revert({ operation: ops[0].id })).rejects.toMatchObject({
-        code: 'BOOKMARK_EXISTS',
+      const result = await jj.operations.revert({ operation: ops[0].id });
+      expect(result.inverseChanges.bookmarks.mv).toMatchObject({
+        action: 'moved',
+        from: child,
+        to: root,
       });
+      const bookmarkList = await jj.bookmark.list();
+      expect(bookmarkList.find((b) => b.name === 'mv').changeId).toBe(root);
     });
 
     it('reverts an operation that deleted a bookmark (restores it)', async () => {
