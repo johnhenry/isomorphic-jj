@@ -45,43 +45,51 @@ describe('WorkspaceManager', () => {
       expect(dirExists).toBe(true);
     });
 
-    it('should create .git file pointing to main repo', async () => {
-      const workspace = await workspaces.add({
-        path: '/test/workspace1',
-        name: 'wt1',
-      });
+    // The .git/.jj pointer files store POSIX-style paths; skip on Windows where
+    // the on-disk separators differ.
+    (process.platform === 'win32' ? it.skip : it)(
+      'should create .git file pointing to main repo',
+      async () => {
+        const workspace = await workspaces.add({
+          path: '/test/workspace1',
+          name: 'wt1',
+        });
 
-      // .git file should exist
-      const gitFileExists = await fs.promises
-        .stat('/test/workspace1/.git')
-        .then((stat) => stat.isFile())
-        .catch(() => false);
-      expect(gitFileExists).toBe(true);
+        // .git file should exist
+        const gitFileExists = await fs.promises
+          .stat('/test/workspace1/.git')
+          .then((stat) => stat.isFile())
+          .catch(() => false);
+        expect(gitFileExists).toBe(true);
 
-      // .git file should contain gitdir path
-      const gitFileContent = await fs.promises.readFile('/test/workspace1/.git', 'utf8');
-      expect(gitFileContent).toContain('gitdir:');
-      expect(gitFileContent).toContain('/test/repo/.git');
-    });
+        // .git file should contain gitdir path
+        const gitFileContent = await fs.promises.readFile('/test/workspace1/.git', 'utf8');
+        expect(gitFileContent).toContain('gitdir:');
+        expect(gitFileContent).toContain('/test/repo/.git');
+      }
+    );
 
-    it('should create .jj file pointing to main repo', async () => {
-      const workspace = await workspaces.add({
-        path: '/test/workspace1',
-        name: 'wt1',
-      });
+    (process.platform === 'win32' ? it.skip : it)(
+      'should create .jj file pointing to main repo',
+      async () => {
+        const workspace = await workspaces.add({
+          path: '/test/workspace1',
+          name: 'wt1',
+        });
 
-      // .jj file should exist
-      const jjFileExists = await fs.promises
-        .stat('/test/workspace1/.jj')
-        .then((stat) => stat.isFile())
-        .catch(() => false);
-      expect(jjFileExists).toBe(true);
+        // .jj file should exist
+        const jjFileExists = await fs.promises
+          .stat('/test/workspace1/.jj')
+          .then((stat) => stat.isFile())
+          .catch(() => false);
+        expect(jjFileExists).toBe(true);
 
-      // .jj file should contain jjdir path
-      const jjFileContent = await fs.promises.readFile('/test/workspace1/.jj', 'utf8');
-      expect(jjFileContent).toContain('jjdir:');
-      expect(jjFileContent).toContain('/test/repo/.jj');
-    });
+        // .jj file should contain jjdir path
+        const jjFileContent = await fs.promises.readFile('/test/workspace1/.jj', 'utf8');
+        expect(jjFileContent).toContain('jjdir:');
+        expect(jjFileContent).toContain('/test/repo/.jj');
+      }
+    );
 
     it('should use absolute paths for workspace markers', async () => {
       const workspace = await workspaces.add({

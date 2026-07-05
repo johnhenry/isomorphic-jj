@@ -36,10 +36,14 @@ jobs:
       
       - name: Test
         run: npm test
-      
+
+      # Coverage thresholds are enforced on a single canonical platform. Coverage
+      # is intrinsically machine-independent for our code, so running the gate on
+      # every OS only adds cross-platform flakiness without extra signal.
       - name: Coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 20
         run: npm run test:coverage
-      
+
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.node == 20
         uses: codecov/codecov-action@v3

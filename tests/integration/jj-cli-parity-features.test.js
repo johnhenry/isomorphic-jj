@@ -448,7 +448,9 @@ describe('JJ CLI Parity Features', () => {
   // File Chmod Operation
   // ========================================
 
-  describe('file.chmod()', () => {
+  // chmod cannot set POSIX permission bits on Windows (NTFS has no Unix modes),
+  // so these assertions are POSIX-only.
+  (process.platform === 'win32' ? describe.skip : describe)('file.chmod()', () => {
     it('should change file permissions', async () => {
       await jj.write({ path: 'script.sh', data: '#!/bin/bash\necho "test"' });
 

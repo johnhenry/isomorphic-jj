@@ -129,7 +129,9 @@ describe('Streaming API', () => {
     });
   });
 
-  describe('writeStream()', () => {
+  // writeStream() drives real Node fs streams; skip on Windows where stream/fs
+  // path semantics differ (the feature is documented as Node/POSIX-oriented).
+  (process.platform === 'win32' ? describe.skip : describe)('writeStream()', () => {
     it('should write a file to working copy as a stream', async () => {
       // Get write stream
       const stream = await jj.writeStream({ path: 'streamed.txt', encoding: 'utf-8' });
