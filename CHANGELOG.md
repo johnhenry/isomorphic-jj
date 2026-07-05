@@ -4,6 +4,78 @@ All notable changes to isomorphic-jj are documented here. The project tracks the
 [Jujutsu (jj)](https://github.com/jj-vcs/jj) CLI; each release notes the upstream
 jj version whose semantics it targets.
 
+## [1.7.0] — Real revset parser, testable/UX-improved CLI, background-ops fix
+
+Closes out the remaining known-issue backlog.
+
+### Changed — revset engine rewritten around a real tokenizer + parser + AST
+
+`RevsetEngine.evaluate()` previously matched the whole trimmed expression
+against one long chain of regexes, one per construct. This had two real bugs:
+
+- **Nested function-call arguments silently mis-parsed.** A non-greedy regex
+  like `/^roots\((.+?)\)$/` truncates at the *first* `)` it sees, so
+  `roots(ancestors(x))` never worked — the previous "fix" for this was a
+  one-off hand-rolled paren-counter used only by `reachable()`.
+- **No real operator precedence.** Mixed `&`/`|`/`~` expressions were
+  resolved by checking `.includes(' & ')` before `' | '` before `' ~ '`
+  regardless of the expression's actual structure.
+
+The expression is now tokenized and parsed into a small AST via a real
+recursive-descent / precedence-climbing parser (`&`/`~` at one precedence
+tier, `|` lower, both left-associative), which is then evaluated by walking
+the tree. This is purely a parsing-layer replacement — every per-function
+filter/traversal method (`filterByAuthor`, `getAncestors`, `findForkPoint`,
+etc.) is untouched, and **all 183 pre-existing revset tests pass unchanged**.
+
+New capabilities (all strictly additive — nothing that worked before changed
+behavior):
+- Function-call arguments can nest arbitrarily deep: `roots(ancestors(x))`,
+  `heads(roots(ancestors(x)))`, etc.
+- Parenthesized grouping: `(a | b) & c`.
+- Quote-aware argument splitting: `description("a, b, and c")` no longer
+  mis-splits on the comma inside the quoted string.
+- Whitespace around `&`/`|`/`~` is now optional (`a|b` works, not just `a | b`).
+
+### Fixed — background-ops (td-488842)
+
+`enableAutoSnapshot()`'s timer callback awaited only `queue()`'s immediate
+`{ id, promise }` handle, not the operation's own settling `promise`. Since
+`queue()` resolves as soon as the operation is *enqueued* (not once it
+finishes), a later `describe()` rejection landed on the unobserved promise
+and became an unhandled promise rejection instead of reaching the
+surrounding `catch`. Now awaits the returned `promise` too.
+
+### Changed — CLI (`bin/isojj.js`) rewritten to be testable, with real bugs fixed
+
+The CLI had zero tests (calling `process.exit()` at import time made it
+untestable) and several real bugs:
+- **Made testable**: `parseArgs`/`formatOutput`/`findRepoRoot`/
+  `loadGitBackend`/`run` are now exported; `run()` returns an exit code
+  instead of calling `process.exit()` directly, guarded behind an
+  is-this-the-entrypoint check.
+- **Fixed a parsing bug**: boolean flags (`dryRun`, `json`, `force`,
+  `interactive`, etc.) used to swallow the next token as a fake "value",
+  silently dropping a following positional — `describe --dryRun "fix typo"`
+  lost the commit message. Boolean flags never consume the next token now;
+  `--flag=true`/`--flag=false` is coerced to a real boolean.
+- **Fixed a latent bug**: the CLI's own error message promised searching
+  "any parent up to mount point /" for a `.jj` repo but never actually did
+  so. Added `findRepoRoot()` to walk up parent directories like git/jj, so
+  the CLI now works from any subdirectory of a repo.
+- **Wired up the real Git backend**: the CLI never passed `git`/`http` to
+  `createJJ()`, so `isojj init` silently ran in storage-only "mock" mode
+  with no real `.git` directory. It now dynamically imports isomorphic-git
+  (an optional peer dependency) when present, falling back gracefully when
+  it isn't.
+- Added a full test suite (`tests/integration/cli.test.js`) and included
+  `bin/**/*.js` in coverage collection.
+
+### Testing
+
+1701 tests passing (was 1671); lint, format:check, typecheck, coverage
+(91.2% branches), and build all green.
+
 ## [1.6.1] — Bugfix batch
 
 Fixes nine real, pre-existing defects that the v1.5/v1.6 coverage push

@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-1626%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-1701%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
@@ -88,7 +88,7 @@ isomorphic-jj v1.0 now implements virtually all commonly-used JJ CLI commands:
 See [JJ_CLI_PARITY.md](./JJ_CLI_PARITY.md) for complete feature comparison.
 
 ### Testing & Quality
-- **1626 tests** passing — ~97% statement / 91% branch coverage (v1.0–v1.6)
+- **1701 tests** passing — ~97% statement / 91% branch coverage (v1.0–v1.7)
 - **100% backward compatible** - All existing code continues to work
 - **Zero breaking changes** - Deprecated features show warnings but still function
 
@@ -898,8 +898,8 @@ repo/
 
 ## Project Status
 
-**Current Version**: v1.6.1
-**Test Coverage**: 1626 tests, ~97% statements / 91% branches
+**Current Version**: v1.7.0
+**Test Coverage**: 1701 tests, ~97% statements / 91% branches
 **JJ CLI parity**: tracks Jujutsu through v0.43
 **Status**: Ready for experimentation and prototyping
 
