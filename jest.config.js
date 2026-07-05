@@ -10,6 +10,7 @@ export default {
   ],
   collectCoverageFrom: [
     'src/**/*.js',
+    'bin/**/*.js',
     '!src/types.d.ts',
     '!src/**/*.test.js'
   ],

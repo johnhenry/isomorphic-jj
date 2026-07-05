@@ -332,10 +332,9 @@ describe('BackgroundOps', () => {
     });
 
     it('logs the error and cleans up the timer when queueing the snapshot throws', async () => {
-      // The catch block in enableAutoSnapshot is only reachable if queue()
-      // itself throws (a describe() rejection lands on the unobserved
-      // op.promise instead — see BUG note below). Force queue() to throw to
-      // exercise the console.error + finally cleanup path.
+      // Force queue() itself to throw (distinct from the operation it queues
+      // rejecting — see the next test) to exercise the console.error + finally
+      // cleanup path.
       const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
       await ops.start();
       const watcherId = await ops.enableAutoSnapshot({ debounceMs: 100 });
@@ -353,13 +352,30 @@ describe('BackgroundOps', () => {
       spy.mockRestore();
     });
 
-    // NOTE: The case where jj.describe() itself rejects during an
-    // auto-snapshot is intentionally NOT tested here. Because queue() resolves
-    // immediately and the operation's rejection lands on the unobserved
-    // op.promise, it surfaces as an unhandled promise rejection that cannot be
-    // intercepted from the test before the fake-timer flush fails the test.
-    // See the BUG note in the final report. The equivalent failure bookkeeping
-    // is covered directly by the queue() "records failure status" test.
+    it('logs the error and cleans up the timer when the queued describe() rejects', async () => {
+      // Fixed: enableAutoSnapshot used to await only queue()'s immediate
+      // `{ id, promise }` handle, not the operation's own settling `promise`.
+      // Since queue() resolves as soon as the operation is *enqueued* (not
+      // once it finishes), a later describe() rejection landed on the
+      // unobserved promise and became an unhandled rejection instead of
+      // reaching this catch block. It now awaits the returned `promise` too.
+      const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      jj.describe.mockRejectedValueOnce(new Error('describe failed'));
+      await ops.start();
+      const watcherId = await ops.enableAutoSnapshot({ debounceMs: 100 });
+      const callback = fs.calls[0].callback;
+
+      callback('change', 'oops.js');
+      await jest.advanceTimersByTimeAsync(100);
+
+      expect(spy).toHaveBeenCalledWith('Auto-snapshot failed:', expect.any(Error));
+      expect(spy.mock.calls[0][1].message).toBe('describe failed');
+      expect(ops.timers.has(watcherId)).toBe(false);
+      // The failed queued operation's bookkeeping still reflects the failure.
+      const queued = [...ops.operations.values()].find((op) => op.description === 'auto-snapshot');
+      expect(queued.status).toBe('failed');
+      spy.mockRestore();
+    });
   });
 
   describe('cleanupOperations', () => {

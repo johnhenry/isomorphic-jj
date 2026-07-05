@@ -132,7 +132,7 @@ export class BackgroundOps {
    * @param {Function} operation - Async operation to run
    * @param {Object} opts - Options
    * @param {string} [opts.description] - Operation description
-   * @returns {Promise<Object>} Operation result
+   * @returns {Promise<{id: string, promise: Promise<any>}>} Operation handle
    */
   async queue(operation, opts = {}) {
     const operationId = `op-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -234,8 +234,13 @@ export class BackgroundOps {
 
         const timer = setTimeout(async () => {
           try {
-            // Create automatic snapshot
-            await this.queue(
+            // Create automatic snapshot. queue() resolves as soon as the
+            // operation is *enqueued*, not once it finishes — it returns a
+            // `{ id, promise }` handle. Awaiting only queue() (and not the
+            // returned `promise`) would let a later describe() rejection
+            // become an unhandled promise rejection instead of landing in
+            // this catch block, so the handle's promise must be awaited too.
+            const { promise } = await this.queue(
               async () => {
                 await this.jj.describe({
                   message: `Auto-snapshot: ${filename || 'multiple files'} changed`,
@@ -243,6 +248,7 @@ export class BackgroundOps {
               },
               { description: 'auto-snapshot' }
             );
+            await promise;
           } catch (error) {
             console.error('Auto-snapshot failed:', error);
           } finally {
