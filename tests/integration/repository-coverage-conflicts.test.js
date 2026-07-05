@@ -39,6 +39,81 @@ describe('repository.js coverage — conflicts & merge', () => {
     return b.changeId;
   }
 
+  // Modify-delete: the current (left) side modifies the file, the source
+  // (right) side deletes it. The stored conflict has sides {base, left} with
+  // NO right side — exercising the `sides.right || ''` fallback branches.
+  async function setupModifyDelete(file = 'md.txt') {
+    const root = await currentId();
+    await jj.write({ path: file, data: 'base\n' });
+    await jj.describe({ message: 'root' });
+    await jj.new({ message: 'B' });
+    await jj.remove({ path: file }); // source deletes the file
+    const b = await jj.describe({ message: 'B' });
+    await jj.edit({ changeId: root });
+    await jj.new({ message: 'C' });
+    await jj.write({ path: file, data: 'left\n' }); // current modifies the file
+    await jj.describe({ message: 'C' });
+    return b.changeId;
+  }
+
+  // Delete-modify: the current (left) side deletes the file, the source
+  // (right) side modifies it. The stored conflict has sides {base, right} with
+  // NO left side — exercising the `sides.left || ''` fallback branches.
+  async function setupDeleteModify(file = 'dm.txt') {
+    const root = await currentId();
+    await jj.write({ path: file, data: 'base\n' });
+    await jj.describe({ message: 'root' });
+    await jj.new({ message: 'B' });
+    await jj.write({ path: file, data: 'right\n' }); // source modifies the file
+    const b = await jj.describe({ message: 'B' });
+    await jj.edit({ changeId: root });
+    await jj.new({ message: 'C' });
+    await jj.remove({ path: file }); // current deletes the file
+    await jj.describe({ message: 'C' });
+    return b.changeId;
+  }
+
+  it('resolve (theirs) on a modify-delete conflict falls back to empty right side', async () => {
+    const b = await setupModifyDelete();
+    await jj.merge({ source: b });
+    const [c] = await jj.conflicts.list();
+    expect(c.sides.right).toBeUndefined();
+    const res = await jj.conflicts.resolve({ conflictId: c.conflictId, strategy: 'theirs' });
+    expect(res).toEqual({ resolved: true });
+  });
+
+  it('markers on a modify-delete conflict render an empty theirs section', async () => {
+    const b = await setupModifyDelete();
+    await jj.merge({ source: b });
+    const [c] = await jj.conflicts.list();
+    const markers = await jj.conflicts.markers({ conflictId: c.conflictId });
+    expect(markers).toContain('=======\n>>>>>>> theirs');
+  });
+
+  it('resolve (ours) on a delete-modify conflict falls back to empty left side', async () => {
+    const b = await setupDeleteModify();
+    await jj.merge({ source: b });
+    const [c] = await jj.conflicts.list();
+    expect(c.sides.left).toBeUndefined();
+    const res = await jj.conflicts.resolve({ conflictId: c.conflictId, strategy: 'ours' });
+    expect(res).toEqual({ resolved: true });
+  });
+
+  it('markers on a delete-modify conflict render an empty ours section', async () => {
+    const b = await setupDeleteModify();
+    await jj.merge({ source: b });
+    const [c] = await jj.conflicts.list();
+    const markers = await jj.conflicts.markers({ conflictId: c.conflictId });
+    expect(markers).toContain('<<<<<<< ours\n=======');
+  });
+
+  it('resolveAll (union) on a delete-modify conflict uses empty left side', async () => {
+    const b = await setupDeleteModify();
+    await jj.merge({ source: b });
+    const res = await jj.conflicts.resolveAll({ strategy: 'union' });
+    expect(res.resolved).toBe(1);
+  });
+
   it('merge dry-run reports conflicts without applying', async () => {
     const b = await setupConflict();
     const dry = await jj.merge({ source: b, dryRun: true });

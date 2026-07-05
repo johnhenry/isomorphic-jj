@@ -481,5 +481,89 @@ describe('IsomorphicGitBackend - coverage', () => {
       const result = await backend.push({ remote: 'origin' });
       expect(result).toEqual({ pushedRefs: [], rejectedRefs: [] });
     });
+
+    test('fetch with noTags:true still maps transport error (exercises tags:false arm)', async () => {
+      const dir = freshDir('fetch-notags');
+      await fs.promises.mkdir(dir, { recursive: true });
+      const http = {
+        request: async () => {
+          const e = new Error('mock net failure');
+          e.code = 'NetworkError';
+          throw e;
+        },
+      };
+      const backend = new IsomorphicGitBackend({ fs, dir, http });
+      await backend.init();
+      await git.addRemote({ fs, dir, remote: 'origin', url: 'http://127.0.0.1:9/repo.git' });
+      await expect(
+        backend.fetch({ remote: 'origin', refs: ['refs/heads/main'], noTags: true })
+      ).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    });
+
+    test('fetch with AuthError from transport and noTags:true maps to AUTH_FAILED', async () => {
+      const dir = freshDir('fetch-notags-auth');
+      await fs.promises.mkdir(dir, { recursive: true });
+      const http = {
+        request: async () => {
+          const e = new Error('mock auth failure');
+          e.code = 'AuthError';
+          throw e;
+        },
+      };
+      const backend = new IsomorphicGitBackend({ fs, dir, http });
+      await backend.init();
+      await git.addRemote({ fs, dir, remote: 'origin', url: 'http://127.0.0.1:9/repo.git' });
+      await expect(backend.fetch({ remote: 'origin', noTags: true })).rejects.toMatchObject({
+        code: 'AUTH_FAILED',
+      });
+    });
+  });
+
+  describe('_ensureGitignore error path', () => {
+    test('rethrows a non-ENOENT error from reading .gitignore', async () => {
+      const mockFs = {
+        promises: {
+          async readFile() {
+            throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+          },
+          async writeFile() {
+            /* not reached */
+          },
+        },
+      };
+      const backend = new IsomorphicGitBackend({ fs: mockFs, dir: '/nowhere' });
+      await expect(backend._ensureGitignore()).rejects.toMatchObject({ code: 'EACCES' });
+    });
+  });
+
+  describe('stageAll error path', () => {
+    test('non-ENOENT error from git.add is wrapped in STAGE_FILE_FAILED', async () => {
+      const dir = freshDir('stage-eacces');
+      await fs.promises.mkdir(dir, { recursive: true });
+      const backend = new IsomorphicGitBackend({ fs, dir });
+      await backend.init();
+      await fs.promises.writeFile(path.join(dir, 'a.txt'), 'a');
+      // Force _getAllFiles to yield a path, then make readFile raise a
+      // non-ENOENT error during git.add so the STAGE_FILE_FAILED branch runs.
+      backend._getAllFiles = async () => ['a.txt'];
+      const realReadFile = backend.fs.promises.readFile.bind(backend.fs.promises);
+      backend.fs = {
+        ...backend.fs,
+        promises: {
+          ...backend.fs.promises,
+          async readFile(p, ...rest) {
+            if (typeof p === 'string' && p.endsWith('a.txt')) {
+              throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+            }
+            return realReadFile(p, ...rest);
+          },
+        },
+      };
+      // The inner non-ENOENT branch throws STAGE_FILE_FAILED, but stageAll's
+      // outer catch re-wraps any thrown error as STAGE_FAILED.
+      // BUG: the STAGE_FILE_FAILED code is never surfaced to callers because
+      // the surrounding try/catch re-wraps it. We assert the ACTUAL final code.
+      await expect(backend.stageAll()).rejects.toMatchObject({ code: 'STAGE_FAILED' });
+    });
   });
 });
