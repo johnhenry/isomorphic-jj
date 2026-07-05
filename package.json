@@ -36,8 +36,8 @@
     "test:browser": "playwright test",
     "build": "rollup -c",
     "lint": "eslint src tests",
-    "format": "prettier --write 'src/**/*.js' 'tests/**/*.js'",
-    "format:check": "prettier --check 'src/**/*.js' 'tests/**/*.js'",
+    "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\"",
     "typecheck": "tsc --noEmit",
     "docs": "typedoc",
     "prepublishOnly": "npm run build && npm test"
