@@ -1,7 +1,16 @@
 # isomorphic-jj Roadmap
 
-**Current Version**: v1.6.1 ✅ (tracks jj through v0.43)
+**Current Version**: v1.7.0 ✅ (tracks jj through v0.43)
 **Last Updated**: 2026-07-05
+
+> **v1.7.0:** rewrote the revset engine's parser around a real tokenizer +
+> recursive-descent AST (fixing nested function-call arguments like
+> `roots(ancestors(x))` and giving `&`/`|`/`~` real operator precedence; all
+> 183 pre-existing revset tests pass unchanged); fixed an unhandled-promise-
+> rejection bug in the background-ops auto-snapshot path; and rewrote the CLI
+> (`bin/isojj.js`) to be fully testable, fixing a boolean-flag parsing bug, a
+> repo-root-search bug, and wiring up the real Git backend by default. See
+> [CHANGELOG.md](./CHANGELOG.md).
 
 > **v1.6.1 bugfix batch:** fixed nine real defects surfaced by the coverage
 > push — broken `bookmarks()`/`show()` bookmark attribution, a dead-code

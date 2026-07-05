@@ -2,6 +2,20 @@
  * RevsetEngine - Query language for finding changes
  *
  * Implements a simplified revset language for querying the change graph.
+ *
+ * Parsing pipeline (v1.7): expressions are tokenized and parsed into a small
+ * AST via a real recursive-descent / precedence-climbing parser, then
+ * evaluated by walking the AST. This replaces an earlier implementation that
+ * matched the whole trimmed expression against one big chain of regexes per
+ * construct — which could not correctly handle a revset-taking function
+ * whose argument was itself a nested function call (e.g. `roots(ancestors(x))`
+ * would silently mis-parse), and had no real operator precedence for mixed
+ * `&`/`|`/`~` expressions. The AST only covers *structural* parsing (`@`,
+ * change-id atoms, the `-`/`+` suffix operators, `..` ranges, function-call
+ * boundaries, parenthesized grouping, and `&`/`|`/`~` precedence); the actual
+ * per-function semantics (author matching, ancestry walks, date filters,
+ * etc.) are unchanged from before and live in the filter/getX helper methods
+ * below the parser.
  */
 
 import { JJError } from '../utils/errors.js';
@@ -19,6 +33,302 @@ import { JJError } from '../utils/errors.js';
  * @typedef {object} WorkingCopy
  * @property {() => string} getCurrentChangeId
  */
+
+// ============================================================================
+// Tokenizer
+// ============================================================================
+
+/**
+ * Find the index of the `)` matching the `(` at `openIndex`, respecting
+ * nested parentheses and single/double-quoted strings — so a quoted argument
+ * containing a literal `(`, `)`, or `,` (e.g. `description("a (b), c")`)
+ * doesn't confuse the boundary search.
+ *
+ * @param {string} source - Full source string
+ * @param {number} openIndex - Index of the '(' to match
+ * @returns {number} Index of the matching ')'
+ */
+function findMatchingParen(source, openIndex) {
+  let depth = 0;
+  /** @type {string|null} */
+  let quote = null;
+  for (let i = openIndex; i < source.length; i++) {
+    const ch = source[i];
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  throw new JJError('INVALID_REVSET', `Unmatched '(' in revset expression: ${source}`, {
+    expression: source,
+  });
+}
+
+// Characters that terminate a bare (unquoted, unparenthesized) symbol token
+// at the top-level expression grammar. Everything else (letters, digits,
+// dots, slashes, glob '*'/'?', hyphens WITHIN a symbol like a date, etc.) is
+// swallowed into the symbol — hyphens are only split off as MINUS tokens
+// when the tokenizer's main loop reaches them directly (i.e. not already
+// consumed as part of a preceding symbol scan), matching how change-id/`@`
+// suffix operators are recognized without breaking apart tokens that merely
+// *contain* a hyphen in the middle (dates are never routed through this
+// tokenizer at all — see the note on function argument kinds below).
+const SYMBOL_STOP_CHARS = new Set([
+  ' ',
+  '\t',
+  '\n',
+  '\r',
+  '(',
+  ')',
+  ',',
+  '&',
+  '|',
+  '~',
+  '@',
+  '-',
+  '+',
+]);
+
+/**
+ * Tokenize a top-level revset expression (or a nested revset-typed function
+ * argument). String-typed function arguments (author patterns, dates,
+ * glob patterns, etc.) are never routed through this tokenizer — they are
+ * extracted as raw substrings by `findMatchingParen` + `splitTopLevelArgs`,
+ * exactly as before, and are only interpreted once evaluateFunctionCall()
+ * dispatches on the now-unambiguous function name.
+ *
+ * @param {string} source
+ * @returns {Array<{type: string, value?: string}>}
+ */
+function tokenize(source) {
+  const tokens = [];
+  let i = 0;
+  const n = source.length;
+
+  while (i < n) {
+    const ch = source[i];
+
+    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+      i++;
+      continue;
+    }
+    if (ch === '(') {
+      tokens.push({ type: 'LPAREN' });
+      i++;
+      continue;
+    }
+    if (ch === ')') {
+      tokens.push({ type: 'RPAREN' });
+      i++;
+      continue;
+    }
+    if (ch === '&') {
+      tokens.push({ type: 'AMP' });
+      i++;
+      continue;
+    }
+    if (ch === '|') {
+      tokens.push({ type: 'PIPE' });
+      i++;
+      continue;
+    }
+    if (ch === '~') {
+      tokens.push({ type: 'TILDE' });
+      i++;
+      continue;
+    }
+    if (ch === '@') {
+      tokens.push({ type: 'AT' });
+      i++;
+      continue;
+    }
+    if (ch === '+') {
+      tokens.push({ type: 'PLUS' });
+      i++;
+      continue;
+    }
+    if (ch === '-') {
+      tokens.push({ type: 'MINUS' });
+      i++;
+      continue;
+    }
+
+    // Bare symbol (identifier, hex change id, glob pattern, `base..tip`
+    // range, etc.) — consume until a structural character.
+    let j = i;
+    while (j < n && !SYMBOL_STOP_CHARS.has(source[j])) {
+      j++;
+    }
+    if (j === i) {
+      throw new JJError('INVALID_REVSET', `Unexpected character '${ch}' in revset expression`, {
+        expression: source,
+      });
+    }
+    const name = source.slice(i, j);
+
+    if (j < n && source[j] === '(') {
+      // Function call: consume the whole balanced (...) group as one token,
+      // so nested calls (`roots(ancestors(x))`) are handled correctly no
+      // matter how deep, instead of a non-greedy regex truncating at the
+      // first ')' it sees.
+      const closeIndex = findMatchingParen(source, j);
+      tokens.push({ type: 'CALL', name, argsRaw: source.slice(j + 1, closeIndex) });
+      i = closeIndex + 1;
+    } else {
+      tokens.push({ type: 'SYMBOL', value: name });
+      i = j;
+    }
+  }
+
+  tokens.push({ type: 'EOF' });
+  return tokens;
+}
+
+// ============================================================================
+// Parser (precedence climbing) — produces a small AST
+// ============================================================================
+//
+// Grammar (highest to lowest precedence):
+//   primary    := '@' suffix? | SYMBOL suffix? | CALL | '(' union ')'
+//   suffix     := ('-' | '+')+                      -- must be homogeneous
+//   intersect  := primary (('&' | '~') primary)*     -- left-assoc, same tier
+//   union      := intersect ('|' intersect)*         -- left-assoc, lowest
+//
+// A bare SYMBOL containing '..' (e.g. "abcd1234..ef567890") is recognized as
+// a range atom at the primary level, matching the previous implementation's
+// top-level `trimmed.includes('..')` special case.
+
+class RevsetParser {
+  /**
+   * @param {Array<{type: string, value?: string, name?: string, argsRaw?: string}>} tokens
+   * @param {string} source - Original source (for error messages)
+   */
+  constructor(tokens, source) {
+    this.tokens = tokens;
+    this.pos = 0;
+    this.source = source;
+  }
+
+  peek() {
+    return this.tokens[this.pos];
+  }
+
+  next() {
+    return this.tokens[this.pos++];
+  }
+
+  /** @param {string} message */
+  fail(message) {
+    throw new JJError('INVALID_REVSET', message, { expression: this.source });
+  }
+
+  /** @returns {any} */
+  parse() {
+    const node = this.parseUnion();
+    if (this.peek().type !== 'EOF') {
+      this.fail(`Invalid revset expression: ${this.source}`);
+    }
+    return node;
+  }
+
+  /** @returns {any} */
+  parseUnion() {
+    /** @type {any} */
+    let node = this.parseIntersect();
+    while (this.peek().type === 'PIPE') {
+      this.next();
+      const right = this.parseIntersect();
+      node = { type: 'union', left: node, right };
+    }
+    return node;
+  }
+
+  /** @returns {any} */
+  parseIntersect() {
+    /** @type {any} */
+    let node = this.parsePrimary();
+    while (this.peek().type === 'AMP' || this.peek().type === 'TILDE') {
+      const op = this.next().type === 'AMP' ? 'intersect' : 'difference';
+      const right = this.parsePrimary();
+      node = { type: op, left: node, right };
+    }
+    return node;
+  }
+
+  /** Consume a homogeneous run of '-' or '+' tokens, returning its depth (0 if none). */
+  parseSuffixDepth() {
+    const first = this.peek().type;
+    if (first !== 'PLUS' && first !== 'MINUS') return { dir: null, depth: 0 };
+    let depth = 0;
+    while (this.peek().type === first) {
+      this.next();
+      depth++;
+    }
+    // A mixed run (e.g. '-+') is not a valid suffix; only a homogeneous run
+    // is consumed above, so if the OPPOSITE token immediately follows, that's
+    // invalid syntax (matches the old regex's "all same character" requirement).
+    if (this.peek().type === 'PLUS' || this.peek().type === 'MINUS') {
+      this.fail(`Invalid revset expression: ${this.source}`);
+    }
+    return { dir: first === 'PLUS' ? '+' : '-', depth };
+  }
+
+  /** @returns {any} */
+  parsePrimary() {
+    const tok = this.peek();
+
+    if (tok.type === 'LPAREN') {
+      this.next();
+      /** @type {any} */
+      const inner = this.parseUnion();
+      if (this.peek().type !== 'RPAREN') {
+        this.fail(`Unmatched '(' in revset expression: ${this.source}`);
+      }
+      this.next();
+      return inner;
+    }
+
+    if (tok.type === 'AT') {
+      this.next();
+      const { dir, depth } = this.parseSuffixDepth();
+      return { type: 'workingCopy', dir, depth };
+    }
+
+    if (tok.type === 'CALL') {
+      this.next();
+      return { type: 'call', name: tok.name, argsRaw: tok.argsRaw };
+    }
+
+    if (tok.type === 'SYMBOL') {
+      this.next();
+      const value = /** @type {string} */ (tok.value);
+
+      // A bare "base..tip" range, e.g. `abcd1234..ef567890`.
+      if (value.includes('..')) {
+        const parts = value.split('..');
+        if (parts.length === 2) {
+          return { type: 'range', base: parts[0].trim(), tip: parts[1].trim() };
+        }
+      }
+
+      const { dir, depth } = this.parseSuffixDepth();
+      return { type: 'symbol', value, dir, depth };
+    }
+
+    this.fail(`Invalid revset expression: ${this.source}`);
+    // unreachable; keeps TS/control-flow happy
+    return /** @type {any} */ (null);
+  }
+}
 
 export class RevsetEngine {
   /**
@@ -44,667 +354,566 @@ export class RevsetEngine {
    */
   async evaluate(expression) {
     const trimmed = expression.trim();
-
-    // @ - working copy
-    if (trimmed === '@') {
-      return [this.workingCopy.getCurrentChangeId()];
+    if (trimmed === '') {
+      throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
+        expression,
+        suggestion: this._suggestion(),
+      });
     }
 
-    // @- operator (parent of working copy) - handles chaining like @-- for grandparents
-    const atParentsMatch = trimmed.match(/^@(-+)$/);
-    if (atParentsMatch) {
-      const depth = atParentsMatch[1].length; // Count number of '-' characters
-      const workingCopyId = this.workingCopy.getCurrentChangeId();
-
-      let currentSet = [workingCopyId];
-      for (let i = 0; i < depth; i++) {
-        currentSet = await this.getParentsOfSet(currentSet);
-        if (currentSet.length === 0) break; // Stop if we reach root
+    let ast;
+    try {
+      ast = new RevsetParser(tokenize(trimmed), trimmed).parse();
+    } catch (error) {
+      if (error instanceof JJError) {
+        // Attach the full suggestion text to the top-level parse failure,
+        // matching the previous single-throw-site behavior.
+        error.context = error.context || {};
+        if (error.code === 'INVALID_REVSET' && !error.context.suggestion) {
+          error.context.suggestion = this._suggestion();
+          error.suggestion = error.context.suggestion;
+        }
       }
-      return currentSet;
+      throw error;
     }
 
-    // @+ operator (children of working copy)
-    const atChildrenMatch = trimmed.match(/^@(\++)$/);
-    if (atChildrenMatch) {
-      const depth = atChildrenMatch[1].length; // Count number of '+' characters
-      const workingCopyId = this.workingCopy.getCurrentChangeId();
+    return await this.evaluateAst(ast);
+  }
 
-      let currentSet = [workingCopyId];
-      for (let i = 0; i < depth; i++) {
-        currentSet = await this.getChildrenOfSet(currentSet);
-        if (currentSet.length === 0) break; // Stop if we reach leaves
+  /**
+   * @private
+   * @returns {string}
+   */
+  _suggestion() {
+    return 'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(revset[, depth]), author(name), author_name(x), author_email(x), committer(x), committer_name(x), committer_email(x), subject(pattern), description(text), change_id(prefix), commit_id(prefix), empty(), mine(), merge(), merges(), forks(), signed(), divergent(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), first_parent(revset), first_ancestors(revset), fork_point(revset), merge_point(revset), exactly(revset, n), present(revset), coalesce(a, b, ...), latest(revset, [count]), tags([pattern]), remote_tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID';
+  }
+
+  /**
+   * Evaluate a parsed AST node into an array of change IDs.
+   *
+   * @param {any} node
+   * @returns {Promise<Array<string>>}
+   */
+  async evaluateAst(node) {
+    switch (node.type) {
+      case 'union': {
+        const [left, right] = await Promise.all([
+          this.evaluateAst(node.left),
+          this.evaluateAst(node.right),
+        ]);
+        return Array.from(new Set([...left, ...right]));
       }
-      return currentSet;
+      case 'intersect': {
+        const [left, right] = await Promise.all([
+          this.evaluateAst(node.left),
+          this.evaluateAst(node.right),
+        ]);
+        const rightSet = new Set(right);
+        return left.filter((id) => rightSet.has(id));
+      }
+      case 'difference': {
+        const [left, right] = await Promise.all([
+          this.evaluateAst(node.left),
+          this.evaluateAst(node.right),
+        ]);
+        const rightSet = new Set(right);
+        return left.filter((id) => !rightSet.has(id));
+      }
+      case 'workingCopy': {
+        const workingCopyId = this.workingCopy.getCurrentChangeId();
+        return await this.applySuffix([workingCopyId], node.dir, node.depth);
+      }
+      case 'symbol': {
+        if (!/^[0-9a-f]{32}$/.test(node.value)) {
+          throw new JJError('INVALID_REVSET', `Invalid revset expression: ${node.value}`, {
+            expression: node.value,
+            suggestion: this._suggestion(),
+          });
+        }
+        if (node.depth > 0) {
+          // Suffixed change-id form never validated existence of the base id
+          // up-front (getParentsOfSet/getChildrenOfSet already no-op on an
+          // unknown id), matching the previous implementation.
+          return await this.applySuffix([node.value], node.dir, node.depth);
+        }
+        await this.graph.load();
+        const change = await this.graph.getChange(node.value);
+        return change ? [node.value] : [];
+      }
+      case 'range':
+        return await this.evalRange(node.base, node.tip);
+      case 'call':
+        return await this.evaluateFunctionCall(node.name, node.argsRaw);
+      default:
+        throw new JJError('INVALID_REVSET', `Invalid revset expression`, {
+          suggestion: this._suggestion(),
+        });
+    }
+  }
+
+  /**
+   * Apply a run of '-' (parents) or '+' (children) suffix operators to a seed
+   * set, stepping generation-by-generation exactly like the previous
+   * `@(-+)$` / `x(-+)$` handling.
+   *
+   * @param {string[]} seedSet
+   * @param {'-'|'+'|null} dir
+   * @param {number} depth
+   * @returns {Promise<string[]>}
+   */
+  async applySuffix(seedSet, dir, depth) {
+    let currentSet = seedSet;
+    for (let i = 0; i < depth; i++) {
+      currentSet =
+        dir === '-'
+          ? await this.getParentsOfSet(currentSet)
+          : await this.getChildrenOfSet(currentSet);
+      if (currentSet.length === 0) break;
+    }
+    return currentSet;
+  }
+
+  /**
+   * Evaluate a bare `base..tip` range (ancestors(tip) ~ ancestors(base)).
+   *
+   * @param {string} base
+   * @param {string} tip
+   * @returns {Promise<string[]>}
+   */
+  async evalRange(base, tip) {
+    const baseChange = await this.graph.getChange(base);
+    const tipChange = await this.graph.getChange(tip);
+
+    if (!baseChange || !tipChange) {
+      throw new JJError('INVALID_REVSET', `Invalid range: ${base}..${tip}`, {
+        suggestion: 'Both base and tip must be valid change IDs',
+      });
     }
 
-    // all() - all changes
-    if (trimmed === 'all()') {
-      await this.graph.load();
-      return this.graph.getAll().map((c) => c.changeId);
-    }
+    const tipAncestors = new Set(await this.getAncestors(tip));
+    const baseAncestors = new Set(await this.getAncestors(base));
+    return [...tipAncestors].filter((id) => !baseAncestors.has(id));
+  }
 
-    // v1.0: none() - empty set
-    if (trimmed === 'none()') {
-      return [];
-    }
+  /**
+   * Dispatch a parsed function call (name + raw, unsplit argument string) to
+   * its semantic handler. This mirrors the previous per-function branches in
+   * `evaluate()` almost verbatim — only how `name`/`argsRaw` were obtained
+   * has changed (via the tokenizer/parser above, instead of one regex per
+   * function tried against the whole expression).
+   *
+   * @param {string} name
+   * @param {string} argsRaw - Raw text between the call's parentheses
+   * @returns {Promise<string[]>}
+   */
+  async evaluateFunctionCall(name, argsRaw) {
+    const raw = argsRaw.trim();
+    const unquote = (/** @type {string} */ s) => s.trim().replace(/^['"]|['"]$/g, '');
 
-    // v1.0: root() - the first commit (oldest commit with no parents)
-    if (trimmed === 'root()') {
-      await this.graph.load();
-      const allChanges = this.graph.getAll();
-      const rootCommits = allChanges.filter((c) => !c.parents || c.parents.length === 0);
-      if (rootCommits.length === 0) return [];
-      // Return the oldest root by timestamp
-      const oldest = rootCommits.sort(
-        (a, b) =>
-          /** @type {any} */ (new Date(a.timestamp)) - /** @type {any} */ (new Date(b.timestamp))
-      )[0];
-      return [oldest.changeId];
-    }
+    switch (name) {
+      case 'all':
+        await this.graph.load();
+        return this.graph.getAll().map((c) => c.changeId);
 
-    // v1.0: visible_heads() - all commits with no children
-    if (trimmed === 'visible_heads()') {
-      await this.graph.load();
-      const allChanges = this.graph.getAll();
-      const changeIdSet = new Set(allChanges.map((c) => c.changeId));
-      const hasChildren = new Set();
+      case 'none':
+        return [];
 
-      // Mark all commits that have children
-      for (const change of allChanges) {
-        if (change.parents) {
-          for (const parent of change.parents) {
-            if (changeIdSet.has(parent)) {
-              hasChildren.add(parent);
+      case 'root': {
+        await this.graph.load();
+        const allChanges = this.graph.getAll();
+        const rootCommits = allChanges.filter((c) => !c.parents || c.parents.length === 0);
+        if (rootCommits.length === 0) return [];
+        const oldest = rootCommits.sort(
+          (a, b) =>
+            /** @type {any} */ (new Date(a.timestamp)) - /** @type {any} */ (new Date(b.timestamp))
+        )[0];
+        return [oldest.changeId];
+      }
+
+      case 'visible_heads': {
+        await this.graph.load();
+        const allChanges = this.graph.getAll();
+        const changeIdSet = new Set(allChanges.map((c) => c.changeId));
+        const hasChildren = new Set();
+        for (const change of allChanges) {
+          if (change.parents) {
+            for (const parent of change.parents) {
+              if (changeIdSet.has(parent)) hasChildren.add(parent);
             }
           }
         }
+        return allChanges.filter((c) => !hasChildren.has(c.changeId)).map((c) => c.changeId);
       }
 
-      // Return commits without children
-      return allChanges.filter((c) => !hasChildren.has(c.changeId)).map((c) => c.changeId);
-    }
-
-    // v1.0: git_refs() - all commits with bookmarks
-    if (trimmed === 'git_refs()') {
-      if (!this.bookmarkStore) return [];
-      await this.bookmarkStore.load();
-      const allBookmarks = /** @type {any[]} */ (await this.bookmarkStore.list());
-      return allBookmarks.map((b) => b.changeId);
-    }
-
-    // v1.0: git_head() - current working copy (Git HEAD equivalent)
-    if (trimmed === 'git_head()') {
-      try {
-        const currentId = this.workingCopy.getCurrentChangeId();
-        return currentId ? [currentId] : [];
-      } catch (error) {
-        // Working copy not loaded, return empty set
-        return [];
+      case 'git_refs': {
+        if (!this.bookmarkStore) return [];
+        await this.bookmarkStore.load();
+        const allBookmarks = /** @type {any[]} */ (await this.bookmarkStore.list());
+        return allBookmarks.map((b) => b.changeId);
       }
-    }
 
-    // v0.36.0: visible() - non-abandoned changes
-    if (trimmed === 'visible()') {
-      await this.graph.load();
-      const all = this.graph.getAll();
-      return all.filter((c) => !c.abandoned).map((c) => c.changeId);
-    }
-
-    // v0.36.0: hidden() - abandoned changes
-    if (trimmed === 'hidden()') {
-      await this.graph.load();
-      const all = this.graph.getAll();
-      return all.filter((c) => c.abandoned === true).map((c) => c.changeId);
-    }
-
-    // ancestors(revset[, depth]) - all ancestors including the change(s) itself
-    // v1.5: generalized to accept any nested revset plus an optional depth limit
-    // (matches jj's `ancestors(x, depth)`).
-    const ancestorsMatch = trimmed.match(/^ancestors\((.+?)(?:,\s*(\d+))?\)$/);
-    if (ancestorsMatch) {
-      const seeds = await this.resolveArg(ancestorsMatch[1]);
-      const depth = ancestorsMatch[2] ? parseInt(ancestorsMatch[2], 10) : undefined;
-      const result = new Set();
-      for (const seed of seeds) {
-        for (const id of await this.getAncestors(seed, depth)) {
-          result.add(id);
-        }
-      }
-      return Array.from(result);
-    }
-
-    // v1.5: change_id(prefix) / commit_id(prefix) - explicit prefix lookup
-    // (jj v0.31). Resolves a change by a hex prefix of its changeId/commitId.
-    const changeIdMatch = trimmed.match(/^change_id\((.+?)\)$/);
-    if (changeIdMatch) {
-      return await this.filterByIdPrefix(changeIdMatch[1].replace(/['"]/g, ''), 'changeId');
-    }
-    const commitIdMatch = trimmed.match(/^commit_id\((.+?)\)$/);
-    if (commitIdMatch) {
-      return await this.filterByIdPrefix(commitIdMatch[1].replace(/['"]/g, ''), 'commitId');
-    }
-
-    // v1.5: subject(pattern) - match the first line of the description (jj v0.26)
-    const subjectMatch = trimmed.match(/^subject\((.+?)\)$/);
-    if (subjectMatch) {
-      return await this.filterBySubject(subjectMatch[1].replace(/['"]/g, ''));
-    }
-
-    // v1.5: author_name / author_email / committer / committer_name /
-    // committer_email (jj v0.26) - fine-grained signature filters.
-    const authorNameMatch = trimmed.match(/^author_name\((.+?)\)$/);
-    if (authorNameMatch) {
-      return await this.filterBySignatureField(
-        'author',
-        'name',
-        authorNameMatch[1].replace(/['"]/g, '')
-      );
-    }
-    const authorEmailMatch = trimmed.match(/^author_email\((.+?)\)$/);
-    if (authorEmailMatch) {
-      return await this.filterBySignatureField(
-        'author',
-        'email',
-        authorEmailMatch[1].replace(/['"]/g, '')
-      );
-    }
-    const committerNameMatch = trimmed.match(/^committer_name\((.+?)\)$/);
-    if (committerNameMatch) {
-      return await this.filterBySignatureField(
-        'committer',
-        'name',
-        committerNameMatch[1].replace(/['"]/g, '')
-      );
-    }
-    const committerEmailMatch = trimmed.match(/^committer_email\((.+?)\)$/);
-    if (committerEmailMatch) {
-      return await this.filterBySignatureField(
-        'committer',
-        'email',
-        committerEmailMatch[1].replace(/['"]/g, '')
-      );
-    }
-    const committerMatch = trimmed.match(/^committer\((.+?)\)$/);
-    if (committerMatch) {
-      const pattern = committerMatch[1].replace(/['"]/g, '');
-      const byName = await this.filterBySignatureField('committer', 'name', pattern);
-      const byEmail = await this.filterBySignatureField('committer', 'email', pattern);
-      return Array.from(new Set([...byName, ...byEmail]));
-    }
-
-    // v1.5: signed() - cryptographically signed changes (jj v0.29)
-    if (trimmed === 'signed()') {
-      await this.graph.load();
-      return this.graph
-        .getAll()
-        .filter((c) => c.signed === true || (c.signature && c.signature.status))
-        .map((c) => c.changeId);
-    }
-
-    // v1.5: divergent() - changes that share a changeId with another visible
-    // change (jj v0.38). Detected via an explicit `divergent` flag or by
-    // duplicate changeIds in the graph.
-    if (trimmed === 'divergent()') {
-      await this.graph.load();
-      const all = this.graph.getAll();
-      const counts = new Map();
-      for (const c of all) {
-        counts.set(c.changeId, (counts.get(c.changeId) || 0) + 1);
-      }
-      return all
-        .filter((c) => c.divergent === true || counts.get(c.changeId) > 1)
-        .map((c) => c.changeId);
-    }
-
-    // v1.5: merges() - alias of merge() (jj's canonical spelling is `merges()`)
-    if (trimmed === 'merges()') {
-      return await this.filterMerge();
-    }
-
-    // v1.5: forks() - changes with more than one child (unreleased jj)
-    if (trimmed === 'forks()') {
-      await this.graph.load();
-      const all = this.graph.getAll();
-      return all
-        .filter((c) => this.graph.getChildren(c.changeId).length > 1)
-        .map((c) => c.changeId);
-    }
-
-    // v1.5: remote_tags([pattern]) - remote tag targets (jj v0.38)
-    const remoteTagsMatch = trimmed.match(/^remote_tags\((?:(.+?))?\)$/);
-    if (remoteTagsMatch || trimmed === 'remote_tags()') {
-      const pattern = remoteTagsMatch ? remoteTagsMatch[1]?.replace(/['"]/g, '') : undefined;
-      return await this.filterRemoteTags(pattern);
-    }
-
-    // v1.5: first_parent(revset) - first parent of each change (jj v0.32)
-    const firstParentMatch = trimmed.match(/^first_parent\((.+?)\)$/);
-    if (firstParentMatch) {
-      const seeds = await this.resolveArg(firstParentMatch[1]);
-      const parents = new Set();
-      for (const seed of seeds) {
-        const change = await this.graph.getChange(seed);
-        if (change && change.parents && change.parents.length > 0) {
-          parents.add(change.parents[0]);
-        }
-      }
-      return Array.from(parents);
-    }
-
-    // v1.5: first_ancestors(revset) - first-parent ancestry chain (jj v0.32)
-    const firstAncestorsMatch = trimmed.match(/^first_ancestors\((.+?)\)$/);
-    if (firstAncestorsMatch) {
-      const seeds = await this.resolveArg(firstAncestorsMatch[1]);
-      const result = new Set();
-      for (const seed of seeds) {
-        let current = seed;
-        while (current) {
-          if (result.has(current)) break;
-          result.add(current);
-          const change = await this.graph.getChange(current);
-          current =
-            change && change.parents && change.parents.length > 0 ? change.parents[0] : null;
-        }
-      }
-      return Array.from(result);
-    }
-
-    // v1.5: fork_point(revset) - the youngest common ancestor of a set (jj v0.32)
-    const forkPointMatch = trimmed.match(/^fork_point\((.+?)\)$/);
-    if (forkPointMatch) {
-      const seeds = await this.resolveArg(forkPointMatch[1]);
-      return await this.findForkPoint(seeds);
-    }
-
-    // v1.5: merge_point(revset) - the youngest common descendant of a set
-    const mergePointMatch = trimmed.match(/^merge_point\((.+?)\)$/);
-    if (mergePointMatch) {
-      const seeds = await this.resolveArg(mergePointMatch[1]);
-      return await this.findMergePoint(seeds);
-    }
-
-    // v1.5: exactly(revset, n) - the set, but error unless it has exactly n
-    // elements (jj v0.34).
-    const exactlyMatch = trimmed.match(/^exactly\((.+),\s*(\d+)\)$/);
-    if (exactlyMatch) {
-      const result = await this.evaluate(exactlyMatch[1].trim());
-      const expected = parseInt(exactlyMatch[2], 10);
-      if (result.length !== expected) {
-        throw new JJError(
-          'REVSET_EXACTLY_MISMATCH',
-          `exactly() expected ${expected} revision(s) but found ${result.length}`,
-          { expected, actual: result.length }
-        );
-      }
-      return result;
-    }
-
-    // v1.5: present(revset) - evaluate but yield [] instead of erroring on an
-    // unknown symbol/function (jj's present()).
-    const presentMatch = trimmed.match(/^present\((.+)\)$/);
-    if (presentMatch) {
-      try {
-        return await this.evaluate(presentMatch[1].trim());
-      } catch {
-        return [];
-      }
-    }
-
-    // v1.5: coalesce(a, b, ...) - the first argument that resolves to a
-    // non-empty set (jj's coalesce()).
-    const coalesceMatch = trimmed.match(/^coalesce\((.+)\)$/);
-    if (coalesceMatch) {
-      for (const part of this.splitTopLevelArgs(coalesceMatch[1])) {
-        /** @type {string[]} */
-        let result = [];
+      case 'git_head': {
         try {
-          result = await this.evaluate(part.trim());
-        } catch {
-          result = [];
+          const currentId = this.workingCopy.getCurrentChangeId();
+          return currentId ? [currentId] : [];
+        } catch (error) {
+          return [];
         }
-        if (result.length > 0) return result;
       }
-      return [];
-    }
 
-    // v0.2: author(name) - changes by author
-    const authorMatch = trimmed.match(/^author\((.+?)\)$/);
-    if (authorMatch) {
-      const authorName = authorMatch[1].replace(/['"]/g, '');
-      return await this.filterByAuthor(authorName);
-    }
-
-    // v0.2: description(text) - changes with description containing text
-    const descMatch = trimmed.match(/^description\((.+?)\)$/);
-    if (descMatch) {
-      const text = descMatch[1].replace(/['"]/g, '');
-      return await this.filterByDescription(text);
-    }
-
-    // v0.2: empty() - changes with no content
-    if (trimmed === 'empty()') {
-      return await this.filterEmpty();
-    }
-
-    // v0.3.1: mine() - changes by current user
-    if (trimmed === 'mine()') {
-      return await this.filterMine();
-    }
-
-    // v0.3.1: merge() - merge commits (multiple parents)
-    if (trimmed === 'merge()') {
-      return await this.filterMerge();
-    }
-
-    // v0.3.1: file(pattern) - changes touching files matching pattern
-    const fileMatch = trimmed.match(/^file\((.+?)\)$/);
-    if (fileMatch) {
-      const pattern = fileMatch[1].replace(/['"]/g, '');
-      return await this.filterByFile(pattern);
-    }
-
-    // v0.4: roots(revset) - commits not descendants of others in set
-    const rootsMatch = trimmed.match(/^roots\((.+?)\)$/);
-    if (rootsMatch) {
-      const innerRevset = rootsMatch[1];
-      const innerResults = await this.evaluate(innerRevset);
-      return await this.filterRoots(innerResults);
-    }
-
-    // v0.4: heads(revset) - commits not ancestors of others in set
-    const headsMatch = trimmed.match(/^heads\((.+?)\)$/);
-    if (headsMatch) {
-      const innerRevset = headsMatch[1];
-      const innerResults = await this.evaluate(innerRevset);
-      return await this.filterHeads(innerResults);
-    }
-
-    // v1.0: parents(revset) - direct parents of commits in set
-    const parentsMatch = trimmed.match(/^parents\((.+?)\)$/);
-    if (parentsMatch) {
-      const innerRevset = parentsMatch[1];
-      const innerResults = await this.evaluate(innerRevset);
-      return await this.getParentsOfSet(innerResults);
-    }
-
-    // v1.0: children(revset) - direct children of commits in set
-    const childrenMatch = trimmed.match(/^children\((.+?)\)$/);
-    if (childrenMatch) {
-      const innerRevset = childrenMatch[1];
-      const innerResults = await this.evaluate(innerRevset);
-      return await this.getChildrenOfSet(innerResults);
-    }
-
-    // v0.4: latest(revset, [count]) - latest N commits by committer timestamp
-    const latestMatch = trimmed.match(/^latest\((.+?)(?:,\s*(\d+))?\)$/);
-    if (latestMatch) {
-      const innerRevset = latestMatch[1];
-      const count = latestMatch[2] ? parseInt(latestMatch[2], 10) : 1;
-      const innerResults = await this.evaluate(innerRevset);
-      return await this.filterLatest(innerResults, count);
-    }
-
-    // v0.4: tags([pattern]) - tag targets
-    const tagsMatch = trimmed.match(/^tags\((?:(.+?))?\)$/);
-    if (tagsMatch || trimmed === 'tags()') {
-      const pattern = tagsMatch ? tagsMatch[1]?.replace(/['"]/g, '') : undefined;
-      return await this.filterTags(pattern);
-    }
-
-    // v1.0: bookmark(name) - single bookmark by exact name
-    const bookmarkMatch = trimmed.match(/^bookmark\((.+?)\)$/);
-    if (bookmarkMatch) {
-      const name = bookmarkMatch[1].replace(/['"]/g, '');
-      if (!this.bookmarkStore) return [];
-      await this.bookmarkStore.load();
-      const target = await this.bookmarkStore.get(name);
-      return target ? [target] : [];
-    }
-
-    // v0.4: bookmarks([pattern]) - bookmark targets
-    const bookmarksMatch = trimmed.match(/^bookmarks\((?:(.+?))?\)$/);
-    if (bookmarksMatch || trimmed === 'bookmarks()') {
-      const pattern = bookmarksMatch ? bookmarksMatch[1]?.replace(/['"]/g, '') : undefined;
-      return await this.filterBookmarks(pattern);
-    }
-
-    // v0.5: last(N) - last N commits
-    // v0.5: last(Nd) - commits in last N days
-    // v0.5: last(Nh) - commits in last N hours
-    const lastMatch = trimmed.match(/^last\((\d+)([dh])?\)$/);
-    if (lastMatch) {
-      const value = parseInt(lastMatch[1], 10);
-      const unit = lastMatch[2]; // 'd', 'h', or undefined
-
-      if (unit) {
-        // Time-based: last(Nd) or last(Nh)
-        return await this.filterByTimeRange(value, unit);
-      } else {
-        // Count-based: last(N)
-        return await this.filterLast(value);
+      case 'visible': {
+        await this.graph.load();
+        return this.graph
+          .getAll()
+          .filter((c) => !c.abandoned)
+          .map((c) => c.changeId);
       }
-    }
 
-    // v0.5: since(date) - commits since date
-    const sinceMatch = trimmed.match(/^since\(([0-9-]+)\)$/);
-    if (sinceMatch) {
-      const date = sinceMatch[1];
-      return await this.filterSince(date);
-    }
-
-    // v0.5: between(start, end) - commits between dates
-    const betweenMatch = trimmed.match(/^between\(([0-9-]+),\s*([0-9-]+)\)$/);
-    if (betweenMatch) {
-      const startDate = betweenMatch[1];
-      const endDate = betweenMatch[2];
-      return await this.filterBetween(startDate, endDate);
-    }
-
-    // v0.5: descendants(changeId[, depth]) - all descendants
-    const descendantsMatch = trimmed.match(/^descendants\(([0-9a-f]{32})(?:,\s*(\d+))?\)$/);
-    if (descendantsMatch) {
-      const changeId = descendantsMatch[1];
-      const depth = descendantsMatch[2] ? parseInt(descendantsMatch[2], 10) : undefined;
-      return await this.getDescendants(changeId, depth);
-    }
-
-    // v0.5: common_ancestor(rev1, rev2) - common ancestor
-    const commonAncestorMatch = trimmed.match(
-      /^common_ancestor\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/
-    );
-    if (commonAncestorMatch) {
-      const rev1 = commonAncestorMatch[1];
-      const rev2 = commonAncestorMatch[2];
-      return await this.findCommonAncestor(rev1, rev2);
-    }
-
-    // v0.5: range(base..tip) - commits in range
-    const rangeMatch = trimmed.match(/^range\(([0-9a-f]{32})\.\.([0-9a-f]{32})\)$/);
-    if (rangeMatch) {
-      const base = rangeMatch[1];
-      const tip = rangeMatch[2];
-      return await this.getRange(base, tip);
-    }
-
-    // v0.5: diverge_point(rev1, rev2) - divergence point
-    const divergeMatch = trimmed.match(/^diverge_point\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/);
-    if (divergeMatch) {
-      const rev1 = divergeMatch[1];
-      const rev2 = divergeMatch[2];
-      return await this.findDivergePoint(rev1, rev2);
-    }
-
-    // v0.5: connected(rev1, rev2) - check if path exists
-    const connectedMatch = trimmed.match(/^connected\(([0-9a-f]{32}),\s*([0-9a-f]{32})\)$/);
-    if (connectedMatch) {
-      const rev1 = connectedMatch[1];
-      const rev2 = connectedMatch[2];
-      return /** @type {any} */ (await this.checkConnected(rev1, rev2));
-    }
-
-    // v1.0: x- operator (parents) - handles chaining like x-- for grandparents
-    const parentsOpMatch = trimmed.match(/^([0-9a-f]{32})(-+)$/);
-    if (parentsOpMatch) {
-      const baseChangeId = parentsOpMatch[1];
-      const depth = parentsOpMatch[2].length; // Count number of '-' characters
-
-      let currentSet = [baseChangeId];
-      for (let i = 0; i < depth; i++) {
-        currentSet = await this.getParentsOfSet(currentSet);
-        if (currentSet.length === 0) break; // Stop if we reach root
+      case 'hidden': {
+        await this.graph.load();
+        return this.graph
+          .getAll()
+          .filter((c) => c.abandoned === true)
+          .map((c) => c.changeId);
       }
-      return currentSet;
-    }
 
-    // v1.0: x+ operator (children) - handles chaining like x++ for grandchildren
-    const childrenOpMatch = trimmed.match(/^([0-9a-f]{32})(\++)$/);
-    if (childrenOpMatch) {
-      const baseChangeId = childrenOpMatch[1];
-      const depth = childrenOpMatch[2].length; // Count number of '+' characters
-
-      let currentSet = [baseChangeId];
-      for (let i = 0; i < depth; i++) {
-        currentSet = await this.getChildrenOfSet(currentSet);
-        if (currentSet.length === 0) break; // Stop if we reach leaves
+      case 'ancestors': {
+        const parts = this.splitTopLevelArgs(raw);
+        const seeds = await this.resolveArg(parts[0]);
+        const depth = parts[1] !== undefined ? parseInt(parts[1].trim(), 10) : undefined;
+        const result = new Set();
+        for (const seed of seeds) {
+          for (const id of await this.getAncestors(seed, depth)) {
+            result.add(id);
+          }
+        }
+        return Array.from(result);
       }
-      return currentSet;
-    }
 
-    // Range operator (..) - all changes from base to tip
-    // Format: base..tip means ancestors(tip) ~ ancestors(base)
-    if (trimmed.includes('..')) {
-      const parts = trimmed.split('..');
-      if (parts.length === 2) {
-        const base = parts[0].trim();
-        const tip = parts[1].trim();
+      case 'change_id':
+        return await this.filterByIdPrefix(unquote(raw), 'changeId');
+      case 'commit_id':
+        return await this.filterByIdPrefix(unquote(raw), 'commitId');
+      case 'subject':
+        return await this.filterBySubject(unquote(raw));
 
-        // Get ancestors of tip
-        const baseChange = await this.graph.getChange(base);
-        const tipChange = await this.graph.getChange(tip);
+      case 'author_name':
+        return await this.filterBySignatureField('author', 'name', unquote(raw));
+      case 'author_email':
+        return await this.filterBySignatureField('author', 'email', unquote(raw));
+      case 'committer_name':
+        return await this.filterBySignatureField('committer', 'name', unquote(raw));
+      case 'committer_email':
+        return await this.filterBySignatureField('committer', 'email', unquote(raw));
+      case 'committer': {
+        const pattern = unquote(raw);
+        const byName = await this.filterBySignatureField('committer', 'name', pattern);
+        const byEmail = await this.filterBySignatureField('committer', 'email', pattern);
+        return Array.from(new Set([...byName, ...byEmail]));
+      }
 
-        if (!baseChange || !tipChange) {
-          throw new JJError('INVALID_REVSET', `Invalid range: ${trimmed}`, {
-            suggestion: 'Both base and tip must be valid change IDs',
+      case 'signed': {
+        await this.graph.load();
+        return this.graph
+          .getAll()
+          .filter((c) => c.signed === true || (c.signature && c.signature.status))
+          .map((c) => c.changeId);
+      }
+
+      case 'divergent': {
+        await this.graph.load();
+        const all = this.graph.getAll();
+        const counts = new Map();
+        for (const c of all) {
+          counts.set(c.changeId, (counts.get(c.changeId) || 0) + 1);
+        }
+        return all
+          .filter((c) => c.divergent === true || counts.get(c.changeId) > 1)
+          .map((c) => c.changeId);
+      }
+
+      case 'merges':
+      case 'merge':
+        return await this.filterMerge();
+
+      case 'forks': {
+        await this.graph.load();
+        const all = this.graph.getAll();
+        return all
+          .filter((c) => this.graph.getChildren(c.changeId).length > 1)
+          .map((c) => c.changeId);
+      }
+
+      case 'remote_tags':
+        return await this.filterRemoteTags(raw === '' ? undefined : unquote(raw));
+
+      case 'first_parent': {
+        const seeds = await this.resolveArg(raw);
+        const parents = new Set();
+        for (const seed of seeds) {
+          const change = await this.graph.getChange(seed);
+          if (change && change.parents && change.parents.length > 0) {
+            parents.add(change.parents[0]);
+          }
+        }
+        return Array.from(parents);
+      }
+
+      case 'first_ancestors': {
+        const seeds = await this.resolveArg(raw);
+        const result = new Set();
+        for (const seed of seeds) {
+          let current = seed;
+          while (current) {
+            if (result.has(current)) break;
+            result.add(current);
+            const change = await this.graph.getChange(current);
+            current =
+              change && change.parents && change.parents.length > 0 ? change.parents[0] : null;
+          }
+        }
+        return Array.from(result);
+      }
+
+      case 'fork_point':
+        return await this.findForkPoint(await this.resolveArg(raw));
+      case 'merge_point':
+        return await this.findMergePoint(await this.resolveArg(raw));
+
+      case 'exactly': {
+        const parts = this.splitTopLevelArgs(raw);
+        if (parts.length !== 2) {
+          throw new JJError('INVALID_REVSET', `Invalid revset expression: exactly(${raw})`, {
+            suggestion: this._suggestion(),
           });
         }
-
-        // ancestors(tip) ~ ancestors(base) gives us all changes from base to tip
-        const tipAncestors = new Set(await this.getAncestors(tip));
-        const baseAncestors = new Set(await this.getAncestors(base));
-
-        // Remove base's ancestors from tip's ancestors
-        const rangeChanges = [...tipAncestors].filter((id) => !baseAncestors.has(id));
-
-        return rangeChanges;
-      }
-    }
-
-    // conflicted() - changes with conflicts
-    if (trimmed === 'conflicted()') {
-      await this.graph.load();
-      const all = this.graph.getAll();
-      return all
-        .filter((c) => c.conflicts && Object.keys(c.conflicts).length > 0)
-        .map((c) => c.changeId);
-    }
-
-    // reachable(heads) - all changes reachable from heads
-    // Use a more careful regex that handles nested expressions
-    if (trimmed.startsWith('reachable(')) {
-      const innerStart = 'reachable('.length;
-      let parenCount = 1;
-      let endIndex = innerStart;
-
-      // Find the matching closing parenthesis
-      while (endIndex < trimmed.length && parenCount > 0) {
-        if (trimmed[endIndex] === '(') parenCount++;
-        if (trimmed[endIndex] === ')') parenCount--;
-        endIndex++;
+        const result = await this.evaluate(parts[0].trim());
+        const expected = parseInt(parts[1].trim(), 10);
+        if (result.length !== expected) {
+          throw new JJError(
+            'REVSET_EXACTLY_MISMATCH',
+            `exactly() expected ${expected} revision(s) but found ${result.length}`,
+            { expected, actual: result.length }
+          );
+        }
+        return result;
       }
 
-      // Check if this is a complete reachable() expression (not part of a larger expression)
-      if (parenCount === 0 && endIndex === trimmed.length) {
-        const headsExpr = trimmed.substring(innerStart, endIndex - 1).trim();
-        const heads = await this.evaluate(headsExpr);
+      case 'present': {
+        try {
+          return await this.evaluate(raw);
+        } catch {
+          return [];
+        }
+      }
 
-        // Get all ancestors of all heads
+      case 'coalesce': {
+        for (const part of this.splitTopLevelArgs(raw)) {
+          /** @type {string[]} */
+          let result = [];
+          try {
+            result = await this.evaluate(part.trim());
+          } catch {
+            result = [];
+          }
+          if (result.length > 0) return result;
+        }
+        return [];
+      }
+
+      case 'author':
+        return await this.filterByAuthor(unquote(raw));
+      case 'description':
+        return await this.filterByDescription(unquote(raw));
+      case 'empty':
+        return await this.filterEmpty();
+      case 'mine':
+        return await this.filterMine();
+      case 'file':
+        return await this.filterByFile(unquote(raw));
+
+      case 'roots':
+        return await this.filterRoots(await this.evaluate(raw));
+      case 'heads':
+        return await this.filterHeads(await this.evaluate(raw));
+      case 'parents':
+        return await this.getParentsOfSet(await this.evaluate(raw));
+      case 'children':
+        return await this.getChildrenOfSet(await this.evaluate(raw));
+
+      case 'latest': {
+        const parts = this.splitTopLevelArgs(raw);
+        const innerResults = await this.evaluate(parts[0]);
+        const count = parts[1] !== undefined ? parseInt(parts[1].trim(), 10) : 1;
+        return await this.filterLatest(innerResults, count);
+      }
+
+      case 'tags':
+        return await this.filterTags(raw === '' ? undefined : unquote(raw));
+      case 'bookmark': {
+        const name = unquote(raw);
+        if (!this.bookmarkStore) return [];
+        await this.bookmarkStore.load();
+        const target = await this.bookmarkStore.get(name);
+        return target ? [target] : [];
+      }
+      case 'bookmarks':
+        return await this.filterBookmarks(raw === '' ? undefined : unquote(raw));
+
+      case 'last': {
+        const lastMatch = raw.match(/^(\d+)([dh])?$/);
+        if (!lastMatch) {
+          throw new JJError('INVALID_REVSET', `Invalid revset expression: last(${raw})`, {
+            suggestion: this._suggestion(),
+          });
+        }
+        const value = parseInt(lastMatch[1], 10);
+        const unit = lastMatch[2];
+        return unit ? await this.filterByTimeRange(value, unit) : await this.filterLast(value);
+      }
+
+      case 'since': {
+        const dateMatch = raw.match(/^[0-9-]+$/);
+        if (!dateMatch) {
+          throw new JJError('INVALID_REVSET', `Invalid revset expression: since(${raw})`, {
+            suggestion: this._suggestion(),
+          });
+        }
+        return await this.filterSince(raw);
+      }
+
+      case 'between': {
+        const parts = this.splitTopLevelArgs(raw).map((p) => p.trim());
+        if (parts.length !== 2 || !/^[0-9-]+$/.test(parts[0]) || !/^[0-9-]+$/.test(parts[1])) {
+          throw new JJError('INVALID_REVSET', `Invalid revset expression: between(${raw})`, {
+            suggestion: this._suggestion(),
+          });
+        }
+        return await this.filterBetween(parts[0], parts[1]);
+      }
+
+      case 'descendants': {
+        const parts = this.splitTopLevelArgs(raw).map((p) => p.trim());
+        if (!/^[0-9a-f]{32}$/.test(parts[0])) {
+          throw new JJError('INVALID_REVSET', `Invalid revset expression: descendants(${raw})`, {
+            suggestion: this._suggestion(),
+          });
+        }
+        const depth = parts[1] !== undefined ? parseInt(parts[1], 10) : undefined;
+        return await this.getDescendants(parts[0], depth);
+      }
+
+      case 'common_ancestor': {
+        const [rev1, rev2] = this._twoHexArgs(name, raw);
+        return await this.findCommonAncestor(rev1, rev2);
+      }
+
+      case 'range': {
+        const rangeParts = raw.split('..');
+        if (
+          rangeParts.length !== 2 ||
+          !/^[0-9a-f]{32}$/.test(rangeParts[0]) ||
+          !/^[0-9a-f]{32}$/.test(rangeParts[1])
+        ) {
+          throw new JJError('INVALID_REVSET', `Invalid revset expression: range(${raw})`, {
+            suggestion: this._suggestion(),
+          });
+        }
+        return await this.getRange(rangeParts[0], rangeParts[1]);
+      }
+
+      case 'diverge_point': {
+        const [rev1, rev2] = this._twoHexArgs(name, raw);
+        return await this.findDivergePoint(rev1, rev2);
+      }
+
+      case 'connected': {
+        const [rev1, rev2] = this._twoHexArgs(name, raw);
+        return /** @type {any} */ (await this.checkConnected(rev1, rev2));
+      }
+
+      case 'conflicted': {
+        await this.graph.load();
+        return this.graph
+          .getAll()
+          .filter((c) => c.conflicts && Object.keys(c.conflicts).length > 0)
+          .map((c) => c.changeId);
+      }
+
+      case 'reachable': {
+        const heads = await this.evaluate(raw);
         const reachable = new Set();
         for (const headId of heads) {
-          const ancestors = await this.getAncestors(headId);
-          for (const ancestorId of ancestors) {
+          for (const ancestorId of await this.getAncestors(headId)) {
             reachable.add(ancestorId);
           }
         }
-
         return Array.from(reachable);
       }
-    }
 
-    // tracked() - changes with tracked files (all changes with files)
-    if (trimmed === 'tracked()') {
-      await this.graph.load();
-      const all = this.graph.getAll();
-      return all
-        .filter((c) => c.fileSnapshot && Object.keys(c.fileSnapshot).length > 0)
-        .map((c) => c.changeId);
-    }
-
-    // untracked() - changes with no tracked files (empty changes)
-    if (trimmed === 'untracked()') {
-      await this.graph.load();
-      const all = this.graph.getAll();
-      return all
-        .filter((c) => !c.fileSnapshot || Object.keys(c.fileSnapshot).length === 0)
-        .map((c) => c.changeId);
-    }
-
-    // remote_branches([pattern]) - remote branch targets
-    const remoteBranchesMatch = trimmed.match(/^remote_branches\((?:"([^"]+)")?\)$/);
-    if (remoteBranchesMatch || trimmed === 'remote_branches()') {
-      if (!this.bookmarkStore) return [];
-
-      await this.bookmarkStore.load();
-      const allBookmarks = /** @type {any[]} */ (await this.bookmarkStore.list());
-
-      // Filter for remote branches (bookmarks with '/' in the name)
-      let remoteBookmarks = allBookmarks.filter((bookmark) => bookmark.name.includes('/'));
-
-      // If pattern provided, filter by pattern
-      if (remoteBranchesMatch && remoteBranchesMatch[1]) {
-        const pattern = remoteBranchesMatch[1];
-        const regex = new RegExp(pattern.replace(/\*/g, '.*'));
-        remoteBookmarks = remoteBookmarks.filter((bookmark) => regex.test(bookmark.name));
+      case 'tracked': {
+        await this.graph.load();
+        return this.graph
+          .getAll()
+          .filter((c) => c.fileSnapshot && Object.keys(c.fileSnapshot).length > 0)
+          .map((c) => c.changeId);
       }
 
-      // Get target change IDs
-      const targets = new Set();
-      for (const bookmark of remoteBookmarks) {
-        if (bookmark.changeId) {
-          targets.add(bookmark.changeId);
+      case 'untracked': {
+        await this.graph.load();
+        return this.graph
+          .getAll()
+          .filter((c) => !c.fileSnapshot || Object.keys(c.fileSnapshot).length === 0)
+          .map((c) => c.changeId);
+      }
+
+      case 'remote_branches': {
+        if (!this.bookmarkStore) return [];
+        await this.bookmarkStore.load();
+        const allBookmarks = /** @type {any[]} */ (await this.bookmarkStore.list());
+        let remoteBookmarks = allBookmarks.filter((bookmark) => bookmark.name.includes('/'));
+        if (raw !== '') {
+          const pattern = unquote(raw);
+          remoteBookmarks = remoteBookmarks.filter((bookmark) =>
+            this.globMatch(bookmark.name, pattern)
+          );
         }
+        const targets = new Set();
+        for (const bookmark of remoteBookmarks) {
+          if (bookmark.changeId) targets.add(bookmark.changeId);
+        }
+        return Array.from(targets);
       }
 
-      return Array.from(targets);
+      default:
+        throw new JJError('INVALID_REVSET', `Invalid revset expression: ${name}(${raw})`, {
+          expression: `${name}(${raw})`,
+          suggestion: this._suggestion(),
+        });
     }
+  }
 
-    // v0.5: Set operations - intersection (&), union (|), difference (~)
-    if (trimmed.includes(' & ') || trimmed.includes(' | ') || trimmed.includes(' ~ ')) {
-      return await this.evaluateSetOperation(trimmed);
+  /**
+   * Parse and validate exactly two comma-separated 32-hex-char arguments for
+   * functions like common_ancestor/diverge_point/connected.
+   *
+   * @private
+   * @param {string} name - Function name (for the error message)
+   * @param {string} raw - Raw argument text
+   * @returns {[string, string]}
+   */
+  _twoHexArgs(name, raw) {
+    const parts = this.splitTopLevelArgs(raw).map((p) => p.trim());
+    if (
+      parts.length !== 2 ||
+      !/^[0-9a-f]{32}$/.test(parts[0]) ||
+      !/^[0-9a-f]{32}$/.test(parts[1])
+    ) {
+      throw new JJError('INVALID_REVSET', `Invalid revset expression: ${name}(${raw})`, {
+        suggestion: this._suggestion(),
+      });
     }
-
-    // Direct changeId
-    if (/^[0-9a-f]{32}$/.test(trimmed)) {
-      await this.graph.load();
-      const change = await this.graph.getChange(trimmed);
-      return change ? [trimmed] : [];
-    }
-
-    throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
-      expression,
-      suggestion:
-        'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(revset[, depth]), author(name), author_name(x), author_email(x), committer(x), committer_name(x), committer_email(x), subject(pattern), description(text), change_id(prefix), commit_id(prefix), empty(), mine(), merge(), merges(), forks(), signed(), divergent(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), first_parent(revset), first_ancestors(revset), fork_point(revset), merge_point(revset), exactly(revset, n), present(revset), coalesce(a, b, ...), latest(revset, [count]), tags([pattern]), remote_tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
-    });
+    return [parts[0], parts[1]];
   }
 
   /**
@@ -764,7 +973,9 @@ export class RevsetEngine {
   }
 
   /**
-   * Split a comma-separated argument list, respecting nested parentheses (v1.5).
+   * Split a comma-separated argument list, respecting nested parentheses and
+   * quoted strings — so a quoted argument containing a literal comma (e.g.
+   * `description("a, b")`) isn't mis-split (v1.7: now quote-aware).
    *
    * @param {string} argString - Raw argument string (without the outer parens)
    * @returns {Array<string>} Individual argument expressions
@@ -772,8 +983,20 @@ export class RevsetEngine {
   splitTopLevelArgs(argString) {
     const args = [];
     let depth = 0;
+    /** @type {string|null} */
+    let quote = null;
     let current = '';
     for (const ch of argString) {
+      if (quote) {
+        current += ch;
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        current += ch;
+        continue;
+      }
       if (ch === '(') depth++;
       if (ch === ')') depth--;
       if (ch === ',' && depth === 0) {
@@ -1437,56 +1660,24 @@ export class RevsetEngine {
   }
 
   /**
-   * Evaluate set operations (v0.5)
+   * Evaluate a bare set-operation expression directly (kept for backward
+   * compatibility — evaluate() now handles `&`/`|`/`~` as part of normal
+   * parsing/precedence, so this is a thin wrapper that still enforces the
+   * "must contain an operator" contract for direct callers.
    *
-   * @param {string} expression - Expression with set operations
-   * @returns {Promise<Array<string>>} Result of set operation
+   * @param {string} expression - Expression expected to contain a set operator
+   * @returns {Promise<Array<string>>} Result of the set operation
    */
   async evaluateSetOperation(expression) {
-    // Parse set operations: & (intersection), | (union), ~ (difference)
-    // Simple implementation - split by operators and evaluate left to right
-
-    // Handle intersection (&)
-    if (expression.includes(' & ')) {
-      const parts = expression.split(' & ');
-      let result = new Set(await this.evaluate(parts[0]));
-
-      for (let i = 1; i < parts.length; i++) {
-        const partResult = new Set(await this.evaluate(parts[i]));
-        result = new Set([...result].filter((x) => partResult.has(x)));
-      }
-
-      return Array.from(result);
+    const tokens = tokenize(expression.trim());
+    const hasOperator = tokens.some(
+      (t) => t.type === 'AMP' || t.type === 'PIPE' || t.type === 'TILDE'
+    );
+    if (!hasOperator) {
+      throw new JJError('INVALID_SET_OPERATION', `Invalid set operation: ${expression}`, {
+        expression,
+      });
     }
-
-    // Handle union (|)
-    if (expression.includes(' | ')) {
-      const parts = expression.split(' | ');
-      const result = new Set();
-
-      for (const part of parts) {
-        const partResult = await this.evaluate(part);
-        partResult.forEach((id) => result.add(id));
-      }
-
-      return Array.from(result);
-    }
-
-    // Handle difference (~)
-    if (expression.includes(' ~ ')) {
-      const parts = expression.split(' ~ ');
-      let result = new Set(await this.evaluate(parts[0]));
-
-      for (let i = 1; i < parts.length; i++) {
-        const partResult = new Set(await this.evaluate(parts[i]));
-        result = new Set([...result].filter((x) => !partResult.has(x)));
-      }
-
-      return Array.from(result);
-    }
-
-    throw new JJError('INVALID_SET_OPERATION', `Invalid set operation: ${expression}`, {
-      expression,
-    });
+    return await this.evaluate(expression);
   }
 }
