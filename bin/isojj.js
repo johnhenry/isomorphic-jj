@@ -124,42 +124,75 @@ async function main() {
   try {
     const { command, opts } = parseArgs(process.argv);
 
+    if (command === 'version' || command === '--version' || command === '-v') {
+      const pkg = JSON.parse(
+        fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+      );
+      console.log(`isojj ${pkg.version}`);
+      process.exit(0);
+    }
+
     if (!command || command === 'help' || command === '--help' || command === '-h') {
       console.log(`
 isojj - CLI for isomorphic-jj
 
 Usage: isojj <command> [options]
 
-Common commands:
-  init                    Initialize a new repository
-  log [--revset <expr>]   Show change history
-  status                  Show working copy status
-  describe -m <message>   Set change description
-  new -m <message>        Create new change
-  diff [--changeId <id>]  Show changes
+Change management:
+  init                          Initialize a new repository
+  status                        Show working copy status
+  log [<revset> | --revset <e>] Show change history
+  describe -m <message>         Set change description
+  new -m <message>              Create a new change
+  commit -m <message>           Describe + start a new change
+  diff [--revision <id>]        Show changes
+  abandon [--revision <id>]     Abandon a change
+  edit --revision <id>          Edit an existing change
 
-  bookmark.set --name <name> --changeId <id>
+History editing:
+  squash / split / rebase / duplicate / parallelize
+  absorb [--dryRun]             Absorb working-copy changes into ancestors
+  revert --revision <id>        Create a change that undoes another (was: backout)
+  undo / redo                   Undo or redo the last operation
+
+Files:
+  file.list [--revision <id>]   List tracked files
+  file.show <path>              Show file contents
+  file.search --pattern <re>    Search file contents        (jj file search)
+  file.annotate --path <p>      Blame-style annotation
+
+Bookmarks & tags:
+  bookmark.set --name <n> --to <id>
+  bookmark.advance --name <n> --to <id>    Move a bookmark forward only
   bookmark.list
+  tag.set --name <n> --changeId <id>       Create or move a tag
+  tag.list
 
-  absorb [--dryRun]       Absorb working copy changes
+Signing:
+  sign [--revision <id>] [--backend ssh --key <k>]
+  unsign [--revision <id>]
 
+Bisect:
   bisect.start --good <id> --bad <id>
-  bisect.good
-  bisect.bad
-  bisect.status
-  bisect.reset
+  bisect.good / bisect.bad / bisect.status / bisect.reset
 
 Options:
   --dir <path>            Repository directory (default: current directory)
   --json                  Output raw JSON (skip formatting)
+  -m, --message <msg>     Message / description
+  -r, --revision <id>     Target revision
+
+Any additional --flags are passed straight through to the API method, so every
+isomorphic-jj method is reachable (e.g. isojj file.search --pattern TODO).
 
 Examples:
   isojj init
-  isojj log
+  isojj log 'author(alice)'
   isojj describe -m "Fix bug"
-  isojj new -m "Start new feature"
-  isojj bookmark.set --name main --changeId abc123
-  isojj bisect.start --good abc123 --bad def456
+  isojj revert --revision abc123
+  isojj file.search --pattern "TODO"
+  isojj bookmark.advance --name main --to def456
+  isojj tag.set --name v1.0 --changeId abc123
 `);
       process.exit(0);
     }
@@ -203,29 +236,32 @@ Examples:
       throw new Error(`${command} is not a valid command`);
     }
 
-    // Map common CLI flags to API options
-    const apiOpts = {};
+    // Map CLI flags to API options. Every parsed flag is passed through so new
+    // commands work without special-casing; a few common shorthands are then
+    // normalized on top.
+    const { dir: _dir, json: _json, _positional, ...passthrough } = opts;
+    const apiOpts = { ...passthrough };
 
-    // Common mappings
+    // Common shorthand mappings
     if (opts.m || opts.message) apiOpts.message = opts.m || opts.message;
-    if (opts.changeId) apiOpts.changeId = opts.changeId;
-    if (opts.revset) apiOpts.revset = opts.revset;
-    if (opts.name) apiOpts.name = opts.name;
-    if (opts.path) apiOpts.path = opts.path;
-    if (opts.good) apiOpts.good = opts.good;
-    if (opts.bad) apiOpts.bad = opts.bad;
+    if (opts.r || opts.revision) apiOpts.revision = opts.r || opts.revision;
     if (opts.dryRun) apiOpts.dryRun = true;
-    if (opts.parents) {
+    if (typeof opts.parents === 'string') {
       apiOpts.parents = opts.parents.includes(',')
         ? opts.parents.split(',')
         : [opts.parents];
     }
 
-    // Add positional arguments if any
-    if (opts._positional?.length > 0) {
-      // For commands like 'read <path>', use first positional as path
-      if (command === 'read' || command === 'remove') {
-        apiOpts.path = opts._positional[0];
+    // Positional arguments: map the first positional to the most natural
+    // parameter for common file/query commands.
+    if (_positional?.length > 0) {
+      const first = _positional[0];
+      if ((command === 'read' || command === 'remove' || command.startsWith('file.')) && !apiOpts.path) {
+        apiOpts.path = first;
+      } else if (command === 'log' && !apiOpts.revset) {
+        apiOpts.revset = first;
+      } else if ((command === 'describe' || command === 'new' || command === 'commit') && !apiOpts.message) {
+        apiOpts.message = first;
       }
     }
 

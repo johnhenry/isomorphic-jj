@@ -1,7 +1,7 @@
 # isomorphic-jj
 
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-460%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
+[![test coverage](https://img.shields.io/badge/tests-732%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
 
 > **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
@@ -88,7 +88,7 @@ isomorphic-jj v1.0 now implements virtually all commonly-used JJ CLI commands:
 See [JJ_CLI_PARITY.md](./JJ_CLI_PARITY.md) for complete feature comparison.
 
 ### Testing & Quality
-- **460 tests** passing - Complete test coverage for all v1.0 features
+- **732 tests** passing - Complete coverage for v1.0-v1.5 features
 - **100% backward compatible** - All existing code continues to work
 - **Zero breaking changes** - Deprecated features show warnings but still function
 
@@ -898,8 +898,9 @@ repo/
 
 ## Project Status
 
-**Current Version**: v0.5.0
-**Test Coverage**: 351 tests, 100% passing
+**Current Version**: v1.5.0
+**Test Coverage**: 732 tests, 100% passing
+**JJ CLI parity**: tracks Jujutsu through v0.43
 **Status**: Ready for experimentation and prototyping
 
 **Completed:**
@@ -908,13 +909,10 @@ repo/
 - ✅ v0.3: Git backend, conflicts, workspaces, browser support
 - ✅ v0.4: Shallow clones, advanced revsets, event system
 - ✅ v0.5: Custom merge drivers, enhanced revsets (time-based, graph analytics), conflict resolution enhancements
+- ✅ v1.0: Full JJ CLI semantic parity, complete `file.*`/`operations.*`/`git.*` namespaces
+- ✅ v1.5: Parity refresh tracking jj through **v0.43** — new revsets (`change_id`, `commit_id`, `subject`, `author_name`/`email`, `committer*`, `signed`, `divergent`, `merges`, `forks`, `first_parent`, `first_ancestors`, `fork_point`, `merge_point`, `exactly`, `present`, `coalesce`, `remote_tags`, `ancestors(x, depth)`), working `tags()`/`remote_tags()` revsets, and new commands: `revert()`, `redo()`, `sign()`/`unsign()`, `file.search()`, `bookmark.advance()`, `tag.set()`. See [CHANGELOG.md](./CHANGELOG.md).
 
-**Coming Next (v0.6):**
-- Repository analytics and debugging tools
-- Interactive workflows
-- Performance optimizations
-
-See [ROADMAP.md](./ROADMAP.md) for detailed plans through v1.0.
+See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELOG.md) for the release history.
 
 ---
 

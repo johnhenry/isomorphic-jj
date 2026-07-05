@@ -84,7 +84,7 @@ describe('Move Validation and Detection', () => {
       // This is ambiguous - both look like change IDs
       try {
         await jj.move({ from: fakeChangeId1, to: fakeChangeId2 });
-        fail('Should have thrown error');
+        throw new Error('Should have thrown error');
       } catch (error) {
         expect(error.code).toBe('AMBIGUOUS_OPERATION');
       }
@@ -98,7 +98,7 @@ describe('Move Validation and Detection', () => {
 
       try {
         await jj.move({ from: fakeChangeId1, to: fakeChangeId2 });
-        fail('Should have thrown error');
+        throw new Error('Should have thrown error');
       } catch (error) {
         expect(error.code).toBe('AMBIGUOUS_OPERATION');
         expect(error.details.suggestion).toContain('changeId, newParent');
@@ -162,7 +162,7 @@ describe('Move Validation and Detection', () => {
     it('should provide helpful error details for missing files', async () => {
       try {
         await jj.move({ from: 'missing.txt', to: 'dest.txt' });
-        fail('Should have thrown error');
+        throw new Error('Should have thrown error');
       } catch (error) {
         expect(error.code).toBe('FILE_NOT_FOUND');
         expect(error.details.path).toBe('missing.txt');
@@ -201,7 +201,7 @@ describe('Move Validation and Detection', () => {
 
       try {
         await jj.move({ changeId: change.workingCopy.changeId, newParent: 'invalid' });
-        fail('Should have thrown error');
+        throw new Error('Should have thrown error');
       } catch (error) {
         expect(error.code).toBe('INVALID_CHANGE_ID');
         expect(error.message).toContain('Invalid');
@@ -242,7 +242,7 @@ describe('Move Validation and Detection', () => {
 
       try {
         await jj.move({ changeId: fakeChangeId, newParent: change.workingCopy.changeId });
-        fail('Should have thrown error');
+        throw new Error('Should have thrown error');
       } catch (error) {
         expect(error.code).toBe('CHANGE_NOT_FOUND');
         expect(error.details.changeId).toBe(fakeChangeId);
@@ -255,7 +255,7 @@ describe('Move Validation and Detection', () => {
     it('should provide context in error messages', async () => {
       try {
         await jj.move({ from: null, to: 'test.txt' });
-        fail('Should have thrown');
+        throw new Error('Should have thrown');
       } catch (error) {
         expect(error.details.provided).toBeDefined();
         expect(error.details.provided.from).toBeNull();
@@ -266,7 +266,7 @@ describe('Move Validation and Detection', () => {
     it('should suggest solutions in error messages', async () => {
       try {
         await jj.move(null);
-        fail('Should have thrown');
+        throw new Error('Should have thrown');
       } catch (error) {
         expect(error.details.suggestion).toContain('from, to');
         expect(error.details.suggestion).toContain('changeId, newParent');

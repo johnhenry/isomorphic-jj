@@ -12,12 +12,14 @@ export class RevsetEngine {
    * @param {WorkingCopy} workingCopy - Working copy instance
    * @param {UserConfig} userConfig - User configuration instance (optional)
    * @param {BookmarkStore} bookmarkStore - Bookmark store instance (optional, v0.4)
+   * @param {TagStore} tagStore - Tag store instance (optional, v1.5)
    */
-  constructor(graph, workingCopy, userConfig = null, bookmarkStore = null) {
+  constructor(graph, workingCopy, userConfig = null, bookmarkStore = null, tagStore = null) {
     this.graph = graph;
     this.workingCopy = workingCopy;
     this.userConfig = userConfig;
     this.bookmarkStore = bookmarkStore;
+    this.tagStore = tagStore;
   }
 
   /**
@@ -147,11 +149,195 @@ export class RevsetEngine {
         .map(c => c.changeId);
     }
 
-    // ancestors(changeId) - all ancestors including the change itself
-    const ancestorsMatch = trimmed.match(/^ancestors\(([0-9a-f]{32})\)$/);
+    // ancestors(revset[, depth]) - all ancestors including the change(s) itself
+    // v1.5: generalized to accept any nested revset plus an optional depth limit
+    // (matches jj's `ancestors(x, depth)`).
+    const ancestorsMatch = trimmed.match(/^ancestors\((.+?)(?:,\s*(\d+))?\)$/);
     if (ancestorsMatch) {
-      const changeId = ancestorsMatch[1];
-      return await this.getAncestors(changeId);
+      const seeds = await this.resolveArg(ancestorsMatch[1]);
+      const depth = ancestorsMatch[2] ? parseInt(ancestorsMatch[2], 10) : undefined;
+      const result = new Set();
+      for (const seed of seeds) {
+        for (const id of await this.getAncestors(seed, depth)) {
+          result.add(id);
+        }
+      }
+      return Array.from(result);
+    }
+
+    // v1.5: change_id(prefix) / commit_id(prefix) - explicit prefix lookup
+    // (jj v0.31). Resolves a change by a hex prefix of its changeId/commitId.
+    const changeIdMatch = trimmed.match(/^change_id\((.+?)\)$/);
+    if (changeIdMatch) {
+      return await this.filterByIdPrefix(changeIdMatch[1].replace(/['"]/g, ''), 'changeId');
+    }
+    const commitIdMatch = trimmed.match(/^commit_id\((.+?)\)$/);
+    if (commitIdMatch) {
+      return await this.filterByIdPrefix(commitIdMatch[1].replace(/['"]/g, ''), 'commitId');
+    }
+
+    // v1.5: subject(pattern) - match the first line of the description (jj v0.26)
+    const subjectMatch = trimmed.match(/^subject\((.+?)\)$/);
+    if (subjectMatch) {
+      return await this.filterBySubject(subjectMatch[1].replace(/['"]/g, ''));
+    }
+
+    // v1.5: author_name / author_email / committer / committer_name /
+    // committer_email (jj v0.26) - fine-grained signature filters.
+    const authorNameMatch = trimmed.match(/^author_name\((.+?)\)$/);
+    if (authorNameMatch) {
+      return await this.filterBySignatureField('author', 'name', authorNameMatch[1].replace(/['"]/g, ''));
+    }
+    const authorEmailMatch = trimmed.match(/^author_email\((.+?)\)$/);
+    if (authorEmailMatch) {
+      return await this.filterBySignatureField('author', 'email', authorEmailMatch[1].replace(/['"]/g, ''));
+    }
+    const committerNameMatch = trimmed.match(/^committer_name\((.+?)\)$/);
+    if (committerNameMatch) {
+      return await this.filterBySignatureField('committer', 'name', committerNameMatch[1].replace(/['"]/g, ''));
+    }
+    const committerEmailMatch = trimmed.match(/^committer_email\((.+?)\)$/);
+    if (committerEmailMatch) {
+      return await this.filterBySignatureField('committer', 'email', committerEmailMatch[1].replace(/['"]/g, ''));
+    }
+    const committerMatch = trimmed.match(/^committer\((.+?)\)$/);
+    if (committerMatch) {
+      const pattern = committerMatch[1].replace(/['"]/g, '');
+      const byName = await this.filterBySignatureField('committer', 'name', pattern);
+      const byEmail = await this.filterBySignatureField('committer', 'email', pattern);
+      return Array.from(new Set([...byName, ...byEmail]));
+    }
+
+    // v1.5: signed() - cryptographically signed changes (jj v0.29)
+    if (trimmed === 'signed()') {
+      await this.graph.load();
+      return this.graph.getAll()
+        .filter((c) => c.signed === true || (c.signature && c.signature.status))
+        .map((c) => c.changeId);
+    }
+
+    // v1.5: divergent() - changes that share a changeId with another visible
+    // change (jj v0.38). Detected via an explicit `divergent` flag or by
+    // duplicate changeIds in the graph.
+    if (trimmed === 'divergent()') {
+      await this.graph.load();
+      const all = this.graph.getAll();
+      const counts = new Map();
+      for (const c of all) {
+        counts.set(c.changeId, (counts.get(c.changeId) || 0) + 1);
+      }
+      return all
+        .filter((c) => c.divergent === true || counts.get(c.changeId) > 1)
+        .map((c) => c.changeId);
+    }
+
+    // v1.5: merges() - alias of merge() (jj's canonical spelling is `merges()`)
+    if (trimmed === 'merges()') {
+      return await this.filterMerge();
+    }
+
+    // v1.5: forks() - changes with more than one child (unreleased jj)
+    if (trimmed === 'forks()') {
+      await this.graph.load();
+      const all = this.graph.getAll();
+      return all
+        .filter((c) => this.graph.getChildren(c.changeId).length > 1)
+        .map((c) => c.changeId);
+    }
+
+    // v1.5: remote_tags([pattern]) - remote tag targets (jj v0.38)
+    const remoteTagsMatch = trimmed.match(/^remote_tags\((?:(.+?))?\)$/);
+    if (remoteTagsMatch || trimmed === 'remote_tags()') {
+      const pattern = remoteTagsMatch ? remoteTagsMatch[1]?.replace(/['"]/g, '') : undefined;
+      return await this.filterRemoteTags(pattern);
+    }
+
+    // v1.5: first_parent(revset) - first parent of each change (jj v0.32)
+    const firstParentMatch = trimmed.match(/^first_parent\((.+?)\)$/);
+    if (firstParentMatch) {
+      const seeds = await this.resolveArg(firstParentMatch[1]);
+      const parents = new Set();
+      for (const seed of seeds) {
+        const change = await this.graph.getChange(seed);
+        if (change && change.parents && change.parents.length > 0) {
+          parents.add(change.parents[0]);
+        }
+      }
+      return Array.from(parents);
+    }
+
+    // v1.5: first_ancestors(revset) - first-parent ancestry chain (jj v0.32)
+    const firstAncestorsMatch = trimmed.match(/^first_ancestors\((.+?)\)$/);
+    if (firstAncestorsMatch) {
+      const seeds = await this.resolveArg(firstAncestorsMatch[1]);
+      const result = new Set();
+      for (const seed of seeds) {
+        let current = seed;
+        while (current) {
+          if (result.has(current)) break;
+          result.add(current);
+          const change = await this.graph.getChange(current);
+          current = change && change.parents && change.parents.length > 0
+            ? change.parents[0]
+            : null;
+        }
+      }
+      return Array.from(result);
+    }
+
+    // v1.5: fork_point(revset) - the youngest common ancestor of a set (jj v0.32)
+    const forkPointMatch = trimmed.match(/^fork_point\((.+?)\)$/);
+    if (forkPointMatch) {
+      const seeds = await this.resolveArg(forkPointMatch[1]);
+      return await this.findForkPoint(seeds);
+    }
+
+    // v1.5: merge_point(revset) - the youngest common descendant of a set
+    const mergePointMatch = trimmed.match(/^merge_point\((.+?)\)$/);
+    if (mergePointMatch) {
+      const seeds = await this.resolveArg(mergePointMatch[1]);
+      return await this.findMergePoint(seeds);
+    }
+
+    // v1.5: exactly(revset, n) - the set, but error unless it has exactly n
+    // elements (jj v0.34).
+    const exactlyMatch = trimmed.match(/^exactly\((.+),\s*(\d+)\)$/);
+    if (exactlyMatch) {
+      const result = await this.evaluate(exactlyMatch[1].trim());
+      const expected = parseInt(exactlyMatch[2], 10);
+      if (result.length !== expected) {
+        throw new JJError('REVSET_EXACTLY_MISMATCH',
+          `exactly() expected ${expected} revision(s) but found ${result.length}`,
+          { expected, actual: result.length });
+      }
+      return result;
+    }
+
+    // v1.5: present(revset) - evaluate but yield [] instead of erroring on an
+    // unknown symbol/function (jj's present()).
+    const presentMatch = trimmed.match(/^present\((.+)\)$/);
+    if (presentMatch) {
+      try {
+        return await this.evaluate(presentMatch[1].trim());
+      } catch {
+        return [];
+      }
+    }
+
+    // v1.5: coalesce(a, b, ...) - the first argument that resolves to a
+    // non-empty set (jj's coalesce()).
+    const coalesceMatch = trimmed.match(/^coalesce\((.+)\)$/);
+    if (coalesceMatch) {
+      for (const part of this.splitTopLevelArgs(coalesceMatch[1])) {
+        let result = [];
+        try {
+          result = await this.evaluate(part.trim());
+        } catch {
+          result = [];
+        }
+        if (result.length > 0) return result;
+      }
+      return [];
     }
 
     // v0.2: author(name) - changes by author
@@ -486,7 +672,7 @@ export class RevsetEngine {
 
     throw new JJError('INVALID_REVSET', `Invalid revset expression: ${expression}`, {
       expression,
-      suggestion: 'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(changeId), author(name), description(text), empty(), mine(), merge(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), latest(revset, [count]), tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
+      suggestion: 'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(revset[, depth]), author(name), author_name(x), author_email(x), committer(x), committer_name(x), committer_email(x), subject(pattern), description(text), change_id(prefix), commit_id(prefix), empty(), mine(), merge(), merges(), forks(), signed(), divergent(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), first_parent(revset), first_ancestors(revset), fork_point(revset), merge_point(revset), exactly(revset, n), present(revset), coalesce(a, b, ...), latest(revset, [count]), tags([pattern]), remote_tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID',
     });
   }
 
@@ -496,15 +682,15 @@ export class RevsetEngine {
    * @param {string} changeId - Change ID
    * @returns {Promise<Array<string>>} Array of ancestor change IDs
    */
-  async getAncestors(changeId) {
+  async getAncestors(changeId, depth = undefined) {
     await this.graph.load();
 
     const ancestors = [];
     const visited = new Set();
-    const queue = [changeId];
+    const queue = [{ id: changeId, level: 0 }];
 
     while (queue.length > 0) {
-      const current = queue.shift();
+      const { id: current, level } = queue.shift();
 
       if (visited.has(current)) {
         continue;
@@ -513,13 +699,155 @@ export class RevsetEngine {
       visited.add(current);
       ancestors.push(current);
 
+      // Depth is measured from the seed change. A depth of N includes the seed
+      // plus N generations of parents (matching jj's `ancestors(x, depth)`).
+      if (depth !== undefined && level >= depth) {
+        continue;
+      }
+
       const parents = this.graph.getParents(current);
       for (const parent of parents) {
-        queue.push(parent);
+        queue.push({ id: parent, level: level + 1 });
       }
     }
 
     return ancestors;
+  }
+
+  /**
+   * Resolve a revset argument to a set of change IDs (v1.5).
+   *
+   * Accepts a bare 32-hex change ID, a hex prefix, or any nested revset
+   * expression. Used by graph functions that take another revset as input.
+   *
+   * @param {string} arg - Argument expression
+   * @returns {Promise<Array<string>>} Change IDs
+   */
+  async resolveArg(arg) {
+    const trimmed = arg.trim();
+    if (/^[0-9a-f]{32}$/.test(trimmed)) {
+      return [trimmed];
+    }
+    return await this.evaluate(trimmed);
+  }
+
+  /**
+   * Split a comma-separated argument list, respecting nested parentheses (v1.5).
+   *
+   * @param {string} argString - Raw argument string (without the outer parens)
+   * @returns {Array<string>} Individual argument expressions
+   */
+  splitTopLevelArgs(argString) {
+    const args = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of argString) {
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) {
+        args.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim() !== '') args.push(current);
+    return args;
+  }
+
+  /**
+   * Filter changes whose changeId/commitId starts with a hex prefix (v1.5).
+   *
+   * @param {string} prefix - Hex prefix
+   * @param {string} field - 'changeId' or 'commitId'
+   * @returns {Promise<Array<string>>} Matching change IDs
+   */
+  async filterByIdPrefix(prefix, field) {
+    await this.graph.load();
+    const lower = prefix.toLowerCase();
+    return this.graph.getAll()
+      .filter((c) => (c[field] || '').toLowerCase().startsWith(lower))
+      .map((c) => c.changeId);
+  }
+
+  /**
+   * Filter changes whose subject (first line of the description) matches (v1.5).
+   *
+   * @param {string} text - Text to match within the subject line
+   * @returns {Promise<Array<string>>} Matching change IDs
+   */
+  async filterBySubject(text) {
+    await this.graph.load();
+    return this.graph.getAll()
+      .filter((c) => {
+        const subject = (c.description || '').split('\n')[0];
+        return subject.includes(text);
+      })
+      .map((c) => c.changeId);
+  }
+
+  /**
+   * Filter changes by a signature field (v1.5).
+   *
+   * @param {string} role - 'author' or 'committer'
+   * @param {string} field - 'name' or 'email'
+   * @param {string} pattern - Substring to match
+   * @returns {Promise<Array<string>>} Matching change IDs
+   */
+  async filterBySignatureField(role, field, pattern) {
+    await this.graph.load();
+    return this.graph.getAll()
+      .filter((c) => c[role] && c[role][field] && c[role][field].includes(pattern))
+      .map((c) => c.changeId);
+  }
+
+  /**
+   * Find the fork point (youngest common ancestor) of a set of changes (v1.5).
+   *
+   * @param {Array<string>} changeIds - Seed change IDs
+   * @returns {Promise<Array<string>>} Fork point (single element array or empty)
+   */
+  async findForkPoint(changeIds) {
+    await this.graph.load();
+    if (changeIds.length === 0) return [];
+
+    // Intersect the ancestor sets of every seed.
+    let common = null;
+    for (const id of changeIds) {
+      const ancestors = new Set(await this.getAncestors(id));
+      common = common === null
+        ? ancestors
+        : new Set([...common].filter((a) => ancestors.has(a)));
+    }
+    if (!common || common.size === 0) return [];
+
+    // Youngest common ancestor: the one that is not an ancestor of any other
+    // member of the common set (i.e. a head within the common set).
+    return await this.filterHeads(Array.from(common));
+  }
+
+  /**
+   * Find the merge point (youngest common descendant) of a set of changes (v1.5).
+   *
+   * @param {Array<string>} changeIds - Seed change IDs
+   * @returns {Promise<Array<string>>} Merge point (single element array or empty)
+   */
+  async findMergePoint(changeIds) {
+    await this.graph.load();
+    if (changeIds.length === 0) return [];
+
+    let common = null;
+    for (const id of changeIds) {
+      const descendants = new Set(await this.getDescendants(id));
+      descendants.add(id);
+      common = common === null
+        ? descendants
+        : new Set([...common].filter((d) => descendants.has(d)));
+    }
+    if (!common || common.size === 0) return [];
+
+    // Youngest common descendant: a root within the common set.
+    return await this.filterRoots(Array.from(common));
   }
 
   /**
@@ -735,11 +1063,47 @@ export class RevsetEngine {
    * @returns {Promise<Array<string>>} Change IDs pointed to by matching tags
    */
   async filterTags(pattern) {
-    await this.graph.load();
+    if (!this.tagStore) {
+      return [];
+    }
 
-    // For now, return empty array since we don't have tag support yet
-    // TODO: Implement when tag storage is added
-    return [];
+    await this.tagStore.load();
+    // TagStore.list([pattern]) returns [{ name, changeId }] and applies the
+    // glob pattern itself when provided.
+    const matchingTags = await this.tagStore.list(pattern);
+
+    const targets = new Set();
+    for (const tag of matchingTags) {
+      if (tag.changeId) {
+        targets.add(tag.changeId);
+      }
+    }
+    return Array.from(targets);
+  }
+
+  /**
+   * Filter remote tags (v1.5 - jj v0.38 remote_tags())
+   *
+   * Remote tags are stored with a slash-qualified name (e.g. "origin/v1.0").
+   *
+   * @param {string} [pattern] - Optional tag name pattern
+   * @returns {Promise<Array<string>>} Change IDs pointed to by matching remote tags
+   */
+  async filterRemoteTags(pattern) {
+    if (!this.tagStore) {
+      return [];
+    }
+
+    await this.tagStore.load();
+    const allTags = await this.tagStore.list();
+
+    const targets = new Set();
+    for (const tag of allTags) {
+      if (!tag.name.includes('/')) continue; // only remote-qualified tags
+      if (pattern && !this.globMatch(tag.name, pattern)) continue;
+      if (tag.changeId) targets.add(tag.changeId);
+    }
+    return Array.from(targets);
   }
 
   /**

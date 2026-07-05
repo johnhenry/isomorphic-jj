@@ -293,7 +293,7 @@ export async function createJJ(options) {
   });
 
   // Create revset engine with the middleware-wrapped graph (v0.4: added bookmarkStore)
-  const revset = new RevsetEngine(graph, workingCopy, userConfig, bookmarks);
+  const revset = new RevsetEngine(graph, workingCopy, userConfig, bookmarks, tags);
 
   /**
    * Helper to resolve conflicts with different strategies (v0.5)
@@ -330,7 +330,11 @@ export async function createJJ(options) {
     oplog,
     bookmarks,
     revset,
-    conflicts,
+    tags,  // TagStore instance (raw); public API is the `tag` namespace below
+    // NOTE: the raw ConflictModel is intentionally not exposed here because the
+    // public `conflicts` namespace (defined below) uses the same key. It remains
+    // accessible internally via the module closure.
+    conflictModel: conflicts,  // v1.5: advanced access to the raw ConflictModel
     workspaces,
     userConfig,
     mergeDrivers,  // v0.5: expose merge driver registry
@@ -1225,7 +1229,7 @@ export async function createJJ(options) {
       }
 
       // Store old change ID for potential regeneration
-      const oldChangeId = change.changeId;
+      const _oldChangeId = change.changeId;
 
       // Update author if provided
       if (args.author) {
@@ -1920,11 +1924,16 @@ export async function createJJ(options) {
         await conflicts.clear();
       }
 
-      // Record undo operation
+      // Record undo operation. Tag it with the view it undid so that redo()
+      // can re-apply it (jj's progressive undo/redo, added in jj v0.33).
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: await getUserOplogInfo(),
         description: 'undo operation',
+        eventType: 'undo',
+        undoneOpId: currentOp.id,
+        undoneView: currentOp.view,
+        undoneConflictsSnapshot: currentOp.conflictsSnapshot || null,
         parents: [],
         view: previousView,
       });
@@ -1940,6 +1949,101 @@ export async function createJJ(options) {
           workingCopy: previousView.workingCopy,
           heads: previousView.heads,
           fileCount: previousView.fileSnapshot ? Object.keys(previousView.fileSnapshot).length : 0,
+        },
+      };
+    },
+
+    /**
+     * Redo an operation previously undone with undo() (v1.5)
+     *
+     * Mirrors `jj redo` (jj v0.33): progressively re-applies the operations that
+     * `undo()` reverted, most-recent-undo first. Each redo consumes exactly one
+     * pending undo.
+     *
+     * @returns {Promise<Object>} Information about the redone operation
+     */
+    async redo() {
+      await oplog.load();
+      const ops = await oplog.list();
+
+      // Operations already consumed by a prior redo.
+      const alreadyRedone = new Set();
+      for (const op of ops) {
+        if (op.eventType === 'redo' && op.redoOf) {
+          alreadyRedone.add(op.redoOf);
+        }
+      }
+
+      // Find the most recent undo operation that has not yet been redone.
+      let undoOp = null;
+      for (let i = ops.length - 1; i >= 0; i--) {
+        if (ops[i].eventType === 'undo' && !alreadyRedone.has(ops[i].id)) {
+          undoOp = ops[i];
+          break;
+        }
+      }
+
+      if (!undoOp) {
+        throw new JJError('NOTHING_TO_REDO', 'No undone operations to redo', {
+          suggestion: 'redo() only reverses a preceding undo()',
+        });
+      }
+
+      const redoneView = undoOp.undoneView || {};
+
+      // Restore the working-copy pointer.
+      if (redoneView.workingCopy) {
+        await workingCopy.setCurrentChange(redoneView.workingCopy);
+      }
+
+      // Restore the working-copy files captured in the undone view.
+      if (redoneView.fileSnapshot) {
+        for (const [filePath, content] of Object.entries(redoneView.fileSnapshot)) {
+          try {
+            const fullPath = path.join(dir, filePath);
+            const pathParts = filePath.split('/');
+            if (pathParts.length > 1) {
+              const fullDirPath = path.join(dir, pathParts.slice(0, -1).join('/'));
+              await fs.promises.mkdir(fullDirPath, { recursive: true });
+            }
+            await fs.promises.writeFile(fullPath, content, 'utf8');
+          } catch (error) {
+            throw new JJError(
+              'REDO_FILE_RESTORE_FAILED',
+              `Failed to restore file ${filePath} during redo: ${error.message}`,
+              { filePath, originalError: error.message }
+            );
+          }
+        }
+      }
+
+      // Restore conflicts to the state that existed after the redone operation.
+      await conflicts.load();
+      if (undoOp.undoneConflictsSnapshot) {
+        conflicts.conflicts = new Map(Object.entries(undoOp.undoneConflictsSnapshot.conflicts || {}));
+        conflicts.fileConflicts = new Map(Object.entries(undoOp.undoneConflictsSnapshot.fileConflicts || {}));
+        await conflicts.save();
+      }
+
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: 'redo operation',
+        eventType: 'redo',
+        redoOf: undoOp.id,
+        parents: [],
+        view: redoneView,
+      });
+
+      return {
+        redoneOperation: {
+          description: undoOp.description,
+          undoneOpId: undoOp.undoneOpId,
+        },
+        restoredState: {
+          workingCopy: redoneView.workingCopy,
+          heads: redoneView.heads,
+          fileCount: redoneView.fileSnapshot ? Object.keys(redoneView.fileSnapshot).length : 0,
         },
       };
     },
@@ -2033,7 +2137,7 @@ export async function createJJ(options) {
 
         // Create a read-only view at this operation
         return {
-          async log(logArgs = {}) {
+          async log(_logArgs = {}) {
             // Get changes that existed at this operation
             await graph.load();
             const allChanges = await graph.getAllChanges();
@@ -2711,6 +2815,116 @@ export async function createJJ(options) {
         backedOut: args.revision,
         fileSnapshot: backoutChange.fileSnapshot,
       };
+    },
+
+    /**
+     * Revert a change by creating a new change that undoes it (v1.5)
+     *
+     * This is the canonical name in modern Jujutsu (`jj revert`), which fully
+     * replaced `jj backout` in jj v0.35. `backout()` remains as a deprecated
+     * alias for backward compatibility.
+     *
+     * @param {Object} args - Revert arguments
+     * @param {string} args.revision - Change to revert (aliases: change/changeId/target)
+     * @param {string} [args.message] - Custom description for the revert change
+     * @returns {Promise<Object>} Result including `revertedFrom`
+     */
+    async revert(args) {
+      const result = await jj.backout(args);
+      return {
+        changeId: result.changeId,
+        description: result.description,
+        revertedFrom: result.backedOut,
+        // Keep the legacy field so existing callers keep working.
+        backedOut: result.backedOut,
+        fileSnapshot: result.fileSnapshot,
+      };
+    },
+
+    /**
+     * Sign a change (matches `jj sign`, jj v0.27)
+     *
+     * A pure-JS library cannot verify GPG/SSH keys the way the jj CLI does, so
+     * this records signature *metadata* on the change (backend/key/status). This
+     * makes changes discoverable via the `signed()` revset and lets tooling
+     * round-trip signature intent. Pass a real signer via `args.backend`/`args.key`.
+     *
+     * @param {Object} [args] - Arguments
+     * @param {string} [args.revision] - Change to sign (aliases: change/changeId); defaults to @
+     * @param {string} [args.backend='none'] - Signing backend identifier (e.g. 'gpg', 'ssh')
+     * @param {string} [args.key] - Key identifier
+     * @returns {Promise<Object>} { changeId, signed, signature }
+     */
+    async sign(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+
+      const revision = args.revision || args.change || args.changeId || workingCopy.getCurrentChangeId();
+      const change = await graph.getChange(revision);
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${revision} not found`);
+      }
+
+      const signature = {
+        status: 'good',
+        backend: args.backend || 'none',
+        key: args.key || null,
+        timestamp: new Date().toISOString(),
+      };
+
+      await graph.updateChange({ ...change, signed: true, signature });
+
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: `sign ${revision.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [revision],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return { changeId: revision, signed: true, signature };
+    },
+
+    /**
+     * Remove a signature from a change (matches `jj unsign`, jj v0.27)
+     *
+     * @param {Object} [args] - Arguments
+     * @param {string} [args.revision] - Change to unsign (aliases: change/changeId); defaults to @
+     * @returns {Promise<Object>} { changeId, signed }
+     */
+    async unsign(args = {}) {
+      await graph.load();
+      await workingCopy.load();
+
+      const revision = args.revision || args.change || args.changeId || workingCopy.getCurrentChangeId();
+      const change = await graph.getChange(revision);
+      if (!change) {
+        throw new JJError('CHANGE_NOT_FOUND', `Change ${revision} not found`);
+      }
+
+      const updated = { ...change, signed: false };
+      delete updated.signature;
+      await graph.updateChange(updated);
+
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: `unsign ${revision.slice(0, 8)}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [revision],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return { changeId: revision, signed: false };
     },
 
     /**
@@ -4402,7 +4616,7 @@ export async function createJJ(options) {
       };
 
       const currentChangeId = workingCopy.getCurrentChangeId();
-      const currentChange = await graph.getChange(currentChangeId);
+      const _currentChange = await graph.getChange(currentChangeId);
       const sourceChange = await graph.getChange(args.source);
 
       if (!sourceChange) {
@@ -4765,6 +4979,66 @@ export async function createJJ(options) {
       },
 
       /**
+       * Search file contents (matches `jj file search`, jj v0.37).
+       *
+       * Searches the tracked files of a change (defaults to the working copy)
+       * for lines matching a pattern. Following jj v0.41, the pattern is treated
+       * as a regular expression by default; pass `{ kind: 'substring' }` for a
+       * literal search.
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.pattern - Pattern to search for
+       * @param {string} [args.changeId] - Change to search (defaults to @)
+       * @param {string} [args.kind='regex'] - 'regex' or 'substring'
+       * @param {string} [args.path] - Restrict search to a single file path
+       * @returns {Promise<Array<{path: string, lineNumber: number, line: string}>>}
+       */
+      async search(args) {
+        if (!args || !args.pattern) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing pattern argument', {
+            suggestion: 'Provide a search pattern: { pattern: "TODO" }',
+          });
+        }
+
+        await graph.load();
+        const changeId = args.changeId || args.change || workingCopy.getCurrentChangeId();
+        const change = await graph.getChange(changeId);
+        if (!change) {
+          throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
+        }
+
+        const kind = args.kind || 'regex';
+        let matcher;
+        if (kind === 'substring') {
+          matcher = (line) => line.includes(args.pattern);
+        } else {
+          let regex;
+          try {
+            regex = new RegExp(args.pattern);
+          } catch (error) {
+            throw new JJError('INVALID_PATTERN', `Invalid regex pattern: ${error.message}`, {
+              pattern: args.pattern,
+            });
+          }
+          matcher = (line) => regex.test(line);
+        }
+
+        const snapshot = change.fileSnapshot || {};
+        const results = [];
+        for (const [filePath, content] of Object.entries(snapshot)) {
+          if (args.path && filePath !== args.path) continue;
+          if (typeof content !== 'string') continue; // skip binary
+          const lines = content.split('\n');
+          lines.forEach((line, index) => {
+            if (matcher(line)) {
+              results.push({ path: filePath, lineNumber: index + 1, line });
+            }
+          });
+        }
+        return results;
+      },
+
+      /**
        * Write file content (organized file operation)
        *
        * @param {Object} args - Arguments
@@ -4918,7 +5192,7 @@ export async function createJJ(options) {
        * @param {string} args.path - File path to track
        * @throws {JJError} Always throws UNSUPPORTED_OPERATION
        */
-      async track(args) {
+      async track(_args) {
         throw new JJError(
           'UNSUPPORTED_OPERATION',
           'Explicit file tracking (jj file track) is not needed in JavaScript environments',
@@ -4949,7 +5223,7 @@ export async function createJJ(options) {
        * @param {string} args.path - File path to untrack
        * @throws {JJError} Always throws UNSUPPORTED_OPERATION
        */
-      async untrack(args) {
+      async untrack(_args) {
         throw new JJError(
           'UNSUPPORTED_OPERATION',
           'Explicit file untracking (jj file untrack) is not needed in JavaScript environments',
@@ -5548,6 +5822,64 @@ export async function createJJ(options) {
       },
 
       /**
+       * Advance a bookmark to a descendant change (matches `jj bookmark advance`,
+       * jj v0.39). Unlike move(), advance() only moves the bookmark *forward*
+       * along the graph — the target must be a descendant of the bookmark's
+       * current position (defaults to the working copy).
+       *
+       * @param {Object} args - Arguments
+       * @param {string} args.name - Bookmark name to advance
+       * @param {string} [args.to] - Target change (aliases: target/changeId/change/revision); defaults to @
+       * @returns {Promise<Object>} { name, from, to }
+       */
+      async advance(args) {
+        if (args) {
+          const alias = args.to || args.target || args.changeId || args.change || args.revision;
+          if (alias) args = { ...args, to: alias };
+        }
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing bookmark name', {
+            suggestion: 'Provide the bookmark name: { name: "main", to: "abc123..." }',
+          });
+        }
+
+        await bookmarks.load();
+        await graph.load();
+
+        const from = await bookmarks.get(args.name);
+        if (!from) {
+          throw new JJError('NOT_FOUND', `Bookmark ${args.name} not found`);
+        }
+
+        const to = args.to || workingCopy.getCurrentChangeId();
+
+        // The target must be a descendant of (or equal to) the current position.
+        const descendants = new Set(await revset.getDescendants(from));
+        if (to !== from && !descendants.has(to)) {
+          throw new JJError('BOOKMARK_NOT_ADVANCEABLE',
+            `Cannot advance bookmark ${args.name}: ${to.slice(0, 8)} is not a descendant of ${from.slice(0, 8)}`,
+            { suggestion: 'Use bookmark.move() to move a bookmark backward or sideways' });
+        }
+
+        await bookmarks.move(args.name, to);
+
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `bookmark advance ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: { [args.name]: to },
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, from, to };
+      },
+
+      /**
        * Delete a bookmark (matches `jj bookmark delete`)
        *
        * @param {Object} args - Bookmark arguments
@@ -5814,6 +6146,53 @@ export async function createJJ(options) {
         });
 
         return result;
+      },
+
+      /**
+       * Create or update (move) a tag (matches `jj tag set`, jj v0.35).
+       *
+       * Unlike create(), set() is an upsert: it will point an existing tag at a
+       * new change instead of erroring.
+       *
+       * @param {Object} args - Tag arguments
+       * @param {string} args.name - Tag name
+       * @param {string} [args.changeId] - Change ID to tag (default: working copy)
+       * @returns {Promise<{name: string, changeId: string, updated: boolean}>}
+       */
+      async set(args) {
+        if (!args || args.name === undefined || args.name === null) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing name argument', {
+            suggestion: 'Provide: { name: "v1.0.0", changeId: "abc123..." }',
+          });
+        }
+
+        let changeId = args.changeId || args.change || args.revision;
+        if (!changeId) {
+          await workingCopy.load();
+          changeId = workingCopy.getCurrentChangeId();
+        }
+
+        await tags.load();
+        const existed = await tags.exists(args.name);
+        if (existed) {
+          await tags.delete(args.name);
+        }
+        const result = await tags.create(args.name, changeId);
+
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `tag set ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { ...result, updated: existed };
       },
 
       /**
@@ -6406,7 +6785,7 @@ export async function createJJ(options) {
 
         // Find all ancestors of bad that are descendants of good
         const badAncestors = graph.getAncestors(badId);
-        const goodAncestors = graph.getAncestors(goodId);
+        const _goodAncestors = graph.getAncestors(goodId);
 
         // Candidates are changes that are:
         // - Ancestors of bad (or bad itself)
@@ -6688,7 +7067,7 @@ export async function createJJ(options) {
 
         // Create new change as a copy
         const newChangeId = generateChangeId();
-        const user = userConfig.getUser();
+        const _user = userConfig.getUser();
         const newChange = {
           ...originalChange,
           changeId: newChangeId,
@@ -6925,7 +7304,7 @@ export async function createJJ(options) {
    * @status UNSUPPORTED - Requires interactive diff editor
    * @throws {JJError} Always throws UNSUPPORTED_OPERATION
    */
-  jj.diffedit = async function (args) {
+  jj.diffedit = async function (_args) {
     throw new JJError(
       'UNSUPPORTED_OPERATION',
       'diffedit requires interactive diff editor',
@@ -6944,7 +7323,7 @@ export async function createJJ(options) {
    * @status UNSUPPORTED - Requires external formatters
    * @throws {JJError} Always throws UNSUPPORTED_OPERATION
    */
-  jj.fix = async function (args) {
+  jj.fix = async function (_args) {
     throw new JJError(
       'UNSUPPORTED_OPERATION',
       'Automatic formatting requires external tools',
@@ -6957,42 +7336,10 @@ export async function createJJ(options) {
     );
   };
 
-  /**
-   * sign - Cryptographically sign a revision (STUB)
-   *
-   * @status UNSUPPORTED - Cryptographic signing not implemented
-   * @throws {JJError} Always throws UNSUPPORTED_OPERATION
-   */
-  jj.sign = async function (args) {
-    throw new JJError(
-      'UNSUPPORTED_OPERATION',
-      'Cryptographic signing not implemented',
-      {
-        feature: 'sign',
-        reason: 'GPG/SSH signing requires complex key management and security considerations',
-        alternative: 'Use Git\'s signing features with jj.git.push() for signed commits',
-        suggestion: 'Sign commits at the Git layer using git commit --gpg-sign',
-      }
-    );
-  };
-
-  /**
-   * unsign - Remove cryptographic signature (STUB)
-   *
-   * @status UNSUPPORTED - Cryptographic signing not implemented
-   * @throws {JJError} Always throws UNSUPPORTED_OPERATION
-   */
-  jj.unsign = async function (args) {
-    throw new JJError(
-      'UNSUPPORTED_OPERATION',
-      'Cryptographic signing not implemented',
-      {
-        feature: 'unsign',
-        reason: 'Signing features not implemented in isomorphic-jj',
-        alternative: 'Modify commits using jj.metaedit() if you need to change metadata',
-      }
-    );
-  };
+  // NOTE: jj.sign() / jj.unsign() are implemented as real (metadata-based)
+  // methods in the main API object above (v1.5). The old UNSUPPORTED stubs were
+  // removed — a pure-JS library can't verify keys, but it can record and expose
+  // signature metadata for the signed() revset and Git-layer integration.
 
   /**
    * util - CLI utility commands (STUB namespace)
@@ -7036,7 +7383,7 @@ export async function createJJ(options) {
      * exec - Execute command with JJ environment (STUB)
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
-    async exec(args) {
+    async exec(_args) {
       throw new JJError(
         'UNSUPPORTED_OPERATION',
         'Command execution is a CLI utility',
@@ -7075,7 +7422,7 @@ export async function createJJ(options) {
      * upload - Upload changes to Gerrit (STUB)
      * @throws {JJError} Always throws UNSUPPORTED_OPERATION
      */
-    async upload(args) {
+    async upload(_args) {
       throw new JJError(
         'UNSUPPORTED_OPERATION',
         'Gerrit integration not supported',

@@ -1,7 +1,16 @@
 # isomorphic-jj Roadmap
 
-**Current Version**: v1.0 Complete ✅
-**Last Updated**: 2025-11-02
+**Current Version**: v1.5.0 ✅ (tracks jj through v0.43)
+**Last Updated**: 2026-07-05
+
+> **v1.5 parity refresh:** caught up with Jujutsu releases v0.31–v0.43. Added
+> revset functions (`change_id`, `commit_id`, `subject`, `author_name`/`email`,
+> `committer*`, `signed`, `divergent`, `merges`, `forks`, `first_parent`,
+> `first_ancestors`, `fork_point`, `merge_point`, `exactly`, `present`,
+> `coalesce`, `remote_tags`, `ancestors(x, depth)`), made `tags()`/`remote_tags()`
+> actually resolve against the tag store, and added the `revert()`, `redo()`,
+> `sign()`/`unsign()`, `file.search()`, `bookmark.advance()`, and `tag.set()`
+> commands. See [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 

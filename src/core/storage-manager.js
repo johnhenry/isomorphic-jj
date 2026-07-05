@@ -111,7 +111,9 @@ export class Storage {
       // Clean up temp file
       try {
         await this.fs.promises.unlink(tmpPath);
-      } catch {}
+      } catch {
+        // Best-effort cleanup; ignore if the temp file is already gone.
+      }
 
       throw new JJError('STORAGE_WRITE_FAILED', `Failed to write ${path}: ${error.message}`, {
         path: fullPath,

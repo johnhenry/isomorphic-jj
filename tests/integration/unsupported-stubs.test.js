@@ -52,7 +52,7 @@ describe('Unsupported Feature Stubs', () => {
       it('should include helpful alternative in error', async () => {
         try {
           await jj.diffedit({ revision: 'abc' });
-          fail('Should have thrown error');
+          throw new Error('Should have thrown error');
         } catch (error) {
           expect(error.details.alternative).toBeDefined();
           expect(error.details.alternative).toContain('diff()');
@@ -98,7 +98,7 @@ describe('Unsupported Feature Stubs', () => {
       it('should suggest programmatic resolution', async () => {
         try {
           await jj.resolve({ tool: 'meld' });
-          fail('Should have thrown');
+          throw new Error('Should have thrown');
         } catch (error) {
           expect(error.details.alternative).toContain('conflicts.resolve()');
         }
@@ -120,7 +120,7 @@ describe('Unsupported Feature Stubs', () => {
       it('should suggest using formatters separately', async () => {
         try {
           await jj.fix();
-          fail('Should have thrown');
+          throw new Error('Should have thrown');
         } catch (error) {
           expect(error.details.alternative).toBeDefined();
           expect(error.details.reason).toContain('External formatters');
@@ -178,7 +178,7 @@ describe('Unsupported Feature Stubs', () => {
       it('should suggest using git.push() as alternative', async () => {
         try {
           await jj.gerrit.upload({ change: 'test' });
-          fail('Should have thrown');
+          throw new Error('Should have thrown');
         } catch (error) {
           expect(error.details.alternative).toContain('git.push()');
         }
@@ -186,39 +186,26 @@ describe('Unsupported Feature Stubs', () => {
     });
   });
 
-  describe('Cryptographic Features', () => {
-    describe('sign()', () => {
-      it('should throw error for signing', async () => {
-        await jj.write({ path: 'test.txt', data: 'test' });
-        const change = await jj.describe({ message: 'Test' });
+  // NOTE: As of v1.5, sign() / unsign() are implemented as metadata-based
+  // operations (not full GPG/SSH verification). See v1.5-features.test.js for
+  // their behavioral coverage. They are intentionally no longer stubs.
+  describe('Cryptographic Features (now implemented as metadata)', () => {
+    it('sign() records signature metadata instead of throwing', async () => {
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const change = await jj.describe({ message: 'Test' });
 
-        await expect(
-          jj.sign({ revision: change.changeId })
-        ).rejects.toMatchObject({
-          code: 'UNSUPPORTED_OPERATION',
-          message: expect.stringContaining('Cryptographic signing'),
-        });
-      });
-
-      it('should explain security implications', async () => {
-        try {
-          await jj.sign({ revision: 'abc' });
-          fail('Should have thrown');
-        } catch (error) {
-          expect(error.details.reason).toContain('key management');
-        }
-      });
+      const result = await jj.sign({ revision: change.changeId });
+      expect(result.signed).toBe(true);
+      expect(result.signature).toBeDefined();
     });
 
-    describe('unsign()', () => {
-      it('should throw error for unsigning', async () => {
-        await expect(
-          jj.unsign({ revision: 'abc' })
-        ).rejects.toMatchObject({
-          code: 'UNSUPPORTED_OPERATION',
-          message: expect.stringContaining('Cryptographic signing'),
-        });
-      });
+    it('unsign() clears signature metadata', async () => {
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const change = await jj.describe({ message: 'Test' });
+      await jj.sign({ revision: change.changeId });
+
+      const result = await jj.unsign({ revision: change.changeId });
+      expect(result.signed).toBe(false);
     });
   });
 
@@ -227,8 +214,6 @@ describe('Unsupported Feature Stubs', () => {
       const stubs = [
         () => jj.diffedit({}),
         () => jj.fix({}),
-        () => jj.sign({}),
-        () => jj.unsign({}),
         () => jj.util.completion(),
         () => jj.gerrit.upload({}),
       ];
@@ -236,7 +221,7 @@ describe('Unsupported Feature Stubs', () => {
       for (const stub of stubs) {
         try {
           await stub();
-          fail('Should have thrown');
+          throw new Error('Should have thrown');
         } catch (error) {
           expect(error.details.feature).toBeDefined();
           expect(error.code).toBe('UNSUPPORTED_OPERATION');
@@ -247,7 +232,7 @@ describe('Unsupported Feature Stubs', () => {
     it('should include reason in all stub errors', async () => {
       try {
         await jj.diffedit({});
-        fail('Should have thrown');
+        throw new Error('Should have thrown');
       } catch (error) {
         expect(error.details.reason).toBeDefined();
         expect(typeof error.details.reason).toBe('string');
@@ -257,7 +242,7 @@ describe('Unsupported Feature Stubs', () => {
     it('should include alternative in all stub errors', async () => {
       try {
         await jj.fix({});
-        fail('Should have thrown');
+        throw new Error('Should have thrown');
       } catch (error) {
         expect(error.details.alternative).toBeDefined();
         expect(typeof error.details.alternative).toBe('string');
