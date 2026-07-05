@@ -7,8 +7,8 @@ export class JJError extends Error {
   /**
    * @param {string} code - Error code (e.g., 'CHANGE_NOT_FOUND')
    * @param {string} message - Human-readable error message
-   * @param {Object} [context={}] - Additional error context
-   * @param {string} [context.suggestion] - User-actionable suggestion
+   * @param {Object.<string, any>} [context] - Additional error context. May
+   *   include a `suggestion` string plus any other diagnostic fields.
    */
   constructor(code, message, context = {}) {
     super(message);

@@ -84,7 +84,7 @@ function deepMergeJSON(base, ours, theirs) {
  * Attempts to merge JSON files intelligently by merging objects.
  * Falls back to conflict markers if merge isn't possible.
  */
-export async function jsonDriver({ path, content }) {
+export async function jsonDriver({ content }) {
   const { base, ours, theirs } = content;
 
   try {
@@ -134,7 +134,7 @@ export async function jsonDriver({ path, content }) {
  * - Take theirs for version (semver conflicts are hard)
  * - Merge other fields intelligently
  */
-export async function packageJsonDriver({ path, content }) {
+export async function packageJsonDriver({ content }) {
   const { base, ours, theirs } = content;
 
   try {
@@ -211,8 +211,10 @@ export async function packageJsonDriver({ path, content }) {
  *
  * Note: This is a simple implementation. For production use, consider
  * using a proper YAML library like 'js-yaml'.
+ *
+ * @param {{ path?: string, content: { base?: string, ours?: string, theirs?: string } }} args
  */
-export async function yamlDriver({ path, content }) {
+export async function yamlDriver({ content }) {
   const { base, ours, theirs } = content;
 
   // Simple YAML merge - just do text-based for now
@@ -247,8 +249,10 @@ export async function yamlDriver({ path, content }) {
  *
  * Attempts to merge markdown files by sections (headers).
  * Falls back to conflict markers for complex cases.
+ *
+ * @param {{ path?: string, content: { base?: string, ours?: string, theirs?: string } }} args
  */
-export async function markdownDriver({ path, content }) {
+export async function markdownDriver({ content }) {
   const { base, ours, theirs } = content;
 
   // Simple markdown merge - just text-based for now

@@ -1051,6 +1051,39 @@ export interface JJ {
   unabandon(args: UnabandonArgs): Promise<void>;
   absorb(args?: AbsorbArgs): Promise<AbsorbResult>;
 
+  /**
+   * Create a change that reverses another change (matches `jj revert`, v1.5).
+   * Canonical replacement for the deprecated `backout()`.
+   */
+  revert(args: { revision?: ChangeID; change?: ChangeID; changeId?: ChangeID; target?: ChangeID; message?: string }): Promise<{
+    changeId: ChangeID;
+    description: string;
+    revertedFrom: ChangeID;
+    backedOut: ChangeID;
+    fileSnapshot: Record<string, string>;
+  }>;
+
+  /** @deprecated Use {@link JJ.revert}. Retained for backward compatibility. */
+  backout(args: { revision?: ChangeID; change?: ChangeID; changeId?: ChangeID; target?: ChangeID; message?: string }): Promise<{
+    changeId: ChangeID;
+    description: string;
+    backedOut: ChangeID;
+    fileSnapshot: Record<string, string>;
+  }>;
+
+  /** Sign a change, recording signature metadata (matches `jj sign`, v1.5). */
+  sign(args?: { revision?: ChangeID; change?: ChangeID; changeId?: ChangeID; backend?: string; key?: string }): Promise<{
+    changeId: ChangeID;
+    signed: true;
+    signature: { status: string; backend: string; key: string | null; timestamp: string };
+  }>;
+
+  /** Remove signature metadata from a change (matches `jj unsign`, v1.5). */
+  unsign(args?: { revision?: ChangeID; change?: ChangeID; changeId?: ChangeID }): Promise<{
+    changeId: ChangeID;
+    signed: false;
+  }>;
+
   // Queries
   log(opts?: LogOptions & { count?: false }): Promise<LogEntry[]>;
   log(opts: LogOptions & { count: true }): Promise<number>;
@@ -1059,6 +1092,11 @@ export interface JJ {
 
   // Operations
   undo(opts?: UndoOptions): Promise<UndoResult>;
+  /** Re-apply an operation previously reverted by {@link JJ.undo} (matches `jj redo`, v1.5). */
+  redo(): Promise<{
+    redoneOperation: { description: string; undoneOpId: OperationID };
+    restoredState: { workingCopy: ChangeID; heads: ChangeID[]; fileCount: number };
+  }>;
   operations: {
     list(opts?: { limit?: number }): Promise<Operation[]>;
     at(args: { operation: OperationID }): Promise<JJ>;
@@ -1116,6 +1154,8 @@ export interface JJ {
     set(args: BookmarkSetArgs): Promise<{ name: string; changeId: ChangeID }>;
     create(args: BookmarkCreateArgs): Promise<{ name: string; changeId: ChangeID }>;
     move(args: BookmarkMoveArgs): Promise<{ name: string; from: ChangeID; to: ChangeID }>;
+    /** Move a bookmark forward only; rejects non-descendant targets (matches `jj bookmark advance`, v1.5). */
+    advance(args: { name: string; to?: ChangeID; target?: ChangeID; changeId?: ChangeID; change?: ChangeID; revision?: ChangeID }): Promise<{ name: string; from: ChangeID; to: ChangeID }>;
     delete(args: BookmarkDeleteArgs): Promise<{ deleted: string }>;
     rename(args: BookmarkRenameArgs): Promise<{ oldName: string; newName: string; changeId: ChangeID }>;
     track(args: BookmarkTrackArgs): Promise<{ name: string; remote: string; tracking: boolean }>;
@@ -1152,6 +1192,8 @@ export interface JJ {
   file: {
     show(args: ReadArgs): Promise<string | Uint8Array>;
     list(args?: ListFilesArgs): Promise<string[]>;
+    /** Search tracked file contents (matches `jj file search`, v1.5). Regex by default. */
+    search(args: { pattern: string; changeId?: ChangeID; change?: ChangeID; kind?: 'regex' | 'substring'; path?: string }): Promise<Array<{ path: string; lineNumber: number; line: string }>>;
     write(args: WriteArgs): Promise<WriteResult>;
     move(args: MoveFileArgs): Promise<MoveResult>;
     remove(args: RemoveArgs): Promise<RemoveResult>;
@@ -1270,6 +1312,15 @@ export interface JJ {
     reset(): Promise<void>;
     clear(): Promise<void>;
   };
+
+  // Tags (immutable references; `set` is the v1.5 upsert)
+  tag: {
+    create(args: { name: string; changeId?: ChangeID }): Promise<{ name: string; changeId: ChangeID }>;
+    /** Create or move a tag (matches `jj tag set`, v1.5). */
+    set(args: { name: string; changeId?: ChangeID; change?: ChangeID; revision?: ChangeID }): Promise<{ name: string; changeId: ChangeID; updated: boolean }>;
+    list(args?: { pattern?: string }): Promise<Array<{ name: string; changeId: ChangeID }>>;
+    delete(args: { name: string }): Promise<{ deleted: string }>;
+  };
 }
 
 // ============================================================================
@@ -1290,6 +1341,8 @@ export function createJJ(options: CreateJJOptions): Promise<JJ>;
 export class JJError extends Error {
   code: string;
   suggestion?: string;
+  context: Record<string, any>;
+  details: Record<string, any>;
 
-  constructor(code: string, message: string, details?: { suggestion?: string });
+  constructor(code: string, message: string, context?: { suggestion?: string } & Record<string, any>);
 }

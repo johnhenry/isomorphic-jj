@@ -8,7 +8,7 @@
  */
 
 import { JJError } from '../utils/errors.js';
-import { validateChangeId, validatePath } from '../utils/validation.js';
+import { validateChangeId } from '../utils/validation.js';
 import { generateId } from '../utils/id-generation.js';
 import path from 'path';
 

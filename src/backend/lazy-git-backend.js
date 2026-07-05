@@ -60,19 +60,15 @@ export class LazyGitBackend extends IsomorphicGitBackend {
         // Track as missing BEFORE attempting fetch
         this.missingObjects.add(oid);
 
-        // Only fetch if we haven't already tried
+        // Only fetch if we haven't already tried. If the fetch (or the retry
+        // read) fails, the error propagates directly — the object is already
+        // tracked as missing above.
         if (!this.fetchedObjects.has(oid)) {
-          try {
-            await this._fetchObject(oid);
-            this.fetchedObjects.add(oid);
+          await this._fetchObject(oid);
+          this.fetchedObjects.add(oid);
 
-            // Try reading again after fetch
-            return await this._gitReadBlob(oid);
-          } catch (fetchError) {
-            // Fetch failed, but we still track as missing
-            // Re-throw the fetch error
-            throw fetchError;
-          }
+          // Try reading again after fetch
+          return await this._gitReadBlob(oid);
         }
       }
 

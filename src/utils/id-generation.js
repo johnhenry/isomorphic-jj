@@ -22,7 +22,7 @@ export function generateChangeId() {
  *
  * Uses SHA-256 hash of operation content for integrity verification.
  *
- * @param {Object} operation - Operation data
+ * @param {Object.<string, any>} operation - Operation data
  * @returns {Promise<string>} 64-character lowercase hex string (SHA-256)
  */
 export async function generateOperationId(operation) {
