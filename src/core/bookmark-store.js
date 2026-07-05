@@ -204,7 +204,7 @@ export class BookmarkStore {
   /**
    * List all bookmarks (local and remote)
    *
-   * @returns {Promise<Array>} Array of bookmark objects
+   * @returns {Promise<Array<any>>} Array of bookmark objects
    */
   async list() {
     const result = [];

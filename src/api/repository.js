@@ -1175,7 +1175,7 @@ export async function createJJ(options) {
      * The file content and snapshot remain unchanged.
      *
      * @param {Object} [args={}] - Arguments
-     * @param {string} [args.revision] - Change ID to edit (defaults to working copy @)
+     * @param {string} [args.revision] - Change ID to edit (defaults to the working copy)
      * @param {string} [args.change] - Alias for revision
      * @param {string} [args.description] - Update the change description
      * @param {string} [args.message] - Alias for description
@@ -1566,7 +1566,7 @@ export async function createJJ(options) {
      * @param {string} [args.revset='all()'] - Revset expression to filter changes
      * @param {number} [args.limit] - Maximum number of changes to return
      * @param {boolean} [args.count=false] - If true, return count instead of changes (v0.36.0)
-     * @returns {Promise<Array|number>} Array of changes or count if args.count is true
+     * @returns {Promise<Array<any>|number>} Array of changes or count if args.count is true
      */
     async log(args = {}) {
       await graph.load();
@@ -2054,7 +2054,7 @@ export async function createJJ(options) {
      * @param {Object} [opts] - Options
      * @param {number} [opts.limit] - Maximum number of operations to return
      * @param {string} [opts.change] - Show operations for specific change
-     * @returns {Promise<Array>} Array of operations
+     * @returns {Promise<Array<any>>} Array of operations
      */
     async obslog(opts = {}) {
       await oplog.load();
@@ -2100,7 +2100,7 @@ export async function createJJ(options) {
        *
        * @param {Object} [opts] - Options
        * @param {number} [opts.limit] - Maximum number to return
-       * @returns {Promise<Array>} Array of operations
+       * @returns {Promise<Array<any>>} Array of operations
        */
       async list(opts = {}) {
         await oplog.load();
@@ -2497,8 +2497,8 @@ export async function createJJ(options) {
      * Squash source change into destination change
      *
      * @param {Object} args - Arguments
-     * @param {string} [args.source] - Source change ID to squash (defaults to @ - working copy)
-     * @param {string} [args.dest] - Destination change ID (if source is @, defaults to parent)
+     * @param {string} [args.source] - Source change ID to squash (defaults to the working copy)
+     * @param {string} [args.dest] - Destination change ID (if source is the working copy, defaults to parent)
      * @param {string} [args.into] - Alias for dest (matches JJ CLI)
      */
     async squash(args = {}) {
@@ -2661,7 +2661,7 @@ export async function createJJ(options) {
      * Abandon a change
      *
      * @param {Object} [args] - Arguments
-     * @param {string} [args.changeId] - Change ID to abandon (defaults to @ - working copy)
+     * @param {string} [args.changeId] - Change ID to abandon (defaults to the working copy)
      * @returns {Promise<Object>} The abandoned change object including changeId, description, and abandoned flag
      */
     async abandon(args = {}) {
@@ -3263,7 +3263,7 @@ export async function createJJ(options) {
      * @param {string} parentContent - Content from parent change
      * @param {string} currentContent - Current working copy content
      * @param {string[]} startingPoints - Change IDs to start search from (parent changeIds)
-     * @returns {Promise<Map>} Map of ancestorId -> { lines: Map(lineNum -> content), originalContent }
+     * @returns {Promise<Map<any, any>>} Map of ancestorId -> { lines: Map(lineNum -> content), originalContent }
      */
     async _findLineAncestors(filePath, parentContent, currentContent, startingPoints) {
       if (!startingPoints || startingPoints.length === 0) {
@@ -3433,9 +3433,9 @@ export async function createJJ(options) {
      *
      * @private
      * @param {string[]} descendantIds - List of descendant IDs to rebuild
-     * @param {Map} originalStates - Map of changeId -> original state before absorb
+     * @param {Map<any, any>} originalStates - Map of changeId -> original state before absorb
      * @param {string} stopAtChangeId - Don't rebuild this change
-     * @param {Set} directlyModified - Set of changeIds that were directly modified by absorb
+     * @param {Set<any>} directlyModified - Set of changeIds that were directly modified by absorb
      */
     async _rebuildDescendantsWithStates(descendantIds, originalStates, stopAtChangeId, directlyModified = new Set()) {
       // Sort descendants by depth (parents before children)
@@ -4353,7 +4353,7 @@ export async function createJJ(options) {
         /**
          * List Git remotes (matches `jj git remote list`)
          *
-         * @returns {Promise<Array>} List of remotes with names and URLs
+         * @returns {Promise<Array<any>>} List of remotes with names and URLs
          */
         async list() {
           if (!gitBackend) {
@@ -4988,7 +4988,7 @@ export async function createJJ(options) {
        *
        * @param {Object} args - Arguments
        * @param {string} args.pattern - Pattern to search for
-       * @param {string} [args.changeId] - Change to search (defaults to @)
+       * @param {string} [args.changeId] - Change to search (defaults to the working copy)
        * @param {string} [args.kind='regex'] - 'regex' or 'substring'
        * @param {string} [args.path] - Restrict search to a single file path
        * @returns {Promise<Array<{path: string, lineNumber: number, line: string}>>}
@@ -5079,7 +5079,7 @@ export async function createJJ(options) {
        * @param {Object} args - Arguments
        * @param {string} args.path - File path to annotate
        * @param {string} [args.changeId] - Change ID (defaults to working copy)
-       * @returns {Promise<Array>} Array of line annotations with changeId, author, timestamp, and content
+       * @returns {Promise<Array<any>>} Array of line annotations with changeId, author, timestamp, and content
        */
       async annotate(args) {
         if (!args || !args.path) {
@@ -5647,7 +5647,7 @@ export async function createJJ(options) {
       /**
        * List all bookmarks
        *
-       * @returns {Promise<Array>} Array of bookmarks with name and changeId
+       * @returns {Promise<Array<any>>} Array of bookmarks with name and changeId
        */
       async list() {
         await bookmarks.load();

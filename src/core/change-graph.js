@@ -108,7 +108,7 @@ export class ChangeGraph {
   /**
    * Get all changes
    * 
-   * @returns {Array} Array of all changes
+   * @returns {Array<any>} Array of all changes
    */
   getAll() {
     return Array.from(this.nodes.values());

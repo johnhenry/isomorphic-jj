@@ -81,9 +81,9 @@ export class ConflictModel {
    * @param {string} opts.baseChange - Common ancestor change
    * @param {string} opts.leftChange - Left side change
    * @param {string} opts.rightChange - Right side change
-   * @param {Map} opts.baseFiles - Files in base
-   * @param {Map} opts.leftFiles - Files in left
-   * @param {Map} opts.rightFiles - Files in right
+   * @param {Map<any, any>} opts.baseFiles - Files in base
+   * @param {Map<any, any>} opts.leftFiles - Files in left
+   * @param {Map<any, any>} opts.rightFiles - Files in right
    * @param {Object} opts.drivers - Custom merge drivers (v0.5)
    * @param {string} opts.workingCopyDir - Working copy directory for file writes (v0.5)
    * @returns {Array<Conflict>} Detected conflicts

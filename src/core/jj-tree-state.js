@@ -29,7 +29,7 @@ export class JJTreeState {
    * Write tree_state file
    *
    * @param {string} treeId - Tree ID as hex string (40 characters for SHA-1)
-   * @param {Array} fileStates - Array of file state objects
+   * @param {Array<any>} fileStates - Array of file state objects
    */
   async writeTreeState(treeId, fileStates = []) {
     // Load protobuf schema

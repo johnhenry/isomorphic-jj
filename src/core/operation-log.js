@@ -77,7 +77,7 @@ export class OperationLog {
   /**
    * Get all operations
    * 
-   * @returns {Promise<Array>} Array of all operations (chronological order)
+   * @returns {Promise<Array<any>>} Array of all operations (chronological order)
    */
   async list() {
     if (this.operations.length === 0 && this.headOperationId === null) {

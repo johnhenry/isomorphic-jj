@@ -126,7 +126,7 @@ export class Storage {
    * Read JSONL file (newline-delimited JSON)
    * 
    * @param {string} path - Relative path from .jj directory
-   * @returns {Promise<Array>} Array of parsed JSON objects
+   * @returns {Promise<Array<any>>} Array of parsed JSON objects
    */
   async readLines(path) {
     const fullPath = `${this.jjDir}/${path}`;

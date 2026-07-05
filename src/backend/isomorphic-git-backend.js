@@ -416,7 +416,7 @@ export class IsomorphicGitBackend {
    * @param {boolean} [opts.noTags] - Don't fetch tags (v0.4)
    * @param {Function} [opts.onProgress] - Progress callback
    * @param {Function} [opts.onAuth] - Authentication callback
-   * @returns {Promise<{fetchedRefs: Array, updatedRefs: Array}>} Fetch result
+   * @returns {Promise<{fetchedRefs: Array<any>, updatedRefs: Array<any>}>} Fetch result
    */
   async fetch(opts) {
     if (!this.http) {
@@ -490,7 +490,7 @@ export class IsomorphicGitBackend {
    * @param {boolean} [opts.force] - Allow non-fast-forward
    * @param {Function} [opts.onProgress] - Progress callback
    * @param {Function} [opts.onAuth] - Authentication callback
-   * @returns {Promise<{pushedRefs: Array, rejectedRefs: Array}>} Push result
+   * @returns {Promise<{pushedRefs: Array<any>, rejectedRefs: Array<any>}>} Push result
    */
   async push(opts) {
     if (!this.http) {
