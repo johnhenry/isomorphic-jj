@@ -199,6 +199,122 @@ export class WorkingCopy {
   }
 
   /**
+   * Recursively walk the working directory on disk and return every file path
+   * relative to the repo root (v1.6).
+   *
+   * This is the foundation of automatic snapshotting: unlike listFiles() (which
+   * only returns files already tracked in state), this discovers files created
+   * out-of-band (editors, shell, git checkout). The .git and .jj metadata dirs
+   * and node_modules are always excluded.
+   *
+   * @param {object} [opts]
+   * @param {string[]} [opts.exclude] - Additional top-level directory/file names to skip
+   * @returns {Promise<Array<string>>} Repo-relative file paths (forward-slash separated)
+   */
+  async walk(opts = {}) {
+    const exclude = new Set(['.git', '.jj', 'node_modules', ...(opts.exclude || [])]);
+    /** @type {string[]} */
+    const results = [];
+
+    /**
+     * @param {string} current - Absolute directory path
+     * @param {string} prefix - Repo-relative prefix
+     */
+    const recurse = async (current, prefix) => {
+      /** @type {string[]} */
+      let entries;
+      try {
+        entries = await this.fs.promises.readdir(current);
+      } catch {
+        return; // not a readable directory
+      }
+      for (const name of entries) {
+        if (exclude.has(name)) continue;
+        const full = `${current}/${name}`;
+        const rel = prefix ? `${prefix}/${name}` : name;
+        let stats;
+        try {
+          stats = await this.fs.promises.stat(full);
+        } catch {
+          // Some in-memory filesystems don't materialize directory entries;
+          // treat an unstattable name as a possible directory and recurse.
+          await recurse(full, rel);
+          continue;
+        }
+        if (stats.isDirectory()) {
+          await recurse(full, rel);
+        } else if (stats.isFile()) {
+          results.push(rel);
+        }
+      }
+    };
+
+    await recurse(this.dir, '');
+    return results;
+  }
+
+  /**
+   * Snapshot the working directory: scan the disk, then reconcile tracked file
+   * state with what actually exists (v1.6, mirrors jj's snapshot-before-command).
+   *
+   * Newly-seen files are tracked, changed files (by mtime/size) are updated, and
+   * tracked-but-missing files are untracked. Sparse patterns are honored.
+   *
+   * @param {object} [opts]
+   * @param {string[]} [opts.exclude] - Additional names to skip while walking
+   * @returns {Promise<{added: string[], modified: string[], deleted: string[]}>}
+   */
+  async snapshot(opts = {}) {
+    if (!this.state) {
+      await this.load();
+    }
+
+    const onDisk = await this.walk(opts);
+    const trackedBefore = new Set(Object.keys(this.state.fileStates));
+    const seen = new Set();
+    /** @type {string[]} */
+    const added = [];
+    /** @type {string[]} */
+    const modified = [];
+
+    for (const rel of onDisk) {
+      // Respect sparse checkout: don't snapshot files outside the sparse set.
+      if (!this.matchesSparsePatterns(rel)) continue;
+      seen.add(rel);
+
+      let stats;
+      try {
+        stats = await this.fs.promises.stat(`${this.dir}/${rel}`);
+      } catch {
+        continue;
+      }
+
+      const prev = this.state.fileStates[rel];
+      const next = { mtime: stats.mtime, size: stats.size, mode: stats.mode };
+
+      if (!prev) {
+        this.state.fileStates[rel] = next;
+        added.push(rel);
+      } else if (prev.mtime !== stats.mtime || prev.size !== stats.size) {
+        this.state.fileStates[rel] = next;
+        modified.push(rel);
+      }
+    }
+
+    /** @type {string[]} */
+    const deleted = [];
+    for (const rel of trackedBefore) {
+      if (!seen.has(rel)) {
+        delete this.state.fileStates[rel];
+        deleted.push(rel);
+      }
+    }
+
+    await this.save();
+    return { added, modified, deleted };
+  }
+
+  /**
    * List all tracked files in working copy
    *
    * @returns {Promise<Array<string>>} Array of tracked file paths

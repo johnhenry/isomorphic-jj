@@ -28,6 +28,7 @@ import path from 'path';
  * @param {any} [options.git] - isomorphic-git instance (enables Git backend)
  * @param {any} [options.http] - HTTP client for network operations
  * @param {string|any} [options.backend] - Backend name ('isomorphic-git', 'memory') or backend instance
+ * @param {boolean} [options.autoSnapshot] - Auto-snapshot the working dir before read/commit ops (default true)
  *
  * @returns {Promise<Record<string, any>>} Initialized JJ instance
  */
@@ -43,6 +44,11 @@ export async function createJJ(options) {
   const git = options.git;
   const http = options.http;
   const backend = options.backend;
+  // v1.6: automatically snapshot the working directory (disk-walk) before
+  // read/commit operations, so files created out-of-band (editor, shell, git
+  // checkout) are picked up — matching jj's "snapshot before every command".
+  // Enabled by default; pass { autoSnapshot: false } to opt out.
+  const autoSnapshot = options.autoSnapshot !== false;
 
   if (!fs) {
     throw new JJError('INVALID_CONFIG', 'Missing fs', {
@@ -122,6 +128,50 @@ export async function createJJ(options) {
     }
 
     return fileSnapshot;
+  };
+
+  /**
+   * Automatic working-copy snapshot (v1.6).
+   *
+   * Walks the working directory on disk and reconciles tracked file state so
+   * that files created/modified/deleted outside of jj.write() are reflected in
+   * status/describe/diff/file.* . No-op when autoSnapshot is disabled or the
+   * working copy isn't initialized yet. Best-effort: never throws.
+   *
+   * @returns {Promise<{added: string[], modified: string[], deleted: string[]} | null>}
+   */
+  const autoSnapshotWorkingCopy = async () => {
+    if (!autoSnapshot) return null;
+    try {
+      await workingCopy.load();
+    } catch {
+      return null; // repo not initialized yet
+    }
+
+    let result;
+    try {
+      result = await workingCopy.snapshot();
+    } catch {
+      return null; // best-effort; don't let snapshotting break the operation
+    }
+
+    // If the disk changed, refresh the working-copy change's content snapshot so
+    // read()/file.list()/file.search()/diff() reflect out-of-band edits.
+    if (result && (result.added.length || result.modified.length || result.deleted.length)) {
+      try {
+        await graph.load();
+        const wcId = workingCopy.getCurrentChangeId();
+        const change = await graph.getChange(wcId);
+        if (change) {
+          change.fileSnapshot = await snapshotFilesystem();
+          await graph.updateChange(change);
+        }
+      } catch {
+        // Best-effort content refresh; tracking state is already updated.
+      }
+    }
+
+    return result;
   };
 
   /**
@@ -487,6 +537,8 @@ export async function createJJ(options) {
 
       // Read from working copy if no changeId specified
       if (!args.changeId) {
+        // v1.6: reflect out-of-band changes before reading the working copy.
+        await autoSnapshotWorkingCopy();
         // Check sparse patterns
         await workingCopy.load();
         if (!workingCopy.matchesSparsePatterns(args.path)) {
@@ -594,6 +646,8 @@ export async function createJJ(options) {
     async listFiles(args = {}) {
       // List working copy files if no changeId specified
       if (!args.changeId) {
+        // v1.6: include files created on disk out-of-band.
+        await autoSnapshotWorkingCopy();
         await workingCopy.load();
         return await workingCopy.listFiles();
       }
@@ -1080,6 +1134,12 @@ export async function createJJ(options) {
       await workingCopy.load();
       await userConfig.load();
 
+      // v1.6: pick up files created/changed on disk out-of-band so they are
+      // captured by this describe (unless a specific revision is targeted).
+      if (!args.revision) {
+        await autoSnapshotWorkingCopy();
+      }
+
       // Support describing specific revision (not just working copy)
       const targetChangeId = args.revision || workingCopy.getCurrentChangeId();
       const change = await graph.getChange(targetChangeId);
@@ -1465,19 +1525,55 @@ export async function createJJ(options) {
       await workingCopy.load();
       await conflicts.load();
 
+      // Dirty tracked files (computed before reconciling so modifications to
+      // already-tracked files are still reported).
+      const modified = await workingCopy.getModifiedFiles();
+
+      // v1.6: snapshot the working directory so files added/removed on disk
+      // out-of-band show up in status.
+      const snap = await autoSnapshotWorkingCopy();
+
       const currentChangeId = workingCopy.getCurrentChangeId();
       const change = await graph.getChange(currentChangeId);
-      const modified = await workingCopy.getModifiedFiles();
       // Only show unresolved conflicts in status
       const activeConflicts = conflicts.listConflicts({ resolved: false });
 
       return {
         workingCopy: change,
         modified,
-        added: [],
-        removed: [],
+        added: snap ? snap.added : [],
+        removed: snap ? snap.deleted : [],
         conflicts: activeConflicts,
       };
+    },
+
+    /**
+     * Explicitly snapshot the working directory (v1.6).
+     *
+     * Walks the working copy on disk and reconciles tracked file state and the
+     * working-copy change's content, picking up files created/modified/deleted
+     * outside of jj.write() (editor, shell, git checkout). This runs
+     * automatically before status/describe/diff/read/file.* unless the repo was
+     * created with `{ autoSnapshot: false }`; call this to trigger it manually.
+     *
+     * @returns {Promise<{added: string[], modified: string[], deleted: string[]}>}
+     */
+    async snapshot() {
+      await graph.load();
+      await workingCopy.load();
+      const result = await workingCopy.snapshot();
+      // Refresh the working-copy change's content snapshot from disk.
+      try {
+        const wcId = workingCopy.getCurrentChangeId();
+        const change = await graph.getChange(wcId);
+        if (change) {
+          change.fileSnapshot = await snapshotFilesystem();
+          await graph.updateChange(change);
+        }
+      } catch {
+        // Best-effort content refresh.
+      }
+      return result;
     },
 
     /**
@@ -4974,6 +5070,12 @@ export async function createJJ(options) {
           });
         }
 
+        // v1.6: when searching the working copy, snapshot the disk first so
+        // out-of-band files are searchable.
+        if (!args.changeId && !args.change) {
+          await autoSnapshotWorkingCopy();
+        }
+
         await graph.load();
         const changeId = args.changeId || args.change || workingCopy.getCurrentChangeId();
         const change = await graph.getChange(changeId);
@@ -6834,6 +6936,12 @@ export async function createJJ(options) {
      * @returns {Promise<Object>} Diff result with changed files
      */
     async diff(args = {}) {
+      // v1.6: snapshot the working copy first so diffs against @ reflect
+      // out-of-band edits (only when diffing the working copy, i.e. no explicit `to`).
+      if (!args.to) {
+        await autoSnapshotWorkingCopy();
+      }
+
       await graph.load();
       await workingCopy.load();
 

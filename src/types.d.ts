@@ -294,6 +294,12 @@ export interface CreateJJOptions {
   backend?: string | any;
   /** Event hooks */
   hooks?: Hooks;
+  /**
+   * Automatically snapshot the working directory (disk-walk) before
+   * read/commit operations so out-of-band file changes are picked up.
+   * Defaults to `true`; set `false` to only track files written via jj.write().
+   */
+  autoSnapshot?: boolean;
 }
 
 /**
@@ -1042,6 +1048,13 @@ export interface JJ {
   edit(args: EditArgs): Promise<void>;
   status(): Promise<Status>;
   stats(): Promise<RepositoryStats>;
+  /**
+   * Snapshot the working directory (disk-walk), reconciling tracked file state
+   * and the working-copy change's content with what exists on disk (v1.6).
+   * Runs automatically before status/describe/diff/read/file.* unless the repo
+   * was created with `{ autoSnapshot: false }`.
+   */
+  snapshot(): Promise<{ added: string[]; modified: string[]; deleted: string[] }>;
 
   // History editing
   squash(args: SquashArgs): Promise<void>;

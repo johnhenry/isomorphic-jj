@@ -4,6 +4,35 @@ All notable changes to isomorphic-jj are documented here. The project tracks the
 [Jujutsu (jj)](https://github.com/jj-vcs/jj) CLI; each release notes the upstream
 jj version whose semantics it targets.
 
+## [1.6.0] — Automatic working-copy snapshotting
+
+Closes a long-standing fidelity gap: the library now **walks the working
+directory on disk** and reconciles tracked state before read/commit operations,
+so files created, modified, or deleted **out-of-band** (an editor, the shell,
+`git checkout`) are picked up — matching jj's "snapshot before every command".
+Previously only files written through `jj.write()` were ever tracked, so
+`status`/`describe`/`diff`/`file.search`/`read` couldn't see anything else.
+
+### Added
+
+- `WorkingCopy.walk()` — recursively lists working-directory files (excluding
+  `.git`, `.jj`, `node_modules`), robust across Node fs and in-memory fses.
+- `WorkingCopy.snapshot()` — reconciles tracked file state with disk, returning
+  `{ added, modified, deleted }`; honors sparse patterns.
+- `jj.snapshot()` — public method to trigger a snapshot explicitly.
+- `createJJ({ autoSnapshot })` option (default `true`) to opt out of the
+  automatic behavior.
+
+### Changed
+
+- `describe()`, `status()`, `diff()`, `read()`, `file.list()`, and
+  `file.search()` now auto-snapshot the working copy first (when operating on
+  `@`), so they reflect on-disk reality. `status()` now returns real `added` and
+  `removed` lists (previously always empty).
+- A tracked file deleted on disk is now gracefully untracked on the next
+  snapshot instead of making `describe()` throw `SNAPSHOT_FILE_FAILED` (that
+  path still applies under `{ autoSnapshot: false }`).
+
 ## [1.5.0] — Parity refresh (tracks jj through v0.43)
 
 This release brings isomorphic-jj up to date with Jujutsu releases v0.31–v0.43,
