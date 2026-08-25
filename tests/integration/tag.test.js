@@ -176,6 +176,68 @@ describe('Tag Management', () => {
     });
   });
 
+  describe('tag.track(), untrack() (jj v0.44)', () => {
+    it('should track and untrack a remote tag', async () => {
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const change = await jj.describe({ message: 'Test' });
+      await jj.tag.create({ name: 'v1.0.0', changeId: change.changeId });
+
+      const trackResult = await jj.tag.track({ name: 'v1.0.0', remote: 'origin' });
+      expect(trackResult).toMatchObject({ name: 'v1.0.0', remote: 'origin', tracking: true });
+
+      const untrackResult = await jj.tag.untrack({ name: 'v1.0.0' });
+      expect(untrackResult).toMatchObject({
+        name: 'v1.0.0',
+        tracking: false,
+        wasTracking: true,
+      });
+    });
+
+    it('should default to remote "origin" when none given', async () => {
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const change = await jj.describe({ message: 'Test' });
+      await jj.tag.create({ name: 'v2.0.0', changeId: change.changeId });
+
+      const result = await jj.tag.track({ name: 'v2.0.0' });
+      expect(result.remote).toBe('origin');
+    });
+
+    it('should report wasTracking: false when untracking a tag that was not tracked', async () => {
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const change = await jj.describe({ message: 'Test' });
+      await jj.tag.create({ name: 'v3.0.0', changeId: change.changeId });
+
+      const result = await jj.tag.untrack({ name: 'v3.0.0' });
+      expect(result.wasTracking).toBe(false);
+    });
+
+    it('should require a tag name', async () => {
+      await expect(jj.tag.track({})).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+      await expect(jj.tag.untrack({})).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
+    });
+
+    it('should include tracking info in tag.list() once tracked', async () => {
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const change = await jj.describe({ message: 'Test' });
+      await jj.tag.create({ name: 'v4.0.0', changeId: change.changeId });
+      await jj.tag.track({ name: 'v4.0.0', remote: 'upstream' });
+
+      const tags = await jj.tag.list({ pattern: 'v4.0.0' });
+      expect(tags[0].tracking).toMatchObject({ remote: 'upstream', ref: 'v4.0.0' });
+    });
+
+    it('should persist tracking state across reloads', async () => {
+      await jj.write({ path: 'test.txt', data: 'test' });
+      const change = await jj.describe({ message: 'Test' });
+      await jj.tag.create({ name: 'v5.0.0', changeId: change.changeId });
+      await jj.tag.track({ name: 'v5.0.0', remote: 'origin' });
+
+      const reopened = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+      const tags = await reopened.tag.list({ pattern: 'v5.0.0' });
+      expect(tags[0].tracking).toMatchObject({ remote: 'origin' });
+    });
+  });
+
   describe('Tag immutability', () => {
     it('should not allow moving tags to different change', async () => {
       await jj.write({ path: 'v1.txt', data: 'v1' });

@@ -80,6 +80,7 @@ isomorphic-jj v1.0 now implements virtually all commonly-used JJ CLI commands:
 - **`git.remote.*`** - Complete remote management (list, add, remove, rename, setUrl)
 - **`bookmark.rename()`** - Rename bookmarks
 - **`bookmark.track/untrack/forget()`** - Remote bookmark management
+- **`tag.track/untrack()`** - Remote tag management (jj v0.44)
 - **`config.*`** - Configuration management (get, set, list)
 - **`diff()`** - Show file differences between revisions
 - **`next()` / `prev()`** - Navigate between parent/child revisions
@@ -92,7 +93,7 @@ isomorphic-jj v1.0 now implements virtually all commonly-used JJ CLI commands:
 See [JJ_CLI_PARITY.md](./JJ_CLI_PARITY.md) for complete feature comparison.
 
 ### Testing & Quality
-- **1701 tests** passing — ~97% statement / 91% branch coverage (v1.0–v1.7)
+- **1714 tests** passing — ~97% statement / 91% branch coverage (v1.0–v0.1.0 post-rename)
 - **100% backward compatible** - All existing code continues to work
 - **Zero breaking changes** - Deprecated features show warnings but still function
 
@@ -902,9 +903,9 @@ repo/
 
 ## Project Status
 
-**Current Version**: v1.7.0
-**Test Coverage**: 1701 tests, ~97% statements / 91% branches
-**JJ CLI parity**: tracks Jujutsu through v0.43
+**Current Version**: v0.1.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj` v1.7.0)
+**Test Coverage**: 1714 tests, ~97% statements / 91% branches
+**JJ CLI parity**: tracks Jujutsu through v0.44
 **Status**: Ready for experimentation and prototyping
 
 **Completed:**
@@ -915,6 +916,7 @@ repo/
 - ✅ v0.5: Custom merge drivers, enhanced revsets (time-based, graph analytics), conflict resolution enhancements
 - ✅ v1.0: Full JJ CLI semantic parity, complete `file.*`/`operations.*`/`git.*` namespaces
 - ✅ v1.5: Parity refresh tracking jj through **v0.43** — new revsets (`change_id`, `commit_id`, `subject`, `author_name`/`email`, `committer*`, `signed`, `divergent`, `merges`, `forks`, `first_parent`, `first_ancestors`, `fork_point`, `merge_point`, `exactly`, `present`, `coalesce`, `remote_tags`, `ancestors(x, depth)`), working `tags()`/`remote_tags()` revsets, and new commands: `revert()`, `redo()`, `sign()`/`unsign()`, `file.search()`, `bookmark.advance()`, `tag.set()`. See [CHANGELOG.md](./CHANGELOG.md).
+- ✅ v0.1.0 (post-rename): Parity refresh tracking jj through **v0.44** — `tag.track()`/`tag.untrack()`, the `builtin_log()` revset alias, and `file.search({ nameOnly: true })`; `git_refs()`/`git_head()` documented as deprecated (jj removed both in v0.43). See [CHANGELOG.md](./CHANGELOG.md) for what was deliberately left for a maintainer call (`jj run`, fetch-time remote tag/bookmark import).
 
 See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELOG.md) for the release history.
 

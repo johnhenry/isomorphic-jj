@@ -56,18 +56,36 @@ export class TagStore {
     this.fs = fs;
     this.jjDir = jjDir;
     this.tagsFile = `${jjDir}/store/tags.json`;
+    /**
+     * Tracking info for local tags mirrored from a remote (jj v0.44 `jj tag
+     * track`/`untrack`). Keyed by local tag name: { remote, remoteName }.
+     * @type {Record<string, any>}
+     */
+    this.tracking = {};
   }
 
   /**
-   * Loads tags from storage
+   * Loads tags (and their remote-tracking info, jj v0.44) from storage
    * @returns {Promise<Record<string, any>>} Map of tag name to changeId
    */
   async load() {
     try {
       const data = await this.fs.promises.readFile(this.tagsFile, 'utf8');
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+
+      // v0.44: tags.json may be either the legacy flat `{ name: changeId }`
+      // map, or the newer `{ tags: {...}, tracked: {...} }` shape that also
+      // carries remote-tracking state. Support both for backward compat.
+      if (parsed && typeof parsed === 'object' && 'tags' in parsed) {
+        this.tracking = parsed.tracked || {};
+        return parsed.tags || {};
+      }
+
+      this.tracking = {};
+      return parsed || {};
     } catch (error) {
       if (error.code === 'ENOENT') {
+        this.tracking = {};
         return {};
       }
       throw error;
@@ -75,7 +93,7 @@ export class TagStore {
   }
 
   /**
-   * Saves tags to storage
+   * Saves tags (and their remote-tracking info, jj v0.44) to storage
    * @param {Object} tags - Map of tag name to changeId
    * @returns {Promise<void>}
    */
@@ -87,7 +105,10 @@ export class TagStore {
     } catch (err) {
       // Directory might already exist, ignore
     }
-    await this.fs.promises.writeFile(this.tagsFile, JSON.stringify(tags, null, 2));
+    await this.fs.promises.writeFile(
+      this.tagsFile,
+      JSON.stringify({ tags, tracked: this.tracking || {} }, null, 2)
+    );
   }
 
   /**
@@ -116,9 +137,11 @@ export class TagStore {
   }
 
   /**
-   * Lists all tags, optionally filtered by pattern
+   * Lists all tags, optionally filtered by pattern. Each entry also carries
+   * a `tracking: { remote, ref }` field when the tag is tracking a remote
+   * (jj v0.44 `jj tag track`).
    * @param {string} [pattern] - Optional glob pattern
-   * @returns {Promise<Array<{name: string, changeId: string}>>}
+   * @returns {Promise<Array<Record<string, any>>>}
    */
   async list(pattern) {
     const tags = await this.load();
@@ -129,10 +152,17 @@ export class TagStore {
       tagNames = tagNames.filter((name) => matchesPattern(name, pattern));
     }
 
-    return tagNames.map((name) => ({
-      name,
-      changeId: tags[name],
-    }));
+    return tagNames.map((name) => {
+      /** @type {Record<string, any>} */
+      const tag = { name, changeId: tags[name] };
+      if (this.tracking && this.tracking[name]) {
+        tag.tracking = {
+          remote: this.tracking[name].remote,
+          ref: this.tracking[name].remoteName || name,
+        };
+      }
+      return tag;
+    });
   }
 
   /**

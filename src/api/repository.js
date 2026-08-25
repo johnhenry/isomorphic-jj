@@ -5059,10 +5059,17 @@ export async function createJJ(options) {
        * Searches the tracked files of a change (defaults to the working copy)
        * for lines matching a pattern. Following jj v0.41, the pattern is treated
        * as a regular expression by default; pass `{ kind: 'substring' }` for a
-       * literal search.
+       * literal search. isomorphic-jj has always returned the matched line
+       * (and its 1-based `lineNumber`) alongside the path, which is what jj
+       * v0.44 made the CLI's new default (`jj file search` used to print only
+       * file paths). Pass `{ nameOnly: true }` for the pre-v0.44 CLI
+       * behavior — a deduplicated list of matching file paths, matching the
+       * new `--name-only` flag.
        *
-       * @param {Record<string, any>} args - Arguments
-       * @returns {Promise<Array<{path: string, lineNumber: number, line: string}>>}
+       * @param {Record<string, any>} args - Arguments. Pass `nameOnly: true`
+       *   to return only unique matching file paths instead of per-line
+       *   matches (jj v0.44 `--name-only`)
+       * @returns {Promise<Array<{path: string, lineNumber: number, line: string}>|Array<string>>}
        */
       async search(args) {
         if (!args || !args.pattern) {
@@ -5112,6 +5119,10 @@ export async function createJJ(options) {
               results.push({ path: filePath, lineNumber: index + 1, line });
             }
           });
+        }
+
+        if (args.nameOnly) {
+          return Array.from(new Set(results.map((r) => r.path)));
         }
         return results;
       },
@@ -6248,10 +6259,11 @@ export async function createJJ(options) {
       },
 
       /**
-       * List all tags
+       * List all tags. Each entry also carries a `tracking: { remote, ref }`
+       * field when the tag is tracking a remote (jj v0.44 `jj tag track`).
        *
        * @param {Record<string, any>} [args] - Optional filter arguments
-       * @returns {Promise<Array<{name: string, changeId: string}>>} List of tags
+       * @returns {Promise<Array<Record<string, any>>>} List of tags
        */
       async list(args) {
         const pattern = args?.pattern;
@@ -6289,6 +6301,94 @@ export async function createJJ(options) {
         });
 
         return { deleted: args.name };
+      },
+
+      /**
+       * Associate a local tag with a remote tag so it is updated on fetch
+       * (matches `jj tag track`, new in jj v0.44).
+       *
+       * jj v0.44 made tags remote-trackable just like bookmarks: fetched
+       * tags are tracked by default, and `jj tag track`/`untrack` let you
+       * opt individual tags in or out by hand. isomorphic-jj doesn't (yet)
+       * auto-import remote tags during `git.fetch()` — see CHANGELOG — so
+       * this records tracking intent/state the same way `bookmark.track()`
+       * does, without changing fetch's own behavior.
+       *
+       * @param {Record<string, any>} args - Tag arguments: `{ name, remote }`
+       *   (`name` is the local tag name to track; `remote` defaults to `'origin'`)
+       * @returns {Promise<{name: string, remote: string, tracking: boolean}>}
+       */
+      async track(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing tag name', {
+            suggestion: 'Provide tag name: { name: "v1.0.0", remote: "origin" }',
+          });
+        }
+
+        const remote = args.remote || 'origin';
+        const remoteTagName = `${remote}/${args.name}`;
+
+        const tagMap = await tags.load();
+        /** @type {Record<string, any>} */
+        const tracking = tags.tracking || {};
+        tracking[args.name] = { remote, remoteName: args.name };
+        tags.tracking = tracking;
+        await tags.save(tagMap);
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `tag track ${args.name} from ${remote}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: { [remoteTagName]: true },
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, remote, tracking: true };
+      },
+
+      /**
+       * Stop tracking a remote tag (matches `jj tag untrack`, new in jj v0.44).
+       *
+       * @param {Record<string, any>} args - Tag arguments: `{ name }`, the
+       *   local tag name to stop tracking
+       * @returns {Promise<{name: string, tracking: boolean, wasTracking: boolean}>}
+       */
+      async untrack(args) {
+        if (!args || !args.name) {
+          throw new JJError('INVALID_ARGUMENT', 'Missing tag name', {
+            suggestion: 'Provide tag name: { name: "v1.0.0" }',
+          });
+        }
+
+        const tagMap = await tags.load();
+        /** @type {Record<string, any>} */
+        const tracking = tags.tracking || {};
+        const wasTracking = tracking[args.name];
+        delete tracking[args.name];
+        tags.tracking = tracking;
+        await tags.save(tagMap);
+
+        // Record operation
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `tag untrack ${args.name}`,
+          parents: [],
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+
+        return { name: args.name, tracking: false, wasTracking: !!wasTracking };
       },
     },
 

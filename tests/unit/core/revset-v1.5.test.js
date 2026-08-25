@@ -168,6 +168,17 @@ describe('v1.5 revset functions', () => {
     });
   });
 
+  describe('builtin_log() (jj v0.44)', () => {
+    it('is an alias for the built-in default log revset (all())', async () => {
+      const viaBuiltin = await revset.evaluate('builtin_log()');
+      const viaAll = await revset.evaluate('all()');
+      expect(viaBuiltin.sort()).toEqual(viaAll.sort());
+    });
+    it('composes with other revset operators', async () => {
+      expect(await revset.evaluate(`builtin_log() & ${A}`)).toEqual([A]);
+    });
+  });
+
   describe('exactly / present / coalesce', () => {
     it('exactly(x, n) passes when the count matches', async () => {
       expect(await revset.evaluate(`exactly(${A}, 1)`)).toEqual([A]);

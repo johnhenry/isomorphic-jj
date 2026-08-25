@@ -385,7 +385,7 @@ export class RevsetEngine {
    * @returns {string}
    */
   _suggestion() {
-    return 'Use @, @-, @+, bookmark(name), all(), none(), root(), visible_heads(), git_refs(), git_head(), ancestors(revset[, depth]), author(name), author_name(x), author_email(x), committer(x), committer_name(x), committer_email(x), subject(pattern), description(text), change_id(prefix), commit_id(prefix), empty(), mine(), merge(), merges(), forks(), signed(), divergent(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), first_parent(revset), first_ancestors(revset), fork_point(revset), merge_point(revset), exactly(revset, n), present(revset), coalesce(a, b, ...), latest(revset, [count]), tags([pattern]), remote_tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID';
+    return 'Use @, @-, @+, bookmark(name), all(), builtin_log(), none(), root(), visible_heads(), ancestors(revset[, depth]), author(name), author_name(x), author_email(x), committer(x), committer_name(x), committer_email(x), subject(pattern), description(text), change_id(prefix), commit_id(prefix), empty(), mine(), merge(), merges(), forks(), signed(), divergent(), file(pattern), roots(revset), heads(revset), parents(revset), children(revset), first_parent(revset), first_ancestors(revset), fork_point(revset), merge_point(revset), exactly(revset, n), present(revset), coalesce(a, b, ...), latest(revset, [count]), tags([pattern]), remote_tags([pattern]), bookmarks([pattern]), last(N[dh]), since(date), between(start, end), descendants(rev[, depth]), common_ancestor(rev1, rev2), range(base..tip), diverge_point(rev1, rev2), connected(rev1, rev2), operators (x-, x+), set operations (& | ~), or a direct change ID (git_refs()/git_head() still work but are deprecated — jj removed them in v0.43; use bookmarks()/tags()/@ instead)';
   }
 
   /**
@@ -515,6 +515,16 @@ export class RevsetEngine {
         await this.graph.load();
         return this.graph.getAll().map((c) => c.changeId);
 
+      // `builtin_log()` (jj v0.44) is the revset the built-in `jj log` uses
+      // when no user override is configured. isomorphic-jj's `log()` already
+      // defaults to `all()` when no revset is given (see `jj.log()`), so
+      // `builtin_log()` is a pure alias for that same default — this lets
+      // callers compose it (e.g. `builtin_log() & mine()`) instead of
+      // duplicating `all()`.
+      case 'builtin_log':
+        await this.graph.load();
+        return this.graph.getAll().map((c) => c.changeId);
+
       case 'none':
         return [];
 
@@ -545,6 +555,13 @@ export class RevsetEngine {
         return allChanges.filter((c) => !hasChildren.has(c.changeId)).map((c) => c.changeId);
       }
 
+      // `git_refs()` and `git_head()` are deprecated compatibility shims.
+      // Upstream jj deprecated both in favor of `bookmarks()`/`tags()` and
+      // `@`, then removed them outright in jj v0.43 (revset/template calls
+      // to either now error in real jj). isomorphic-jj keeps them working
+      // rather than hard-breaking existing callers, but they are no longer
+      // advertised in `_suggestion()` — prefer `bookmarks([pattern])` /
+      // `tags([pattern])` / `@` instead.
       case 'git_refs': {
         if (!this.bookmarkStore) return [];
         await this.bookmarkStore.load();
