@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.0
+
+- **Renamed: `isomorphic-jj` is now `@johnhenry/isomorphic-jj`, restarted at 0.0.0.** Same library, same API — a new address and era, not a maturity signal (1.7.0 lineage).
+
+  ```sh
+  npm install @johnhenry/isomorphic-jj
+  ```
+
+
 All notable changes to isomorphic-jj are documented here. The project tracks the
 [Jujutsu (jj)](https://github.com/jj-vcs/jj) CLI; each release notes the upstream
 jj version whose semantics it targets.

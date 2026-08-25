@@ -1,5 +1,9 @@
 # isomorphic-jj
 
+> Previously published as `isomorphic-jj` (last release 1.7.0, now deprecated).
+> Renamed to `@johnhenry/isomorphic-jj` and restarted at 0.0.0 on import into
+> the @johnhenry family — a new address and era, not a maturity signal.
+
 [![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
 [![test coverage](https://img.shields.io/badge/tests-1701%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
 [![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
@@ -14,7 +18,7 @@
 - 🌐 **True isomorphic**—same API in Node, browsers, and Web Workers
 
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import git from 'isomorphic-git';
 import fs from 'fs';
 
@@ -97,7 +101,7 @@ See [JJ_CLI_PARITY.md](./JJ_CLI_PARITY.md) for complete feature comparison.
 ### Installation
 
 ```bash
-npm install isomorphic-jj isomorphic-git
+npm install @johnhenry/isomorphic-jj isomorphic-git
 ```
 
 For browsers, also install:
@@ -108,7 +112,7 @@ npm install @isomorphic-git/lightning-fs
 ### Basic Workflow
 
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import git from 'isomorphic-git';
 import fs from 'fs';
 import http from 'isomorphic-git/http/node';
@@ -147,8 +151,8 @@ console.log(log);
 ### Browser Usage
 
 ```javascript
-import { createJJ } from 'isomorphic-jj';
-import { createBrowserFS } from 'isomorphic-jj/browser';
+import { createJJ } from '@johnhenry/isomorphic-jj';
+import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web';
 
@@ -494,7 +498,7 @@ await jj.undo();
 Merge drivers enable smart merging of structured files like JSON, package.json, and YAML:
 
 ```javascript
-import { jsonDriver, packageJsonDriver, yamlDriver, markdownDriver } from 'isomorphic-jj';
+import { jsonDriver, packageJsonDriver, yamlDriver, markdownDriver } from '@johnhenry/isomorphic-jj';
 
 // Register merge drivers for different file types
 jj.mergeDrivers.register({
@@ -625,7 +629,7 @@ const bookmarks = await jj.bookmark.list();
 ### Browser Support
 
 ```javascript
-import { createBrowserFS, requestPersistentStorage } from 'isomorphic-jj/browser';
+import { createBrowserFS, requestPersistentStorage } from '@johnhenry/isomorphic-jj/browser';
 
 // Request persistent storage (prevents eviction)
 const persistent = await requestPersistentStorage();
@@ -634,14 +638,14 @@ const persistent = await requestPersistentStorage();
 const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
 
 // Check browser capabilities
-import { detectCapabilities } from 'isomorphic-jj/browser';
+import { detectCapabilities } from '@johnhenry/isomorphic-jj/browser';
 const caps = detectCapabilities();
 if (caps.indexedDB && caps.serviceWorker) {
   // Enable offline support
 }
 
 // Get storage quota
-import { getStorageQuota } from 'isomorphic-jj/browser';
+import { getStorageQuota } from '@johnhenry/isomorphic-jj/browser';
 const quota = await getStorageQuota();
 console.log(`Using ${quota.percentage}% of available storage`);
 ```
@@ -794,7 +798,7 @@ Full API documentation available in [TypeScript definitions](./src/types.d.ts).
 ### Main Interface
 
 ```typescript
-import { createJJ, type JJ, type CreateJJOptions } from 'isomorphic-jj';
+import { createJJ, type JJ, type CreateJJOptions } from '@johnhenry/isomorphic-jj';
 
 const jj: JJ = await createJJ(options: CreateJJOptions);
 ```
