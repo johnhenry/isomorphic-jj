@@ -110,6 +110,15 @@ describe('v1.5 features', () => {
     it('throws when the pattern is missing', async () => {
       await expect(jj.file.search({})).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' });
     });
+
+    it('nameOnly: true returns a deduplicated list of matching paths (jj v0.44 --name-only)', async () => {
+      await jj.write({ path: 'notes.txt', data: 'TODO: one\nnothing\nTODO: two' });
+      await jj.write({ path: 'other.txt', data: 'no match here' });
+      await jj.describe({ message: 'notes' });
+
+      const results = await jj.file.search({ pattern: 'TODO', nameOnly: true });
+      expect(results).toEqual(['notes.txt']);
+    });
   });
 
   describe('bookmark.advance()', () => {

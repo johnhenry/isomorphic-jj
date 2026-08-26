@@ -1,6 +1,6 @@
 {
-  "name": "isomorphic-jj",
-  "version": "1.7.0",
+  "name": "@johnhenry/isomorphic-jj",
+  "version": "0.1.0",
   "description": "A pure-JavaScript library that brings Jujutsu (jj) version control semantics to Node.js and browsers",
   "type": "module",
   "bin": {
@@ -58,12 +58,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/johnhenry/isomorphic-jj.git"
+    "url": "git+https://github.com/johnhenry/isomorphic-jj.git"
   },
   "bugs": {
     "url": "https://github.com/johnhenry/isomorphic-jj/issues"
   },
-  "homepage": "https://github.com/johnhenry/isomorphic-jj#readme",
+  "homepage": "https://opensource.johnhenry.me/isomorphic-jj/",
   "peerDependencies": {
     "isomorphic-git": "^1.24.0"
   },

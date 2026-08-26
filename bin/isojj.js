@@ -24,6 +24,7 @@ const BOOLEAN_FLAGS = new Set([
   'noTags',
   'allowNew',
   'preserveSnapshot',
+  'nameOnly',
 ]);
 
 /** Coerce a raw flag-value string to a real boolean when it looks like one. */
@@ -179,7 +180,7 @@ History editing:
 Files:
   file.list [--revision <id>]   List tracked files
   file.show <path>              Show file contents
-  file.search --pattern <re>    Search file contents        (jj file search)
+  file.search --pattern <re> [--nameOnly]   Search file contents (jj file search)
   file.annotate --path <p>      Blame-style annotation
 
 Bookmarks & tags:
@@ -188,6 +189,8 @@ Bookmarks & tags:
   bookmark.list
   tag.set --name <n> --changeId <id>       Create or move a tag
   tag.list
+  tag.track --name <n> [--remote <r>]      Track a remote tag (jj v0.44)
+  tag.untrack --name <n>                   Stop tracking a remote tag
 
 Signing:
   sign [--revision <id>] [--backend ssh --key <k>]

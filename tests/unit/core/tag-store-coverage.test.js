@@ -114,6 +114,35 @@ describe('TagStore - coverage', () => {
     });
   });
 
+  describe('tracking (jj v0.44 tag track/untrack)', () => {
+    it('should persist tracking info across load/save cycles', async () => {
+      await tags.create('v1.0.0', tid(1));
+      const tagMap = await tags.load();
+      tags.tracking = { 'v1.0.0': { remote: 'origin', remoteName: 'v1.0.0' } };
+      await tags.save(tagMap);
+
+      const reloaded = new TagStore(fs, jjDir);
+      await reloaded.load();
+      expect(reloaded.tracking).toEqual({
+        'v1.0.0': { remote: 'origin', remoteName: 'v1.0.0' },
+      });
+      // The tag data itself must still be intact.
+      expect(await reloaded.get('v1.0.0')).toBe(tid(1));
+    });
+
+    it('should read a legacy flat-format tags.json (no tracking) without error', async () => {
+      // Pre-v0.44 on-disk format: a bare `{ name: changeId }` map.
+      fs.files.set(tagsFile, {
+        type: 'file',
+        content: JSON.stringify({ 'v1.0.0': tid(1) }),
+      });
+
+      const legacy = new TagStore(fs, jjDir);
+      expect(await legacy.get('v1.0.0')).toBe(tid(1));
+      expect(legacy.tracking).toEqual({});
+    });
+  });
+
   describe('exists / get', () => {
     it('exists should return true/false', async () => {
       await tags.create('v1.0.0', tid(1));

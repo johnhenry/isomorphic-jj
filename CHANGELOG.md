@@ -1,5 +1,117 @@
 # Changelog
 
+## 0.1.0 — Track jj through v0.44
+
+Jujutsu shipped v0.44.0 (2026-08-05) since isomorphic-jj's last parity pass
+(v1.5.0/README, which tracked jj through v0.43). This release closes the gap
+for the parts of v0.43–v0.44 that are in scope for a headless, browser-safe
+reimplementation of jj's model — a library, not the `jj` CLI's terminal UX or
+its Rust process/Git-plumbing internals.
+
+### Added
+
+- **`tag.track({ name, remote })` / `tag.untrack({ name })`** — jj v0.44 made
+  tags remote-trackable the same way bookmarks already were, and added `jj
+  tag track`/`untrack` to manage that per-tag. `TagStore` now persists
+  tracking state (`{ remote, remoteName }` per local tag name) the same way
+  `BookmarkStore` already did for bookmarks, and `tag.list()` includes a
+  `tracking: { remote, ref }` field once a tag is tracked. The on-disk
+  `tags.json` format gained a `{ tags, tracked }` envelope; the old flat
+  `{ name: changeId }` format is still read for backward compatibility.
+- **`builtin_log()` revset function** — jj v0.44 added `builtin_log()` as an
+  alias for the revset the built-in `jj log` uses by default, so a custom
+  `revsets.log` config can extend it instead of duplicating it. isomorphic-jj's
+  `log()` has always defaulted to `all()` when no revset is given, so
+  `builtin_log()` is wired to the same set and can be composed like any other
+  revset function (`builtin_log() & mine()`).
+- **`file.search({ ..., nameOnly: true })`** — jj v0.44 changed `jj file
+  search`'s default CLI output to print every matched *line* (prefixed with
+  its file path), moving the old "just the file paths" behavior behind a new
+  `--name-only` flag. isomorphic-jj's `file.search()` already returned
+  structured per-line matches (`{ path, lineNumber, line }`) — that was
+  already the new default — so the only gap was the old, path-only shape;
+  `{ nameOnly: true }` now returns a deduplicated `string[]` of matching
+  paths, matching `--name-only`.
+
+### Changed
+
+- **`git_refs()` / `git_head()` revsets are now documented as deprecated.**
+  Upstream jj deprecated both in favor of `bookmarks()`/`tags()`/`@`, then
+  removed them outright in jj v0.43 (calling them in real jj now errors).
+  isomorphic-jj keeps them working — removing a function outright is a
+  breaking API change this pass didn't want to force on existing callers
+  unilaterally — but they're no longer listed in the revset engine's
+  "did you mean" suggestion text, and their JSDoc now calls out the upstream
+  removal and recommends `bookmarks()`/`tags()`/`@` instead. See "Not
+  changed" below for the case for a harder break in a future major version.
+
+### Testing
+
+1714 tests passing (was 1701); lint (0 errors), format:check, typecheck, and
+build all still green.
+
+### Not changed (needs a human design call)
+
+jj v0.43–v0.44 included several changes this pass deliberately left alone:
+
+- **`jj run`** (v0.43 new command, gained `--passthrough`/`--ignore-changes`/
+  `--ignore-errors`/oldest-first-ordering in v0.44) — runs an arbitrary
+  subprocess against each revision's own private working copy. isomorphic-jj
+  doesn't shell out to anything and has to keep working in browsers with no
+  process/filesystem access; "run a command" doesn't have an isomorphic
+  equivalent. Adding it would mean either a Node-only stub (inconsistent with
+  the rest of the API surface) or scope-creeping into a job-runner. Flagging
+  for a maintainer decision rather than guessing.
+- **Auto-importing remote tags/bookmarks during `git.fetch()`.** jj v0.44's
+  headline change is that `jj git fetch` now fetches tags the same way it
+  fetches bookmarks — as `<name>@<remote>`, auto-tracked by default. Wiring
+  that up properly for tags would need `git.fetch()` to actually populate
+  `TagStore`'s (and, by the same logic, `BookmarkStore`'s) remote-tracking
+  state from the fetched refs. Investigating this surfaced a **pre-existing**
+  gap: `git.fetch()` already doesn't call `bookmarks.setRemote()` for fetched
+  bookmarks today, even though `BookmarkStore.setRemote()`/`getRemote()` have
+  existed since v0.4 — remote ref sync was never wired all the way through at
+  the fetch call site. Building tag-fetch-tracking on top of that gap would
+  mean either (a) fixing the older bookmark gap too as a drive-by, our
+  papering over an inconsistency where tags "worked" and bookmarks didn't, or
+  (b) building a second, tag-only special case. Both are judgment calls
+  about a real architectural gap, not a mechanical port of one version's
+  changelog — left for a maintainer to decide. `tag.track()`/`untrack()`
+  (added this pass) at least let callers record and query tracking intent by
+  hand in the meantime.
+- **`jj git clone --tag=PATTERN` / `--fetch-tags` removal.** Real jj replaced
+  `--fetch-tags=all|none|included` with `--tag=PATTERN` in v0.44. isojj's
+  `git.clone()`/`git.fetch()` never exposed CLI-shaped `--fetch-tags` flags in
+  the first place (just a boolean `noTags`), so there's no removed flag to
+  mirror; a `PATTERN`-based tag filter for clone/fetch would be new surface
+  area tied to the fetch-tracking gap above.
+- **`jj git push --allow-conflicts`.** Real jj normally refuses to push
+  commits containing conflicts unless this flag is passed. isojj's
+  `git.push()` doesn't currently check for conflicts before pushing at all —
+  there's no existing guard to add a bypass flag for. Adding the guard itself
+  (and then the bypass) is more surface area than a one-version parity pass.
+- **CLI argument parsing "last occurrence wins" (v0.44).** Checked
+  `bin/isojj.js`'s `parseArgs()`: it already stores each `--flag` into a
+  plain object keyed by flag name, so repeating a flag already naturally
+  overwrites the earlier value with no error — this was already jj v0.44's
+  new behavior by construction. No change needed.
+- **`try(expr, fallback...)` template function, `jj workspace list` root
+  display, `diff.stat.max-bar-width`, `colors.crossed-out`, Gerrit/config-gc/
+  `/etc/jj` config-discovery changes.** These are jj's template engine and
+  terminal/config-file layers, which isomorphic-jj's CLI (a thin, generic
+  API-argument passthrough — see `bin/isojj.js`) doesn't attempt to replicate
+  1:1 for any command. Out of scope for this pass; noted here for
+  completeness of the v0.43/v0.44 diff.
+
+## 0.0.0
+
+- **Renamed: `isomorphic-jj` is now `@johnhenry/isomorphic-jj`, restarted at 0.0.0.** Same library, same API — a new address and era, not a maturity signal (1.7.0 lineage).
+
+  ```sh
+  npm install @johnhenry/isomorphic-jj
+  ```
+
+
 All notable changes to isomorphic-jj are documented here. The project tracks the
 [Jujutsu (jj)](https://github.com/jj-vcs/jj) CLI; each release notes the upstream
 jj version whose semantics it targets.
@@ -171,7 +283,9 @@ adds a batch of revset functions and commands, and cleans up the toolchain.
 - `forks()` — changes with more than one child.
 - `first_parent(x)` / `first_ancestors(x)` — first-parent navigation (jj v0.32).
 - `fork_point(x)` — youngest common ancestor of a set (jj v0.32).
-- `merge_point(x)` — youngest common descendant of a set.
+- `merge_point(x)` — youngest common descendant of a set (implemented ahead of
+  upstream; jj stabilized its own `merge_point()` in v0.44 with matching
+  semantics — "the point where multiple branches merge").
 - `exactly(x, n)` — the set, but errors unless it has exactly `n` elements (jj v0.34).
 - `present(x)` — evaluate without erroring on unknown symbols.
 - `coalesce(a, b, …)` — the first argument that resolves to a non-empty set.
