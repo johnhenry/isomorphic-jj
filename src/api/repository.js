@@ -1155,6 +1155,11 @@ export async function createJJ(options) {
       const isWorkingCopy = targetChangeId === workingCopy.getCurrentChangeId();
       const fileSnapshotBefore = isWorkingCopy ? await snapshotFilesystem() : null;
 
+      // Snapshot the change record itself from BEFORE this operation mutates
+      // it in place, so undo() can restore ChangeGraph content (not just
+      // on-disk files/working-copy pointer) — mirrors fileSnapshotBefore above.
+      const changeSnapshotBefore = structuredClone(change);
+
       // Dispatch change:updating event (preventable)
       await dispatchEventAsync(jj, 'change:updating', {
         operation: 'describe',
@@ -1235,6 +1240,10 @@ export async function createJJ(options) {
         },
         description: `describe change ${targetChangeId.slice(0, 8)}`,
         parents: [],
+        // Snapshot of the affected ChangeGraph node from BEFORE this
+        // operation ran, so undo() can restore in-place content mutations
+        // (e.g. the description change below) — not just files/pointers.
+        changeSnapshot: { [targetChangeId]: changeSnapshotBefore },
         view: {
           bookmarks: {},
           remoteBookmarks: {},
@@ -1747,11 +1756,28 @@ export async function createJJ(options) {
         // Try to resolve as revset
         try {
           const changes = await revset.evaluate(args.change);
+          if (changes.length > 1) {
+            // An id-prefix (or other) revset that matches more than one
+            // change must not silently pick a "winner" — see issue #13.
+            throw new JJError(
+              'AMBIGUOUS_ID',
+              `"${args.change}" is ambiguous: it resolves to ${changes.length} changes (${changes.join(', ')})`,
+              {
+                expression: args.change,
+                matches: changes,
+                suggestion: 'Use a longer prefix or an exact change ID to disambiguate',
+              }
+            );
+          }
           if (changes.length > 0) {
             changeId = changes[0];
           }
-        } catch {
-          // Use as-is
+        } catch (error) {
+          if (error instanceof JJError && error.code === 'AMBIGUOUS_ID') {
+            throw error;
+          }
+          // Not a valid revset expression - use args.change as-is (e.g. a
+          // literal change ID that revset parsing rejected).
         }
       }
 
@@ -1993,6 +2019,21 @@ export async function createJJ(options) {
 
       // Restore state from previous view
       await workingCopy.setCurrentChange(previousView.workingCopy);
+
+      // Restore ChangeGraph content mutated in place by the operation being
+      // undone (e.g. describe() editing change.description) — see issue #12.
+      // currentOp.changeSnapshot holds the affected change record(s) as they
+      // were BEFORE currentOp ran, captured the same way fileSnapshot is.
+      await graph.load();
+      if (currentOp && currentOp.changeSnapshot) {
+        for (const snapshot of Object.values(
+          /** @type {Record<string, any>} */ (currentOp.changeSnapshot)
+        )) {
+          if (snapshot && (await graph.getChange(snapshot.changeId))) {
+            await graph.updateChange(snapshot);
+          }
+        }
+      }
 
       // Restore filesystem from previous operation's snapshot (taken BEFORE that operation)
       // This is how JJ snapshots the working copy before every command
@@ -2478,6 +2519,7 @@ export async function createJJ(options) {
         // Compute the inverse changes
         const inversChanges = /** @type {Record<string, any>} */ ({
           bookmarks: {},
+          tags: {},
           heads: [],
         });
 
@@ -2517,6 +2559,46 @@ export async function createJJ(options) {
 
         await bookmarks.save();
 
+        // Revert tag changes (mirrors the bookmark diff above — issue #12).
+        // Unlike bookmarks, TagStore has no "move" primitive (tags are meant
+        // to be immutable once created), so a moved tag is reverted via
+        // delete+recreate, matching how tag.set() itself updates a tag.
+        const prevTags = previousOp.view?.tags || {};
+        const targetTags = targetOp.view?.tags || {};
+
+        for (const name of Object.keys(targetTags)) {
+          if (!prevTags[name]) {
+            // Tag was added - delete it
+            if (await tags.exists(name)) {
+              await tags.delete(name);
+            }
+            inversChanges.tags[name] = { action: 'deleted' };
+          } else if (prevTags[name] !== targetTags[name]) {
+            // Tag was moved - restore old target
+            if (await tags.exists(name)) {
+              await tags.delete(name);
+            }
+            await tags.create(name, prevTags[name]);
+            inversChanges.tags[name] = {
+              action: 'moved',
+              from: targetTags[name],
+              to: prevTags[name],
+            };
+          }
+        }
+
+        // Check for deleted tags (existed before, don't exist after)
+        for (const name of Object.keys(prevTags)) {
+          if (!targetTags[name] && !(await tags.exists(name))) {
+            // Tag was deleted - restore it
+            await tags.create(name, prevTags[name]);
+            inversChanges.tags[name] = {
+              action: 'restored',
+              to: prevTags[name],
+            };
+          }
+        }
+
         // Revert working copy change if it changed
         if (previousOp.view?.workingCopy !== targetOp.view?.workingCopy) {
           await workingCopy.load();
@@ -2531,6 +2613,7 @@ export async function createJJ(options) {
           parents: [],
           view: {
             bookmarks: prevBookmarks,
+            tags: prevTags,
             remoteBookmarks: previousOp.view?.remoteBookmarks || {},
             heads: previousOp.view?.heads || [],
             workingCopy: previousOp.view?.workingCopy,
@@ -4968,11 +5051,18 @@ export async function createJJ(options) {
           throw new JJError('CONFLICT_NOT_FOUND', `Conflict ${args.conflictId} not found`);
         }
 
-        // Generate standard conflict markers
+        // Generate standard conflict markers. Force a newline before each
+        // boundary marker whenever there's non-empty content that doesn't
+        // already end in one — otherwise the content fuses onto the
+        // `=======`/`>>>>>>> theirs` marker, producing a corrupted/unparseable
+        // line (see issue #15). Empty sides (e.g. a modify-delete conflict)
+        // intentionally get no extra blank line before the marker.
         const ours = conflict.sides.left || '';
         const theirs = conflict.sides.right || '';
+        const oursSep = ours && !ours.endsWith('\n') ? '\n' : '';
+        const theirsSep = theirs && !theirs.endsWith('\n') ? '\n' : '';
 
-        return `<<<<<<< ours\n${ours}=======\n${theirs}>>>>>>> theirs`;
+        return `<<<<<<< ours\n${ours}${oursSep}=======\n${theirs}${theirsSep}>>>>>>> theirs`;
       },
 
       /**
@@ -6205,6 +6295,10 @@ export async function createJJ(options) {
           view: {
             bookmarks: {},
             remoteBookmarks: {},
+            // Tag delta for this operation (mirrors how `bookmarks` records
+            // its delta above), so operations.revert() can diff it — see
+            // issue #12.
+            tags: { [args.name]: changeId },
             heads: [],
             workingCopy: workingCopy.getCurrentChangeId(),
           },
@@ -6250,6 +6344,7 @@ export async function createJJ(options) {
           view: {
             bookmarks: {},
             remoteBookmarks: {},
+            tags: { [args.name]: changeId },
             heads: [],
             workingCopy: workingCopy.getCurrentChangeId(),
           },
@@ -6295,6 +6390,7 @@ export async function createJJ(options) {
           view: {
             bookmarks: {},
             remoteBookmarks: {},
+            tags: {},
             heads: [],
             workingCopy: workingCopy.getCurrentChangeId(),
           },

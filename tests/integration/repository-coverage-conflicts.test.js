@@ -141,6 +141,33 @@ describe('repository.js coverage — conflicts & merge', () => {
     expect(markers).toContain('>>>>>>> theirs');
   });
 
+  it('conflicts.markers keeps boundary markers on their own line when content lacks a trailing newline (issue #15)', async () => {
+    // Content deliberately has NO trailing newline on either side.
+    const file = 'no-newline.txt';
+    const root = await currentId();
+    await jj.write({ path: file, data: 'base' });
+    await jj.describe({ message: 'root' });
+    await jj.new({ message: 'B' });
+    await jj.write({ path: file, data: 'left' });
+    const b = await jj.describe({ message: 'B' });
+    await jj.edit({ changeId: root });
+    await jj.new({ message: 'C' });
+    await jj.write({ path: file, data: 'right' });
+    await jj.describe({ message: 'C' });
+
+    await jj.merge({ source: b.changeId });
+    const [c] = await jj.conflicts.list();
+    const markers = await jj.conflicts.markers({ conflictId: c.conflictId });
+
+    // The boundary markers must land on their own line — content must never
+    // fuse onto '=======' or '>>>>>>> theirs'.
+    expect(markers).toMatch(/^<<<<<<< ours\n(left|right)\n=======\n(left|right)\n>>>>>>> theirs$/);
+    expect(markers).not.toContain('left=======');
+    expect(markers).not.toContain('right>>>>>>>');
+    expect(markers).not.toContain('left>>>>>>>');
+    expect(markers).not.toContain('right=======');
+  });
+
   it('conflicts.resolve with an explicit strategy (ours)', async () => {
     const b = await setupConflict();
     await jj.merge({ source: b });

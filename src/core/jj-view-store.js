@@ -8,6 +8,7 @@
 import protobuf from 'protobufjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { atomicWriteFile } from '../utils/atomic-write.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,9 +73,9 @@ export class JJViewStore {
     // Encode to binary
     const buffer = View.encode(message).finish();
 
-    // Write to .jj/repo/op_store/views/VIEWID
+    // Write to .jj/repo/op_store/views/VIEWID (atomically — see issue #16).
     const viewPath = `${this.dir}/.jj/repo/op_store/views/${viewId}`;
-    await this.fs.promises.writeFile(viewPath, buffer);
+    await atomicWriteFile(this.fs, viewPath, buffer);
   }
 
   /**

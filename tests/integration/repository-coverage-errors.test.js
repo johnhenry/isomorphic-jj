@@ -5,6 +5,7 @@
  * These tests exercise the many untested throw/guard branches and stub methods.
  */
 
+import { jest } from '@jest/globals';
 import { createJJ } from '../../src/index.js';
 import { MockFS } from '../fixtures/mock-fs.js';
 
@@ -363,6 +364,31 @@ describe('repository.js coverage — errors & aliases', () => {
       const id = await currentId();
       const shown = await jj.show({ change: '@' });
       expect(shown.changeId).toBe(id);
+    });
+
+    it('show throws AMBIGUOUS_ID for a change-id prefix matching multiple changes (issue #13)', async () => {
+      // Force two new changes to share a change-id prefix by controlling
+      // the first random byte generateChangeId() draws from
+      // crypto.getRandomValues(), then use change_id(<prefix>) — a
+      // multi-match id-prefix revset — to trigger the ambiguity.
+      const spy = jest.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation((arr) => {
+        for (let i = 0; i < arr.length; i++) arr[i] = i === 0 ? 0xab : Math.floor(Math.random() * 256);
+        return arr;
+      });
+      try {
+        await jj.new({ message: 'first' });
+        await jj.new({ message: 'second' });
+      } finally {
+        spy.mockRestore();
+      }
+
+      const log = await jj.log();
+      const matches = log.filter((c) => c.changeId.startsWith('ab'));
+      expect(matches.length).toBeGreaterThanOrEqual(2);
+
+      await expect(jj.show({ change: 'change_id(ab)' })).rejects.toMatchObject({
+        code: 'AMBIGUOUS_ID',
+      });
     });
 
     it('amend delegates to describe', async () => {

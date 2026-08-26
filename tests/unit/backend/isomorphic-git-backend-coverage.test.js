@@ -512,8 +512,85 @@ describe('IsomorphicGitBackend - coverage', () => {
       });
       await backend.updateRef('refs/heads/main', sha);
       const result = await backend.push({ remote: 'origin', refs: ['refs/heads/main'] });
-      expect(result.rejectedRefs).toContain('refs/heads/main');
+      expect(result.rejectedRefs).toHaveLength(1);
+      expect(result.rejectedRefs[0]).toMatchObject({ name: 'refs/heads/main' });
+      // The rejection reason must be surfaced, not just the bare ref name —
+      // see issue #14.
+      expect(result.rejectedRefs[0].code).toBeTruthy();
+      expect(result.rejectedRefs[0].reason).toBeTruthy();
       expect(result.pushedRefs).toEqual([]);
+    });
+
+    test('push distinguishes an auth failure from a non-fast-forward rejection (issue #14)', async () => {
+      const setupPushableRepo = async (label) => {
+        const dir = freshDir(label);
+        await fs.promises.mkdir(dir, { recursive: true });
+        return dir;
+      };
+
+      // --- Auth failure: HttpError with a 401 status ---
+      const authDir = await setupPushableRepo('push-auth');
+      const authHttp = {
+        request: async () => {
+          const e = new Error('mock auth failure');
+          e.code = 'HttpError';
+          e.data = { statusCode: 401, statusMessage: 'Unauthorized' };
+          throw e;
+        },
+      };
+      const authBackend = new IsomorphicGitBackend({ fs, dir: authDir, http: authHttp });
+      await authBackend.init();
+      await git.addRemote({
+        fs,
+        dir: authDir,
+        remote: 'origin',
+        url: 'http://127.0.0.1:9/repo.git',
+      });
+      await fs.promises.writeFile(path.join(authDir, 'a.txt'), 'a');
+      await authBackend.stageAll();
+      const authSha = await authBackend.createCommit({
+        message: 'c',
+        author: { name: 'A', email: 'a@e.com' },
+      });
+      await authBackend.updateRef('refs/heads/main', authSha);
+      const authResult = await authBackend.push({
+        remote: 'origin',
+        refs: ['refs/heads/main'],
+      });
+      expect(authResult.rejectedRefs).toHaveLength(1);
+      expect(authResult.rejectedRefs[0].code).toBe('AUTH_FAILED');
+
+      // --- Non-fast-forward rejection: PushRejectedError ---
+      const nffDir = await setupPushableRepo('push-nff');
+      const nffHttp = {
+        request: async () => {
+          const e = new Error('mock non-fast-forward rejection');
+          e.code = 'PushRejectedError';
+          e.data = { reason: 'not-fast-forward' };
+          throw e;
+        },
+      };
+      const nffBackend = new IsomorphicGitBackend({ fs, dir: nffDir, http: nffHttp });
+      await nffBackend.init();
+      await git.addRemote({
+        fs,
+        dir: nffDir,
+        remote: 'origin',
+        url: 'http://127.0.0.1:9/repo.git',
+      });
+      await fs.promises.writeFile(path.join(nffDir, 'a.txt'), 'a');
+      await nffBackend.stageAll();
+      const nffSha = await nffBackend.createCommit({
+        message: 'c',
+        author: { name: 'A', email: 'a@e.com' },
+      });
+      await nffBackend.updateRef('refs/heads/main', nffSha);
+      const nffResult = await nffBackend.push({ remote: 'origin', refs: ['refs/heads/main'] });
+      expect(nffResult.rejectedRefs).toHaveLength(1);
+      expect(nffResult.rejectedRefs[0].code).toBe('NON_FAST_FORWARD');
+
+      // The two failure modes must be distinguishable from each other.
+      expect(authResult.rejectedRefs[0].code).not.toBe(nffResult.rejectedRefs[0].code);
     });
 
     test('push with empty refs list returns empty results', async () => {

@@ -282,4 +282,44 @@ describe('OperationLog', () => {
       });
     });
   });
+
+  describe('concurrency (issue #11 — no locking in the storage layer)', () => {
+    it('should not lose an operation when two recordOperation() calls race', async () => {
+      await oplog.init();
+
+      // Two commands sharing the same OperationLog instance (e.g. a user
+      // command racing BackgroundOps's autosnapshot) recording operations
+      // at the same time. Neither call should silently drop the other's
+      // entry, and both should report success.
+      const [op1, op2] = await Promise.all([
+        oplog.recordOperation({
+          timestamp: '2025-10-30T12:00:00.000Z',
+          user: { name: 'Test', email: 'test@example.com', hostname: 'localhost' },
+          description: 'first',
+          parents: [],
+          view: { bookmarks: {}, remoteBookmarks: {}, heads: [], workingCopy: tid(1) },
+        }),
+        oplog.recordOperation({
+          timestamp: '2025-10-30T12:00:01.000Z',
+          user: { name: 'Test', email: 'test@example.com', hostname: 'localhost' },
+          description: 'second',
+          parents: [],
+          view: { bookmarks: {}, remoteBookmarks: {}, heads: [], workingCopy: tid(2) },
+        }),
+      ]);
+
+      expect(op1.id).toBeTruthy();
+      expect(op2.id).toBeTruthy();
+
+      // Reload from storage (fresh OperationLog instance) to make sure both
+      // entries actually made it to disk, not just into in-memory state.
+      const reloaded = new OperationLog(storage);
+      await reloaded.load();
+      const ops = await reloaded.list();
+      const descriptions = ops.map((op) => op.description).sort();
+
+      expect(ops.length).toBe(2);
+      expect(descriptions).toEqual(['first', 'second']);
+    });
+  });
 });

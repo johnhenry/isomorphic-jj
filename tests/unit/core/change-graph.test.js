@@ -317,4 +317,35 @@ describe('ChangeGraph', () => {
       expect(updated.predecessors).toContain(oldCommitId);
     });
   });
+
+  describe('concurrency (issue #11 — no locking in the storage layer)', () => {
+    it('should not lose a change when two addChange()/save() calls race', async () => {
+      await graph.init();
+
+      const changeA = {
+        changeId: 'a'.repeat(32),
+        parents: [],
+        description: 'A',
+        commitId: 'a'.repeat(40),
+      };
+      const changeB = {
+        changeId: 'b'.repeat(32),
+        parents: [],
+        description: 'B',
+        commitId: 'b'.repeat(40),
+      };
+
+      // Two additions sharing the same ChangeGraph instance, both racing to
+      // persist via save(). Neither should be silently dropped.
+      await Promise.all([graph.addChange(changeA), graph.addChange(changeB)]);
+
+      // Reload from storage (fresh ChangeGraph instance) to make sure both
+      // survived the on-disk write, not just in-memory state.
+      const reloaded = new ChangeGraph(storage);
+      await reloaded.load();
+
+      expect(await reloaded.getChange(changeA.changeId)).toMatchObject({ description: 'A' });
+      expect(await reloaded.getChange(changeB.changeId)).toMatchObject({ description: 'B' });
+    });
+  });
 });

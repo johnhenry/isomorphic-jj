@@ -540,7 +540,11 @@ export class IsomorphicGitBackend {
    * @param {boolean} [opts.force] - Allow non-fast-forward
    * @param {any} [opts.onProgress] - Progress callback
    * @param {any} [opts.onAuth] - Authentication callback
-   * @returns {Promise<{pushedRefs: Array<any>, rejectedRefs: Array<any>}>} Push result
+   * @returns {Promise<{pushedRefs: Array<{name: string, oid: string}>, rejectedRefs: Array<{name: string, code: string, reason: string, message: string}>}>} Push result.
+   *   Each rejected ref carries a `code` (one of `AUTH_FAILED`,
+   *   `NETWORK_ERROR`, `NON_FAST_FORWARD`, `OTHER`) and a human-readable
+   *   `reason`, so callers can tell an auth failure apart from a
+   *   non-fast-forward rejection instead of guessing (see issue #14).
    */
   async push(opts) {
     if (!this.http) {
@@ -576,8 +580,13 @@ export class IsomorphicGitBackend {
             pushedRefs.push({ name: ref, oid });
           }
         } catch (pushError) {
-          // Track rejected refs
-          rejectedRefs.push(ref);
+          // Track rejected refs with the categorized reason so callers can
+          // distinguish an auth failure from a non-fast-forward rejection
+          // (or a network blip) instead of guessing — see issue #14. A
+          // caller that blindly retries with force:true on every rejection
+          // risks doing so on what was actually an auth/network problem.
+          const { code, reason } = this._categorizePushError(pushError);
+          rejectedRefs.push({ name: ref, code, reason, message: pushError.message });
         }
       }
 
@@ -607,6 +616,53 @@ export class IsomorphicGitBackend {
         originalError: error,
       });
     }
+  }
+
+  /**
+   * Categorize a per-ref push failure into a stable code/reason pair so
+   * callers can distinguish auth failures, network errors, and
+   * non-fast-forward rejections from each other and from other/unknown
+   * failures — see issue #14. isomorphic-git doesn't throw a single
+   * "AuthError" class; auth failures generally surface as an HttpError with
+   * a 401/403 status code (or a UserCanceledError if onAuth cancels).
+   *
+   * @private
+   * @param {any} error - Error thrown by git.push() for a single ref
+   * @returns {{code: string, reason: string}}
+   */
+  _categorizePushError(error) {
+    const errCode = error && error.code;
+
+    if (errCode === 'PushRejectedError') {
+      const reason = error.data && error.data.reason;
+      return {
+        code: 'NON_FAST_FORWARD',
+        reason: reason === 'tag-exists' ? 'tag already exists on remote' : 'non-fast-forward',
+      };
+    }
+
+    if (errCode === 'HttpError') {
+      const status = error.data && error.data.statusCode;
+      if (status === 401 || status === 403) {
+        return { code: 'AUTH_FAILED', reason: `HTTP ${status}` };
+      }
+      return { code: 'NETWORK_ERROR', reason: status ? `HTTP ${status}` : 'HTTP error' };
+    }
+
+    if (
+      errCode === 'AuthError' ||
+      errCode === 'UserCanceledError' ||
+      errCode === 'MissingUsernameError' ||
+      errCode === 'MissingPasswordTokenError'
+    ) {
+      return { code: 'AUTH_FAILED', reason: errCode };
+    }
+
+    if (errCode === 'NetworkError' || errCode === 'UnknownTransportError') {
+      return { code: 'NETWORK_ERROR', reason: errCode };
+    }
+
+    return { code: 'OTHER', reason: (error && error.message) || String(error) };
   }
 
   /**

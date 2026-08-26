@@ -5,6 +5,7 @@
  */
 
 import { JJError } from '../utils/errors.js';
+import { KeyedMutex } from '../utils/mutex.js';
 
 export class Storage {
   /**
@@ -18,6 +19,13 @@ export class Storage {
     this.repoDir = `${dir}/.jj/repo`; // Core repo data
     this.workingCopyDir = `${dir}/.jj/working_copy`; // Default workspace working copy
     this.cache = new Map();
+
+    // Serializes write()/appendLine() critical sections per path so that
+    // concurrent same-process callers (e.g. a user command racing
+    // BackgroundOps's autosnapshot) can't interleave a read-modify-write
+    // cycle and silently lose an update. This only protects callers that
+    // share this Storage instance — cross-process locking is out of scope.
+    this._locks = new KeyedMutex();
   }
 
   /**
@@ -92,8 +100,28 @@ export class Storage {
    * @param {Object|string} data - Data to write (object will be stringified)
    */
   async write(path, data) {
+    return this._locks.run(path, () => this._writeLocked(path, data));
+  }
+
+  /**
+   * Unlocked implementation of write(). Only call this from within a
+   * `this._locks.run(path, ...)` critical section (directly from write()
+   * itself, or from appendLine() which holds the same path's lock already).
+   *
+   * @param {string} path - Relative path from .jj directory
+   * @param {Object|string} data - Data to write (object will be stringified)
+   */
+  async _writeLocked(path, data) {
     const fullPath = `${this.jjDir}/${path}`;
-    const tmpPath = `${fullPath}.tmp.${Date.now()}`;
+    // Random suffix (not just a millisecond timestamp) so two concurrent
+    // writes to the same path never collide on the temp filename — a
+    // collision would let one write's error-cleanup unlink() delete the
+    // other's still in-flight temp file.
+    const tmpSuffix =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    const tmpPath = `${fullPath}.tmp.${Date.now()}.${tmpSuffix}`;
     const jsonData = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 
     try {
@@ -163,16 +191,25 @@ export class Storage {
     const fullPath = `${this.jjDir}/${path}`;
 
     try {
-      // Read existing content
-      let existing = '';
-      try {
-        existing = await this.fs.promises.readFile(fullPath, 'utf8');
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-      }
+      // Hold the same per-path lock write() uses for the *entire*
+      // read-modify-write cycle (not just the write half). Without this,
+      // two concurrent appendLine() calls on the same path can both read
+      // the pre-append content, and the loser's write silently drops its
+      // line even though both calls report success.
+      await this._locks.run(path, async () => {
+        // Read existing content
+        let existing = '';
+        try {
+          existing = await this.fs.promises.readFile(fullPath, 'utf8');
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+        }
 
-      // Write atomically
-      await this.write(path, existing + line + '\n');
+        // Write atomically (already inside this path's lock, so use the
+        // unlocked implementation to avoid deadlocking on a non-reentrant
+        // per-key mutex).
+        await this._writeLocked(path, existing + line + '\n');
+      });
     } catch (error) {
       throw new JJError('STORAGE_WRITE_FAILED', `Failed to append to ${path}: ${error.message}`, {
         path: fullPath,

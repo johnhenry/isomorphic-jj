@@ -76,6 +76,25 @@ describe('Basic Workflow Integration', () => {
     expect(afterUndoStatus.workingCopy.changeId).toBe(originalChangeId);
   });
 
+  it('should revert an in-place content mutation (describe) on undo (issue #12)', async () => {
+    await jj.init();
+
+    await jj.describe({ message: 'first' });
+    await jj.describe({ message: 'second' });
+
+    const beforeUndo = await jj.status();
+    expect(beforeUndo.workingCopy.description).toBe('second');
+
+    await jj.undo();
+
+    const afterUndo = await jj.status();
+    expect(afterUndo.workingCopy.description).toBe('first');
+
+    const log = await jj.log();
+    const current = log.find((c) => c.changeId === afterUndo.workingCopy.changeId);
+    expect(current.description).toBe('first');
+  });
+
   it('should demonstrate complete workflow', async () => {
     await jj.init({ userName: 'Developer', userEmail: 'dev@example.com' });
 
