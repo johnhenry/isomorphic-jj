@@ -8,6 +8,7 @@
 import protobuf from 'protobufjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { atomicWriteFile } from '../utils/atomic-write.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,9 +73,9 @@ export class JJTreeState {
     // Encode to binary
     const buffer = TreeState.encode(message).finish();
 
-    // Write to .jj/working_copy/tree_state
+    // Write to .jj/working_copy/tree_state (atomically — see issue #16).
     const treeStatePath = `${this.dir}/.jj/working_copy/tree_state`;
-    await this.fs.promises.writeFile(treeStatePath, buffer);
+    await atomicWriteFile(this.fs, treeStatePath, buffer);
   }
 
   /**

@@ -204,6 +204,80 @@ describe('RevsetEngine', () => {
     });
   });
 
+  describe('open-ended ranges (issue #18)', () => {
+    beforeEach(async () => {
+      // Linear chain: 1 <- 2 <- 3
+      const base = {
+        author: { name: 'Test', email: 'test@example.com', timestamp: '2025-10-30T12:00:00.000Z' },
+        committer: {
+          name: 'Test',
+          email: 'test@example.com',
+          timestamp: '2025-10-30T12:00:00.000Z',
+        },
+        timestamp: '2025-10-30T12:00:00.000Z',
+      };
+      await graph.addChange({
+        ...base,
+        changeId: tid(1),
+        commitId: '0000000000000000000000000000000000000001',
+        parents: [],
+        description: 'Change 1',
+      });
+      await graph.addChange({
+        ...base,
+        changeId: tid(2),
+        commitId: '0000000000000000000000000000000000000002',
+        parents: [tid(1)],
+        description: 'Change 2',
+      });
+      await graph.addChange({
+        ...base,
+        changeId: tid(3),
+        commitId: '0000000000000000000000000000000000000003',
+        parents: [tid(2)],
+        description: 'Change 3',
+      });
+    });
+
+    it('..tip resolves to ancestors(tip)', async () => {
+      const rangeResult = await revset.evaluate(`..${tid(2)}`);
+      const ancestorsResult = await revset.evaluate(`ancestors(${tid(2)})`);
+
+      expect(new Set(rangeResult)).toEqual(new Set(ancestorsResult));
+      expect(rangeResult).toContain(tid(1));
+      expect(rangeResult).toContain(tid(2));
+      expect(rangeResult).not.toContain(tid(3));
+    });
+
+    it('base.. resolves to descendants(base)', async () => {
+      const rangeResult = await revset.evaluate(`${tid(1)}..`);
+      const descendantsResult = await revset.evaluate(`descendants(${tid(1)})`);
+
+      expect(new Set(rangeResult)).toEqual(new Set(descendantsResult));
+      expect(rangeResult).toContain(tid(2));
+      expect(rangeResult).toContain(tid(3));
+    });
+
+    it(':: resolves to all()', async () => {
+      const rangeResult = await revset.evaluate('::');
+      const allResult = await revset.evaluate('all()');
+
+      expect(new Set(rangeResult)).toEqual(new Set(allResult));
+      expect(rangeResult).toContain(tid(1));
+      expect(rangeResult).toContain(tid(2));
+      expect(rangeResult).toContain(tid(3));
+    });
+
+    it('..tip with a malformed tip still reports a clear INVALID_REVSET error', async () => {
+      // Not a valid change id / nested expression — must fail with a clear
+      // parse error, not the old misleading "Invalid range: ..not-a-valid-id"
+      // message that claimed the (empty) base/tip pair were invalid IDs.
+      await expect(revset.evaluate('..not-a-valid-id')).rejects.toMatchObject({
+        code: 'INVALID_REVSET',
+      });
+    });
+  });
+
   describe('v0.2 enhanced revsets', () => {
     beforeEach(async () => {
       // Add test changes with different authors and descriptions

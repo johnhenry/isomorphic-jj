@@ -8,6 +8,7 @@
 import protobuf from 'protobufjs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { atomicWriteFile } from '../utils/atomic-write.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -81,9 +82,11 @@ export class JJOperationStore {
     // Encode to binary
     const buffer = Operation.encode(message).finish();
 
-    // Write to .jj/repo/op_store/operations/OPERATIONID
+    // Write to .jj/repo/op_store/operations/OPERATIONID (atomically — a
+    // crash mid-write must never leave a truncated/undecodable file, see
+    // issue #16).
     const opPath = `${this.dir}/.jj/repo/op_store/operations/${operationId}`;
-    await this.fs.promises.writeFile(opPath, buffer);
+    await atomicWriteFile(this.fs, opPath, buffer);
   }
 
   /**

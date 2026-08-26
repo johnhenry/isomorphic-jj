@@ -140,6 +140,29 @@ describe('repository.js coverage — namespaces & stubs', () => {
       expect(res.reverted).toBe(ops[0].id);
     });
 
+    it('revert reverses a tag-changing operation (issue #12)', async () => {
+      const originalChangeId = await currentId();
+      await jj.new({ message: 'work' });
+      const movedChangeId = await currentId();
+
+      // tag.create() then tag.set() back-to-back (no other operation in
+      // between), so the set's revert() diffs against the create as its
+      // immediate predecessor.
+      await jj.tag.create({ name: 'v1', changeId: originalChangeId });
+      await jj.tag.set({ name: 'v1', changeId: movedChangeId });
+
+      const beforeRevert = (await jj.tag.list()).find((t) => t.name === 'v1');
+      expect(beforeRevert.changeId).toBe(movedChangeId);
+
+      const ops = await jj.operations.list();
+      const setOpId = ops[0].id;
+      const res = await jj.operations.revert({ operation: setOpId });
+      expect(res.reverted).toBe(setOpId);
+
+      const afterRevert = (await jj.tag.list()).find((t) => t.name === 'v1');
+      expect(afterRevert.changeId).toBe(originalChangeId);
+    });
+
     it('abandon throws on missing operation', async () => {
       await expect(jj.operations.abandon({})).rejects.toMatchObject({
         code: 'INVALID_ARGUMENT',

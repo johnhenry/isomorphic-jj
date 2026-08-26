@@ -167,6 +167,74 @@ describe('Storage Manager', () => {
     });
   });
 
+  describe('concurrency (issue #11 — no locking in the storage layer)', () => {
+    it('should not lose an entry when two appendLine() calls race on the same path', async () => {
+      await storage.init();
+
+      // Fire both appends without awaiting either individually first, so
+      // their read-modify-write cycles can interleave exactly like two
+      // concurrent OperationLog.recordOperation() calls sharing this
+      // Storage instance (e.g. a user command racing BackgroundOps's
+      // autosnapshot).
+      await Promise.all([
+        storage.appendLine('oplog.jsonl', JSON.stringify({ id: 'a' })),
+        storage.appendLine('oplog.jsonl', JSON.stringify({ id: 'b' })),
+      ]);
+
+      const lines = await storage.readLines('oplog.jsonl');
+      const ids = lines.map((l) => l.id).sort();
+
+      // Without a lock around appendLine's read-modify-write, one of the
+      // two appends silently loses its line even though both calls resolve
+      // successfully.
+      expect(ids).toEqual(['a', 'b']);
+    });
+
+    it('should not lose an entry when many appendLine() calls race concurrently', async () => {
+      await storage.init();
+
+      const count = 10;
+      await Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          storage.appendLine('oplog.jsonl', JSON.stringify({ id: `op-${i}` }))
+        )
+      );
+
+      const lines = await storage.readLines('oplog.jsonl');
+      expect(lines.length).toBe(count);
+      const ids = new Set(lines.map((l) => l.id));
+      expect(ids.size).toBe(count);
+    });
+
+    it('should not lose an entry when two whole-file write() calls race on the same path', async () => {
+      await storage.init();
+
+      // Simulate two independent in-memory snapshots (as two ChangeGraph.save()
+      // calls sharing one Storage instance would produce) racing to persist
+      // to the same path. Locking write() ensures the writes are applied in
+      // the order they were requested rather than corrupting/clobbering each
+      // other based on unpredictable temp-file/rename timing.
+      const p1 = storage.write('graph.json', { version: 1, changes: { a: { changeId: 'a' } } });
+      const p2 = storage.write('graph.json', {
+        version: 1,
+        changes: { a: { changeId: 'a' }, b: { changeId: 'b' } },
+      });
+      await Promise.all([p1, p2]);
+
+      // The last write() call requested should win (FIFO ordering), and the
+      // file must never be left corrupt/partial regardless of ordering.
+      storage.invalidateCache('graph.json');
+      const data = await storage.read('graph.json');
+      expect(data.version).toBe(1);
+      expect(Object.keys(data.changes).length).toBeGreaterThan(0);
+
+      // No leftover temp files, and no cross-deleted temp file from a
+      // filename collision.
+      const tempFiles = Array.from(fs.files.keys()).filter((k) => k.includes('.tmp'));
+      expect(tempFiles.length).toBe(0);
+    });
+  });
+
   describe('invalidateCache', () => {
     it('should invalidate specific cache entry', async () => {
       await storage.init();

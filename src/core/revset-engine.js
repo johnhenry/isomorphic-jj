@@ -312,11 +312,30 @@ class RevsetParser {
       this.next();
       const value = /** @type {string} */ (tok.value);
 
-      // A bare "base..tip" range, e.g. `abcd1234..ef567890`.
+      // `::` (bare, no operands) means "all visible changes", matching jj's
+      // `::` alias for all().
+      if (value === '::') {
+        return { type: 'rangeAll' };
+      }
+
+      // A bare "base..tip" range, e.g. `abcd1234..ef567890` — and the
+      // open-ended forms `..tip` (ancestors(tip)) and `base..` (everything
+      // not an ancestor of base, approximated here as descendants(base)).
       if (value.includes('..')) {
         const parts = value.split('..');
         if (parts.length === 2) {
-          return { type: 'range', base: parts[0].trim(), tip: parts[1].trim() };
+          const base = parts[0].trim();
+          const tip = parts[1].trim();
+          if (base === '' && tip === '') {
+            return { type: 'rangeAll' };
+          }
+          if (base === '') {
+            return { type: 'rangeAncestors', tip };
+          }
+          if (tip === '') {
+            return { type: 'rangeDescendants', base };
+          }
+          return { type: 'range', base, tip };
         }
       }
 
@@ -442,6 +461,15 @@ export class RevsetEngine {
       }
       case 'range':
         return await this.evalRange(node.base, node.tip);
+      // Open-ended ranges (issue #18): `..tip` / `base..` / `::` delegate to
+      // the equivalent ancestors()/descendants()/all() functions rather than
+      // failing with a misleading "invalid IDs" error.
+      case 'rangeAll':
+        return await this.evaluateFunctionCall('all', '');
+      case 'rangeAncestors':
+        return await this.evaluateFunctionCall('ancestors', node.tip);
+      case 'rangeDescendants':
+        return await this.evaluateFunctionCall('descendants', node.base);
       case 'call':
         return await this.evaluateFunctionCall(node.name, node.argsRaw);
       default:

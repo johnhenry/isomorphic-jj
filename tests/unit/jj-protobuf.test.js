@@ -275,4 +275,112 @@ describe('JJ Protobuf Encoding', () => {
       expect(decoded.wc_commit_ids.default).toBeDefined();
     });
   });
+
+  describe('Atomic writes (issue #16)', () => {
+    // Wraps the real `fs` so writeFile()/rename() can be observed or made to
+    // fail for specific paths, without touching the real filesystem's own
+    // atomicity guarantees.
+    function wrapFs(overrides = {}) {
+      return {
+        promises: {
+          ...fs.promises,
+          ...overrides,
+        },
+      };
+    }
+
+    it('writeOperation() writes via a temp file then renames into place', async () => {
+      const seenTmpPaths = [];
+      const realWriteFile = fs.promises.writeFile.bind(fs.promises);
+      const realRename = fs.promises.rename.bind(fs.promises);
+      const spyFs = wrapFs({
+        writeFile: async (p, data) => {
+          if (typeof p === 'string' && p.includes('.tmp.')) {
+            seenTmpPaths.push(p);
+          }
+          return realWriteFile(p, data);
+        },
+        rename: realRename,
+      });
+
+      const opStore = new JJOperationStore(spyFs, testDir);
+      const operationId = '0'.repeat(128);
+      const viewId = '0'.repeat(128);
+      const metadata = {
+        start_time: { millis_since_epoch: Date.now(), tz_offset: 0 },
+        end_time: { millis_since_epoch: Date.now(), tz_offset: 0 },
+        description: 'atomic test',
+        hostname: 'host',
+        username: 'user',
+        is_snapshot: false,
+        tags: {},
+      };
+
+      await opStore.writeOperation(operationId, viewId, [], metadata);
+
+      expect(seenTmpPaths.length).toBe(1);
+
+      // No leftover temp file after a successful write.
+      const opDir = `${testDir}/.jj/repo/op_store/operations`;
+      const entries = await fs.promises.readdir(opDir);
+      const tempEntries = entries.filter((e) => e.includes('.tmp.'));
+      expect(tempEntries).toEqual([]);
+
+      // The canonical file decodes correctly.
+      const decoded = await opStore.readOperation(operationId);
+      expect(decoded.metadata.description).toBe('atomic test');
+    });
+
+    it('does not corrupt an existing operation file when the rename step fails', async () => {
+      const opStore = new JJOperationStore(fs, testDir);
+      const operationId = '1'.repeat(128);
+      const viewId = '0'.repeat(128);
+      const goodMetadata = {
+        start_time: { millis_since_epoch: 1, tz_offset: 0 },
+        end_time: { millis_since_epoch: 2, tz_offset: 0 },
+        description: 'original',
+        hostname: 'host',
+        username: 'user',
+        is_snapshot: false,
+        tags: {},
+      };
+
+      // Write a valid operation file first.
+      await opStore.writeOperation(operationId, viewId, [], goodMetadata);
+      const opPath = `${testDir}/.jj/repo/op_store/operations/${operationId}`;
+      const originalBuffer = await fs.promises.readFile(opPath);
+
+      // Now attempt an overwrite whose rename step fails part-way through
+      // (simulating a crash between the temp write and the rename).
+      const realRename = fs.promises.rename.bind(fs.promises);
+      const failingFs = wrapFs({
+        rename: async (from, to) => {
+          if (to === opPath) {
+            throw new Error('simulated crash before rename');
+          }
+          return realRename(from, to);
+        },
+      });
+      const failingOpStore = new JJOperationStore(failingFs, testDir);
+      const badMetadata = { ...goodMetadata, description: 'should not land' };
+
+      await expect(
+        failingOpStore.writeOperation(operationId, viewId, [], badMetadata)
+      ).rejects.toThrow();
+
+      // The canonical file must be byte-for-byte untouched — never a
+      // truncated or partially-written file.
+      const afterBuffer = await fs.promises.readFile(opPath);
+      expect(afterBuffer.equals(originalBuffer)).toBe(true);
+
+      const decoded = await opStore.readOperation(operationId);
+      expect(decoded.metadata.description).toBe('original');
+
+      // No leftover temp file from the failed attempt.
+      const opDir = `${testDir}/.jj/repo/op_store/operations`;
+      const entries = await fs.promises.readdir(opDir);
+      const tempEntries = entries.filter((e) => e.includes('.tmp.'));
+      expect(tempEntries).toEqual([]);
+    });
+  });
 });
