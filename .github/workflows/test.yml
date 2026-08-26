@@ -37,6 +37,14 @@ jobs:
       - name: Test
         run: npm test
 
+      # Examples double as a smoke test (each asserts what it demonstrates).
+      # One leg is enough — they exercise library behavior, not platform
+      # behavior — and it's a different leg than the coverage gate to keep
+      # per-job wall time balanced.
+      - name: Examples
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: npm run examples
+
       # Coverage thresholds are enforced on a single canonical platform. Coverage
       # is intrinsically machine-independent for our code, so running the gate on
       # every OS only adds cross-platform flakiness without extra signal.
