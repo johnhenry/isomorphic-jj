@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased — Documentation overhaul: examples suite
+
+- **New `examples/` directory: 12 numbered, runnable examples** covering the
+  core loop (init/describe/new/log), stable-ID stacked changes, history
+  editing (split/squash/abandon/duplicate), branching and merging (including
+  `new({ parents })` for true merge changes), first-class conflicts, revsets,
+  bookmarks + tags (with the v0.44 `tag.track()` surface), Git interop,
+  configuration layers, undo/oplog/time travel, the `file.*` namespace, and
+  browser usage. Each example runs in a temp directory, cleans up after
+  itself, and *asserts* what it demonstrates, so the set doubles as a smoke
+  test. `npm run examples` runs the loop; `npm run example:NN` runs one.
+- **Example 08 exercises real `git.clone()`/`git.push()`/`git.fetch()` with
+  zero network**: it builds a bare fixture repo with the git CLI and serves
+  it on 127.0.0.1 through `git http-backend` (buffering request bodies so
+  CGI gets a `CONTENT_LENGTH` — isomorphic-git sends chunked bodies). Skips
+  cleanly where the git CLI is unavailable.
+- **CI**: the test workflow now runs the examples loop as a smoke step on
+  one matrix leg (ubuntu-latest / Node 22), deliberately a different leg
+  than the coverage gate.
+- Companion docs for the site (opensource.johnhenry.me) were written from
+  this repo's README/API/MIGRATION/CONFIGURATION material in the same pass;
+  behavioral quirks the examples surfaced (e.g. `file()` matching snapshots
+  rather than modifications, duration revsets needing committer timestamps,
+  `init()` after `git.clone()` re-rooting `refs/heads/main`) are documented
+  there rather than papered over.
+
 ## 0.1.0 — Track jj through v0.44
 
 Jujutsu shipped v0.44.0 (2026-08-05) since isomorphic-jj's last parity pass
