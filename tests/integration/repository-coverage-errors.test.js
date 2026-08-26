@@ -372,7 +372,8 @@ describe('repository.js coverage — errors & aliases', () => {
       // crypto.getRandomValues(), then use change_id(<prefix>) — a
       // multi-match id-prefix revset — to trigger the ambiguity.
       const spy = jest.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation((arr) => {
-        for (let i = 0; i < arr.length; i++) arr[i] = i === 0 ? 0xab : Math.floor(Math.random() * 256);
+        for (let i = 0; i < arr.length; i++)
+          arr[i] = i === 0 ? 0xab : Math.floor(Math.random() * 256);
         return arr;
       });
       try {
