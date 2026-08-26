@@ -1,5 +1,7 @@
 # isomorphic-jj
 
+Full documentation: [opensource.johnhenry.me/isomorphic-jj](https://opensource.johnhenry.me/isomorphic-jj/)
+
 > Previously published as `isomorphic-jj` (last release 1.7.0, now deprecated).
 > Renamed to `@johnhenry/isomorphic-jj` and restarted at 0.0.0 on import into
 > the @johnhenry family — a new address and era, not a maturity signal.
