@@ -11,7 +11,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS intentionally excluded: hosted macOS runners are the
+        # scarcest/slowest to schedule, and this is a pure-JS library with
+        # no native/platform-specific code path — Linux + Windows already
+        # cover the realistic cross-platform risk (path separators, line
+        # endings, filesystem case-sensitivity).
+        os: [ubuntu-latest, windows-latest]
         node: [20, 22]
 
     steps:
