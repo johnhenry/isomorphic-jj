@@ -50,7 +50,7 @@ describe('WorkspaceManager', () => {
     (process.platform === 'win32' ? it.skip : it)(
       'should create .git file pointing to main repo',
       async () => {
-        const workspace = await workspaces.add({
+        await workspaces.add({
           path: '/test/workspace1',
           name: 'wt1',
         });
@@ -72,7 +72,7 @@ describe('WorkspaceManager', () => {
     (process.platform === 'win32' ? it.skip : it)(
       'should create .jj file pointing to main repo',
       async () => {
-        const workspace = await workspaces.add({
+        await workspaces.add({
           path: '/test/workspace1',
           name: 'wt1',
         });
@@ -92,7 +92,7 @@ describe('WorkspaceManager', () => {
     );
 
     it('should use absolute paths for workspace markers', async () => {
-      const workspace = await workspaces.add({
+      await workspaces.add({
         path: '/test/workspace1',
         name: 'wt1',
       });

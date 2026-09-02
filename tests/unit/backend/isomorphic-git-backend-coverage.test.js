@@ -210,7 +210,7 @@ describe('IsomorphicGitBackend - coverage', () => {
       const dirs = new Set(['root', 'root/sub']);
       const mockFs = {
         promises: {
-          async readdir(p, opts) {
+          async readdir(p, _opts) {
             // withFileTypes -> return plain string names (entry.name || entry path)
             if (dirs.has(p)) return tree[p];
             // Not a directory -> throw like a real fs would for a file

@@ -242,7 +242,7 @@ describe('New API Features (v1.0)', () => {
       });
 
       it('should work with workspace name', async () => {
-        const workspace = await jj.workspace.add({
+        await jj.workspace.add({
           path: '/test/workspace3',
           name: 'ws3',
         });

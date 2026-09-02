@@ -2,13 +2,12 @@
  * @jest-environment node
  */
 
-import { jest } from '@jest/globals';
 import { createJJ } from '../../src/index.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { pipeline } from 'stream/promises';
-import { Readable, Writable } from 'stream';
+import { Readable } from 'stream';
 
 // The streaming API is built on real Node fs streams, whose flush/read timing
 // is platform- and Node-version-sensitive on Windows. Skip the whole suite

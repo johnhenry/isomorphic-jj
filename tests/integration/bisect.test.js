@@ -53,7 +53,7 @@ describe('bisect', () => {
 
       await jj.new({ message: 'v2' });
       await jj.write({ path: 'file.txt', data: 'v2' });
-      const change2 = await jj.describe({ message: 'v2' });
+      await jj.describe({ message: 'v2' });
 
       await jj.new({ message: 'v3' });
       await jj.write({ path: 'file.txt', data: 'v3' });
@@ -263,7 +263,7 @@ describe('bisect', () => {
 
       await jj.new({ message: 'v2' });
       await jj.write({ path: 'file.txt', data: 'v2' });
-      const change2 = await jj.describe({ message: 'v2' });
+      await jj.describe({ message: 'v2' });
 
       await jj.new({ message: 'v3' });
       await jj.write({ path: 'file.txt', data: 'v3' });

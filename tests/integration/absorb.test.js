@@ -108,7 +108,7 @@ describe('absorb()', () => {
     it('should absorb modifications into multiple ancestors', async () => {
       // Create a stack of changes, each modifying different lines
       await jj.write({ path: 'file.txt', data: 'line 1\nline 2\nline 3' });
-      const change1 = await jj.describe({ message: 'Add lines 1-3' });
+      await jj.describe({ message: 'Add lines 1-3' });
 
       await jj.new({ message: 'Change line 2' });
       await jj.write({ path: 'file.txt', data: 'line 1\nLINE 2\nline 3' });
@@ -162,12 +162,12 @@ describe('absorb()', () => {
   describe('New file handling', () => {
     it('should not absorb new files (not modified from ancestors)', async () => {
       await jj.write({ path: 'existing.txt', data: 'existing' });
-      const change1 = await jj.describe({ message: 'Add existing' });
+      await jj.describe({ message: 'Add existing' });
 
       await jj.new({ message: 'Working' });
       await jj.write({ path: 'new.txt', data: 'new file' });
 
-      const result = await jj.absorb();
+      await jj.absorb();
 
       // Working copy should still have new.txt (can't be absorbed)
       const workingCopy = await jj.show({ change: '@' });
@@ -182,7 +182,7 @@ describe('absorb()', () => {
       await jj.write({ path: 'existing.txt', data: 'modified' });
       await jj.write({ path: 'new.txt', data: 'new' });
 
-      const result = await jj.absorb();
+      await jj.absorb();
 
       // existing.txt should be absorbed, new.txt should remain
       const workingCopy = await jj.show({ change: '@' });
@@ -289,7 +289,7 @@ describe('absorb()', () => {
     it('should absorb file-level changes when line tracking not available', async () => {
       // In simplified mode, absorb just updates the most recent change that touched each file
       await jj.write({ path: 'file.txt', data: 'v1' });
-      const change1 = await jj.describe({ message: 'Change 1' });
+      await jj.describe({ message: 'Change 1' });
 
       await jj.new({ message: 'Change 2' });
       await jj.write({ path: 'file.txt', data: 'v2' });

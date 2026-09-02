@@ -327,7 +327,7 @@ describe('JJ CLI Parity Features', () => {
   describe('operations.show(), diff(), restore()', () => {
     it('should show operation details', async () => {
       await jj.write({ path: 'test.txt', data: 'test' });
-      const change = await jj.new({ message: 'Test change' });
+      await jj.new({ message: 'Test change' });
 
       const ops = await jj.operations.list({ limit: 1 });
       const latestOp = ops[0];
@@ -487,7 +487,7 @@ describe('JJ CLI Parity Features', () => {
     it('should make changes siblings', async () => {
       // Create a linear chain of changes
       await jj.write({ path: 'file1.txt', data: 'test1' });
-      const change1 = await jj.new({ message: 'Change 1' });
+      await jj.new({ message: 'Change 1' });
 
       await jj.write({ path: 'file2.txt', data: 'test2' });
       const change2 = await jj.new({ message: 'Change 2' });
@@ -548,8 +548,7 @@ describe('JJ CLI Parity Features', () => {
   describe('operations.revert()', () => {
     it('should revert an operation', async () => {
       // Get initial state
-      const ops1 = await jj.operations.list({ limit: 1 });
-      const op1 = ops1[0];
+      await jj.operations.list({ limit: 1 });
 
       // Create a bookmark
       const change = await jj.new({ message: 'Test' });
@@ -599,8 +598,7 @@ describe('JJ CLI Parity Features', () => {
       // Create several operations to have a chain
       await jj.write({ path: 'file1.txt', data: 'content1' });
       await jj.new({ message: 'Change 1' });
-      const ops1 = await jj.operations.list({ limit: 1 });
-      const op1 = ops1[0];
+      await jj.operations.list({ limit: 1 });
 
       await jj.write({ path: 'file2.txt', data: 'content2' });
       await jj.new({ message: 'Change 2' });
@@ -664,7 +662,6 @@ describe('JJ CLI Parity Features', () => {
       // Get current head
       const opsBefore = await jj.operations.list({ limit: 2 });
       const headOp = opsBefore[0];
-      const previousOp = opsBefore[1];
 
       // Abandon head
       const result = await jj.operations.abandon({ operation: headOp.id });
@@ -678,8 +675,7 @@ describe('JJ CLI Parity Features', () => {
       // Create a parent operation
       await jj.write({ path: 'parent.txt', data: 'parent' });
       await jj.new({ message: 'Parent' });
-      const parentOps = await jj.operations.list({ limit: 1 });
-      const parentOp = parentOps[0];
+      await jj.operations.list({ limit: 1 });
 
       // Create middle operation to abandon
       await jj.write({ path: 'middle.txt', data: 'middle' });

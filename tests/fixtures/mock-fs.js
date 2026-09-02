@@ -28,7 +28,7 @@ export class MockFS {
     };
   }
 
-  async mkdir(path, opts = {}) {
+  async mkdir(path, _opts = {}) {
     // Mock mkdir - just track that directory was created
     this.files.set(normPath(path), { type: 'dir', created: Date.now() });
   }
@@ -83,7 +83,7 @@ export class MockFS {
     };
   }
 
-  async access(path, mode) {
+  async access(path, _mode) {
     const file = this.files.get(normPath(path));
     if (!file) {
       const error = new Error(`ENOENT: no such file or directory, access '${path}'`);
@@ -98,7 +98,7 @@ export class MockFS {
     // Return all files that start with this path
     const dir = normPath(path);
     const results = [];
-    for (const [filePath, file] of this.files.entries()) {
+    for (const [filePath] of this.files.entries()) {
       if (filePath.startsWith(dir + '/')) {
         const relativePath = filePath.substring(dir.length + 1);
         const firstSegment = relativePath.split('/')[0];

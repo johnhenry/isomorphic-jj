@@ -54,7 +54,7 @@ describe('Git Remote Operations', () => {
     test('should be able to manage Git refs', async () => {
       // Create a blob and commit for the ref
       const content = new TextEncoder().encode('Test');
-      const blobOid = await jj.backend.putObject('blob', content);
+      await jj.backend.putObject('blob', content);
 
       // In a real scenario, we'd create a proper commit
       // For now, just test ref operations

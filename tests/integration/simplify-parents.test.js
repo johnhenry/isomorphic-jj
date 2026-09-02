@@ -44,11 +44,11 @@ describe('simplifyParents()', () => {
       // Create linear chain: A -> B -> C
       // In a linear chain, there are no redundant parents
       await jj.write({ path: 'a.txt', data: 'a' });
-      const changeA = await jj.describe({ message: 'A' });
+      await jj.describe({ message: 'A' });
 
       await jj.new({ message: 'B' });
       await jj.write({ path: 'b.txt', data: 'b' });
-      const changeB = await jj.describe({ message: 'B' });
+      await jj.describe({ message: 'B' });
 
       await jj.new({ message: 'C' });
       await jj.write({ path: 'c.txt', data: 'c' });

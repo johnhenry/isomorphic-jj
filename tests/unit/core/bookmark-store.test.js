@@ -3,7 +3,6 @@
  */
 
 import { BookmarkStore } from '../../../src/core/bookmark-store.js';
-import { JJError } from '../../../src/utils/errors.js';
 import { MockFS } from '../../fixtures/mock-fs.js';
 import { Storage } from '../../../src/core/storage-manager.js';
 
