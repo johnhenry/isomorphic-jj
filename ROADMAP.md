@@ -1,7 +1,7 @@
 # isomorphic-jj Roadmap
 
-**Current Version**: v1.7.0 ✅ (tracks jj through v0.43)
-**Last Updated**: 2026-07-05
+**Current Version**: 0.2.0 (`@johnhenry/isomorphic-jj`; tracks jj through v0.44 — same library/API lineage as the old `isomorphic-jj` package, which reached v1.7.0 before the rename)
+**Last Updated**: 2026-09-02
 
 > **v1.7.0:** rewrote the revset engine's parser around a real tokenizer +
 > recursive-descent AST (fixing nested function-call arguments like
@@ -275,4 +275,4 @@ All remaining JJ CLI parity features completed:
 
 ---
 
-**Current Status**: 501 tests, 100% passing | v1.0+ Complete with full JJ CLI compatibility!
+**Current Status**: 1730 tests passing | Broad JJ CLI semantic compatibility; see [CHANGELOG.md](./CHANGELOG.md) for release-by-release detail.

@@ -1,6 +1,61 @@
 # Changelog
 
-## Unreleased — Documentation overhaul: examples suite
+## 0.2.0 — 2026-09-02
+
+The first `@johnhenry/isomorphic-jj` release since 0.1.0, and the first
+scoped release to carry the audit fixes from PR #19 below — **the published
+0.1.0 tarball on npm predates #19** and does not include them.
+
+### Fixed (PR #19 — audit findings)
+
+Fixes all 8 findings from a bug-hunt audit of the storage/operation-log,
+undo/redo, revset, and Git-push layers:
+
+- **Same-process storage locking.** `Storage.appendLine()`/`write()` did
+  read-then-write with no lock, so concurrent same-process calls (e.g. a
+  user command racing `BackgroundOps`'s autosnapshot) could silently drop an
+  entry. Added a path-keyed in-process async mutex (`src/utils/mutex.js`)
+  that serializes the full critical section for both methods. Scoped to
+  same-process concurrency per the audit's guidance; cross-process locking
+  is a follow-up.
+- **`undo()` now reverts in-place content mutations.** Previously it never
+  restored `ChangeGraph`/tag mutations made in place. `describe()` now
+  snapshots the affected `ChangeGraph` node before mutating it (mirroring
+  the existing `fileSnapshot` pattern), and `undo()` restores it.
+  `operations.revert()` now also diffs/restores `tags`, not just
+  `bookmarks`.
+- **Ambiguous change-id prefixes now throw `AMBIGUOUS_ID`.** `show()`
+  previously resolved an ambiguous prefix silently to the first match; it
+  now throws `AMBIGUOUS_ID` listing all matches.
+- **`push()` surfaces categorized error codes.** Previously all per-ref
+  errors were swallowed into a bare ref name. Rejected refs now carry a
+  categorized `code` (`AUTH_FAILED`/`NETWORK_ERROR`/`NON_FAST_FORWARD`/
+  `OTHER`) and `reason` so callers can tell an auth failure apart from a
+  non-fast-forward rejection instead of guessing.
+- **Conflict-marker newline fix.** Markers could fuse content onto boundary
+  markers when content lacked a trailing newline; now forces a newline
+  separator for non-empty content.
+- **Atomic protobuf writes.** `jj-operation-store.js`, `jj-view-store.js`,
+  and `jj-tree-state.js` risked a truncated/undecodable file on a mid-write
+  crash. Now route through a shared `atomicWriteFile()` temp+rename helper
+  (`src/utils/atomic-write.js`).
+- **Weak temp-file naming fixed alongside storage locking** by adding a
+  random suffix, so two concurrent writes can't collide on the same temp
+  filename.
+- **Open-ended revset ranges** (`..b`, `a..`, `::`) failed with a
+  misleading "invalid IDs" error; they now delegate to the existing
+  `ancestors()`/`descendants()`/`all()` implementations.
+
+Closes #11–#18. See [PR #19](https://github.com/johnhenry/isomorphic-jj/pull/19).
+
+### CI (PR #20)
+
+- Dropped macOS from the test matrix — hosted macOS runners are scarce/slow
+  to schedule and this is a pure-JS library with no native code path; Linux
+  + Windows already cover realistic cross-platform risk. See
+  [PR #20](https://github.com/johnhenry/isomorphic-jj/pull/20).
+
+### Documentation overhaul: examples suite
 
 - **New `examples/` directory: 12 numbered, runnable examples** covering the
   core loop (init/describe/new/log), stable-ID stacked changes, history
@@ -25,6 +80,13 @@
   rather than modifications, duration revsets needing committer timestamps,
   `init()` after `git.clone()` re-rooting `refs/heads/main`) are documented
   there rather than papered over.
+
+### Publishing
+
+- `@johnhenry/isomorphic-jj@0.2.0` is published from `main`. A final
+  unscoped bridge release, `isomorphic-jj@1.8.0` (same code as this
+  release), will follow so existing unscoped installs get one more version
+  pointing at the new package before the unscoped name is deprecated.
 
 ## 0.1.0 — Track jj through v0.44
 

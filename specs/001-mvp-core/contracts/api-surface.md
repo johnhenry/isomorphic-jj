@@ -41,7 +41,7 @@ interface JJOptions {
 
 **Example**:
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import * as git from 'isomorphic-git';
 import fs from 'fs';
 import http from 'isomorphic-git/http/node';
@@ -777,7 +777,7 @@ export interface JJ {
 ### Basic Workflow
 
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import fs from 'fs';
 
 // Initialize repository

@@ -3,7 +3,7 @@
  * Handles pages, workspaces, conflicts, and merging
  */
 
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import { EventEmitter } from 'events';
 import { MarkdownMergeDriver } from '../merge/markdown-driver.js';
 

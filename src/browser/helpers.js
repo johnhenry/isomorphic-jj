@@ -17,8 +17,8 @@
  *
  * @example
  * ```javascript
- * import { createBrowserFS } from 'isomorphic-jj/browser';
- * import { createJJ } from 'isomorphic-jj';
+ * import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
+ * import { createJJ } from '@johnhenry/isomorphic-jj';
  * import git from 'isomorphic-git';
  * import http from 'isomorphic-git/http/web';
  *

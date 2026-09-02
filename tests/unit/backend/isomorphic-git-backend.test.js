@@ -100,7 +100,7 @@ describe('IsomorphicGitBackend', () => {
 
     test('should create and read ref', async () => {
       const content = new TextEncoder().encode('test');
-      const blobOid = await backend.putObject('blob', content);
+      await backend.putObject('blob', content);
 
       // Create commit
       const commitOid = await git.commit({

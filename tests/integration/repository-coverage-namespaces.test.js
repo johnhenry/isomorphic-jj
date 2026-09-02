@@ -7,7 +7,6 @@
 import { createJJ } from '../../src/index.js';
 import { MockFS } from '../fixtures/mock-fs.js';
 
-const ZERO = '0'.repeat(32);
 const NOPE = 'a'.repeat(32);
 
 describe('repository.js coverage — namespaces & stubs', () => {

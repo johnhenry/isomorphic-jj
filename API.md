@@ -26,7 +26,7 @@ Complete API reference for isomorphic-jj, a pure JavaScript implementation of Ju
 ## Getting Started
 
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 
 // Node.js
 import fs from 'fs';
@@ -75,7 +75,7 @@ The JJ instance provides access to all repository operations through organized n
 
 **Example (Node.js)**:
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import fs from 'fs';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/node/index.js';
@@ -104,7 +104,7 @@ await jj.describe({ message: 'Initial commit' });
 
 **Example (Browser with LightningFS)**:
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import FS from '@isomorphic-git/lightning-fs';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web/index.js';
@@ -136,7 +136,7 @@ await jj.init({
 
 **Example (Browser with OPFS - Origin Private File System)**:
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web/index.js';
 
@@ -184,105 +184,104 @@ const jj = await createJJ({
 
 ### Browser Utilities
 
-isomorphic-jj provides additional browser-specific utilities:
+isomorphic-jj provides additional browser-specific utilities, all exported from
+the `@johnhenry/isomorphic-jj/browser` entry point (see `src/browser/helpers.js`):
 
-#### `getBrowserCapabilities()`
-Detect browser capabilities for storage and file system access.
+#### `detectCapabilities()`
+Detect browser capabilities for storage and worker support. Synchronous —
+returns `{ environment: 'node', ... }` outside a browser instead of throwing.
 
 **Returns**:
 ```typescript
 {
-  hasIndexedDB: boolean;           // IndexedDB support
-  hasPersistentStorage: boolean;   // Persistent storage API
-  hasServiceWorker: boolean;       // Service Worker support
-  hasFileSystemAccess: boolean;    // File System Access API
-  hasOPFS: boolean;                // Origin Private File System
-  estimatedQuota: number;          // Estimated storage quota (bytes)
+  environment: 'browser' | 'node';
+  indexedDB: boolean;          // IndexedDB support
+  serviceWorker: boolean;      // Service Worker support
+  persistentStorage: boolean;  // Persistent storage API present
+  sharedArrayBuffer: boolean;  // SharedArrayBuffer support
+  webWorker: boolean;          // Web Worker support
 }
 ```
 
 **Example**:
 ```javascript
-import { getBrowserCapabilities } from 'isomorphic-jj/browser';
+import { detectCapabilities } from '@johnhenry/isomorphic-jj/browser';
 
-const caps = await getBrowserCapabilities();
-console.log('IndexedDB available:', caps.hasIndexedDB);
-console.log('Storage quota:', Math.round(caps.estimatedQuota / 1024 / 1024), 'MB');
-
-if (caps.hasOPFS) {
-  console.log('Can use OPFS for better performance');
+const caps = detectCapabilities();
+if (caps.indexedDB && caps.serviceWorker) {
+  console.log('Offline support available');
 }
 ```
 
 ---
 
 #### `requestPersistentStorage()`
-Request persistent storage permission from the browser.
+Request persistent storage permission from the browser (prevents eviction
+under storage pressure).
 
 **Returns**: `Promise<boolean>` - `true` if permission granted
 
 **Example**:
 ```javascript
-import { requestPersistentStorage } from 'isomorphic-jj';
+import { requestPersistentStorage } from '@johnhenry/isomorphic-jj/browser';
 
 const granted = await requestPersistentStorage();
-if (granted) {
-  console.log('Storage will persist across sessions');
-} else {
-  console.log('Storage may be cleared by browser');
+console.log(granted ? 'Storage will persist across sessions' : 'Storage may be evicted');
+```
+
+---
+
+#### `isPersistentStorage()`
+Check whether persistent storage has already been granted, without prompting.
+
+**Returns**: `Promise<boolean>`
+
+**Example**:
+```javascript
+import { isPersistentStorage } from '@johnhenry/isomorphic-jj/browser';
+
+if (!(await isPersistentStorage())) {
+  console.log('Storage is not yet persistent');
 }
 ```
 
 ---
 
-#### `getStorageEstimate()`
-Get current storage usage and quota.
+#### `getStorageQuota()`
+Get current storage usage and quota via `navigator.storage.estimate()`.
+Returns `null` where the Storage API isn't supported.
 
 **Returns**:
 ```typescript
 Promise<{
-  usage: number;    // Current usage in bytes
-  quota: number;    // Total quota in bytes
-  percent: number;  // Usage percentage
-}>
+  usage: number;       // Current usage in bytes
+  quota: number;       // Total quota in bytes
+  available: number;   // quota - usage
+  percentage: number;  // Usage percentage
+} | null>
 ```
 
 **Example**:
 ```javascript
-import { getStorageEstimate } from 'isomorphic-jj';
+import { getStorageQuota } from '@johnhenry/isomorphic-jj/browser';
 
-const estimate = await getStorageEstimate();
-console.log(`Using ${estimate.usage} / ${estimate.quota} bytes (${estimate.percent}%)`);
-
-if (estimate.percent > 80) {
-  console.warn('Storage nearly full!');
+const quota = await getStorageQuota();
+if (quota) {
+  console.log(`Using ${quota.usage} of ${quota.quota} bytes (${quota.percentage}%)`);
 }
 ```
 
 ---
 
-#### `clearBrowserStorage()`
-Clear all isomorphic-jj data from browser storage.
+#### `serviceWorker`
+Namespace with `register(scriptURL, options?)`, `unregister()`, and
+`isRegistered()` helpers for offline support. See `src/browser/helpers.js`
+for the full signatures.
 
-**Parameters**:
-```typescript
-{
-  filesystem?: string;  // LightningFS name to clear (default: all)
-}
-```
-
-**Returns**: `Promise<void>`
-
-**Example**:
-```javascript
-import { clearBrowserStorage } from 'isomorphic-jj';
-
-// Clear all storage
-await clearBrowserStorage();
-
-// Clear specific filesystem
-await clearBrowserStorage({ filesystem: 'my-app-repos' });
-```
+There is no built-in "clear all storage" helper — the library doesn't own
+a separate storage namespace to wipe. To reset a repo, delete its
+`createBrowserFS({ name })` database directly (e.g. `indexedDB.deleteDatabase(name)`)
+or point `createBrowserFS({ wipe: true })` at it.
 
 ---
 
@@ -316,7 +315,7 @@ class JJError extends Error {
 
 **Example**:
 ```javascript
-import { createJJ, JJError } from 'isomorphic-jj';
+import { createJJ, JJError } from '@johnhenry/isomorphic-jj';
 
 try {
   await jj.bookmark.create({ name: 'main' });
@@ -360,7 +359,7 @@ import type {
   MergeStrategy,
   ConflictType,
   FileStatus
-} from 'isomorphic-jj';
+} from '@johnhenry/isomorphic-jj';
 ```
 
 See the full type definitions in `src/types.d.ts`.
@@ -2433,49 +2432,29 @@ jj.on('conflict-detected', async (event) => {
 
 ## Browser Support
 
-isomorphic-jj includes utilities for browser environments:
-
-### `getBrowserCapabilities()`
-Detect browser capabilities.
-
-**Returns**:
-```typescript
-{
-  hasIndexedDB: boolean;
-  hasPersistentStorage: boolean;
-  hasServiceWorker: boolean;
-  hasFileSystemAccess: boolean;
-  estimatedQuota: number;
-}
-```
-
-### `requestPersistentStorage()`
-Request persistent storage permission.
-
-**Returns**: `Promise<boolean>`
-
-### `getStorageEstimate()`
-Get storage usage and quota.
-
-**Returns**: `Promise<{ usage: number; quota: number }>`
+isomorphic-jj includes utilities for browser environments (see
+[Browser Utilities](#browser-utilities) above for full signatures):
+`detectCapabilities()`, `requestPersistentStorage()`,
+`isPersistentStorage()`, `getStorageQuota()`, and `serviceWorker`.
 
 ### Example
 
 ```javascript
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import {
-  createJJ,
-  getBrowserCapabilities,
-  requestPersistentStorage
-} from 'isomorphic-jj';
+  detectCapabilities,
+  requestPersistentStorage,
+  createBrowserFS,
+} from '@johnhenry/isomorphic-jj/browser';
 
 // Check capabilities
-const caps = await getBrowserCapabilities();
-if (caps.hasPersistentStorage) {
+const caps = detectCapabilities();
+if (caps.persistentStorage) {
   await requestPersistentStorage();
 }
 
-// Create JJ instance with LightningFS
-import { fs } from '@isomorphic-git/lightning-fs';
+// Create JJ instance with an IndexedDB-backed filesystem
+const fs = createBrowserFS({ name: 'my-repo' });
 const jj = await createJJ({ fs, dir: '/repo' });
 ```
 
@@ -2523,7 +2502,7 @@ try {
 isomorphic-jj includes complete TypeScript type definitions:
 
 ```typescript
-import { JJ, Change, Conflict, Operation } from 'isomorphic-jj';
+import { JJ, Change, Conflict, Operation } from '@johnhenry/isomorphic-jj';
 
 const jj: JJ = await createJJ({ fs, dir: '/repo' });
 
@@ -2536,23 +2515,21 @@ const ops: Operation[] = await jj.operations.list();
 
 ## Version Compatibility
 
-isomorphic-jj v1.0+ provides:
+isomorphic-jj provides:
 
-- ✅ **100% JJ CLI command coverage** - All commonly-used JJ CLI commands have JavaScript equivalents
-- ✅ **~90% revset parity** - Comprehensive revset query support
-- ✅ **510 tests, 100% passing** - Extensively tested
-- ✅ **Zero breaking changes** - 100% backward compatible
-- ✅ **JJ CLI repository compatibility** - Repositories created by isomorphic-jj can be read by jj CLI
+- ✅ **Broad JJ CLI command coverage** - Most commonly-used JJ CLI commands have JavaScript equivalents
+- ✅ **Comprehensive revset support** - see [Revset Query Language](#revset-query-language)
+- ✅ **Extensively tested** - see [CHANGELOG.md](./CHANGELOG.md) for current test counts and what changed each release
+- ✅ **JJ CLI repository compatibility** - Repositories created by isomorphic-jj can be read by the `jj` CLI
 
 ---
 
 ## Further Reading
 
-- [GitHub Repository](https://github.com/jujutsu-vcs/isomorphic-jj)
-- [JJ CLI Documentation](https://martinvonz.github.io/jj/)
-- [Migration Guide](./MIGRATION.md)
+- [GitHub Repository](https://github.com/johnhenry/isomorphic-jj)
+- [JJ CLI Documentation](https://jj-vcs.github.io/jj/latest/)
+- [Migration Guide](./MIGRATION_FROM_ISOMORPHIC_GIT.md)
 - [Roadmap](./ROADMAP.md)
-- [JJ CLI Parity Analysis](./JJ_CLI_PARITY.md)
 
 ---
 

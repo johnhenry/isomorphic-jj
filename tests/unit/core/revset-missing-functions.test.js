@@ -95,7 +95,7 @@ describe('Missing Revset Functions', () => {
         conflicts: { 'file.txt': { sides: ['A', 'B'] } },
       });
 
-      const change2 = await graph.createChange({
+      await graph.createChange({
         parents: [change1.changeId],
         description: 'Child of conflict',
       });
@@ -187,7 +187,7 @@ describe('Missing Revset Functions', () => {
     });
 
     it('should return empty set for untracked() when all files tracked', async () => {
-      const change1 = await graph.createChange({
+      await graph.createChange({
         parents: [],
         description: 'All files tracked',
         fileSnapshot: { 'file.txt': 'content' },
@@ -285,13 +285,13 @@ describe('Missing Revset Functions', () => {
 
   describe('Integration with existing functions', () => {
     it('should work with conflicted() in complex expressions', async () => {
-      const change1 = await graph.createChange({
+      await graph.createChange({
         parents: [],
         description: 'Conflict',
         conflicts: { 'file.txt': { sides: ['A', 'B'] } },
       });
 
-      const change2 = await graph.createChange({
+      await graph.createChange({
         parents: [],
         description: 'No conflict',
       });

@@ -3,7 +3,6 @@
  */
 
 import { Storage } from '../../../src/core/storage-manager.js';
-import { JJError } from '../../../src/utils/errors.js';
 import { MockFS } from '../../fixtures/mock-fs.js';
 
 describe('Storage Manager', () => {

@@ -18,7 +18,7 @@ Configuration is loaded and merged in this order (later overrides earlier):
 Stored in `.jj/config.json`:
 
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import fs from 'fs';
 
 const repo = await createJJ({ dir: '/path/to/repo', fs });
@@ -93,7 +93,7 @@ await repo.config.load({
 No file I/O needed in tests:
 
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import { vol } from 'memfs';
 
 const repo = await createJJ({ dir: '/test', fs: vol });
@@ -116,8 +116,8 @@ await repo.config.load({
 Dynamic configuration in browser environments:
 
 ```javascript
-import { createBrowserFS } from 'isomorphic-jj/browser';
-import { createJJ } from 'isomorphic-jj';
+import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 
 const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
 const repo = await createJJ({ fs, dir: '/repo' });
@@ -360,8 +360,8 @@ async function loadUserConfig(userId) {
 All configuration features work in the browser using LightningFS:
 
 ```javascript
-import { createBrowserFS } from 'isomorphic-jj/browser';
-import { createJJ } from 'isomorphic-jj';
+import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 
 const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
 const repo = await createJJ({ fs, dir: '/repo' });

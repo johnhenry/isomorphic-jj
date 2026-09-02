@@ -73,7 +73,7 @@ describe('History Operations Integration', () => {
     it('should filter by revset expression', async () => {
       // Create changes with specific descriptions
       await jj.describe({ message: 'Initial setup' });
-      const change1 = await jj.new({ message: 'Fix bug in parser' });
+      await jj.new({ message: 'Fix bug in parser' });
       await jj.new({ message: 'Add new feature' });
 
       // Use revset to filter

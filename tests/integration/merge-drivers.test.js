@@ -312,13 +312,13 @@ describe('Merge Drivers', () => {
       await jj.init();
 
       // Global driver
-      const globalDriver = async ({ content }) => ({
+      const globalDriver = async ({ content: _content }) => ({
         content: 'GLOBAL',
         hasConflict: false,
       });
 
       // Per-merge driver
-      const perMergeDriver = async ({ content }) => ({
+      const perMergeDriver = async ({ content: _content }) => ({
         content: 'PER-MERGE',
         hasConflict: false,
       });
@@ -568,7 +568,7 @@ describe('Merge Drivers', () => {
       const jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
       await jj.init();
 
-      const successDriver = async (context) => {
+      const successDriver = async (_context) => {
         return {
           hasConflict: false,
           content: 'merged successfully',
