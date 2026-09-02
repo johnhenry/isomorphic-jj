@@ -3,7 +3,7 @@
  * Wraps isomorphic-jj for document storage operations
  */
 
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import { EventEmitter } from 'events';
 
 export class JJStorageBackend extends EventEmitter {

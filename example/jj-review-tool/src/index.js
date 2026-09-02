@@ -3,7 +3,7 @@
  * Main library exports
  */
 
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import { ReviewManager } from './review/manager.js';
 
 export async function createReviewTool(options) {

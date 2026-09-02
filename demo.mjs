@@ -123,7 +123,7 @@ await jj.write({ path: 'README.md', data: '# Demo Project\n\nShowcasing isomorph
 await jj.write({ path: 'package.json', data: JSON.stringify({
   name: 'demo-project',
   version: '1.0.0',
-  dependencies: { 'isomorphic-jj': '^1.0.0' }
+  dependencies: { '@johnhenry/isomorphic-jj': '^0.2.0' }
 }, null, 2) });
 await jj.describe({ message: 'Initial project setup' });
 
@@ -1594,5 +1594,5 @@ console.log('  ✓ Complete documentation');
 console.log('  ✓ Node.js and browser support');
 console.log('  ✓ Git interoperability\n');
 
-console.log('Get started: npm install isomorphic-jj\n');
+console.log('Get started: npm install @johnhenry/isomorphic-jj\n');
 console.log('Documentation: https://github.com/johnhenry/isomorphic-jj\n');

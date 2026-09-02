@@ -12,11 +12,17 @@
     "test:conflicts": "node examples/conflict-test.js",
     "test:workspaces": "node examples/workspace-test.js"
   },
-  "keywords": ["wiki", "collaboration", "version-control", "jujutsu", "conflict-resolution"],
+  "keywords": [
+    "wiki",
+    "collaboration",
+    "version-control",
+    "jujutsu",
+    "conflict-resolution"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "isomorphic-git": "^1.35.1",
-    "isomorphic-jj": "file:../.."
+    "@johnhenry/isomorphic-jj": "file:../.."
   }
 }
