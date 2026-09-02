@@ -84,7 +84,7 @@ await git.setConfig({ fs, dir, path: 'user.email', value: 'you@example.com' });
 
 **isomorphic-jj:**
 ```javascript
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 import fs from 'fs';
 
 const jj = await createJJ({ fs, dir: '/repo' });
@@ -387,8 +387,8 @@ await git.add({ fs, dir: '/repo', filepath: 'file.txt' });
 
 **isomorphic-jj:**
 ```javascript
-import { createJJ } from 'isomorphic-jj';
-import { createBrowserFS } from 'isomorphic-jj/browser';
+import { createJJ } from '@johnhenry/isomorphic-jj';
+import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
 import http from 'isomorphic-git/http/web';
 
 // Create once
@@ -556,14 +556,14 @@ Understanding the architectural differences helps explain why isomorphic-jj offe
 Install alongside isomorphic-git:
 
 ```bash
-npm install isomorphic-jj isomorphic-git
+npm install @johnhenry/isomorphic-jj isomorphic-git
 ```
 
 Use both in the same project:
 
 ```javascript
 import git from 'isomorphic-git';
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 
 // Same directory, both work!
 const jj = await createJJ({ fs, dir: '/repo' });
@@ -599,7 +599,7 @@ Remove isomorphic-git dependency:
 // await git.push({ fs, http, dir, remote, ref, onAuth });
 
 // New code:
-import { createJJ } from 'isomorphic-jj';
+import { createJJ } from '@johnhenry/isomorphic-jj';
 const jj = await createJJ({ fs, dir });
 await jj.git.push({ remote, refs: [ref], http, onAuth });
 ```

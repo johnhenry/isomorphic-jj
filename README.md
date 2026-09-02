@@ -1,16 +1,17 @@
-# isomorphic-jj
+# @johnhenry/isomorphic-jj
+
+> **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
 
 Full documentation: [opensource.johnhenry.me/isomorphic-jj](https://opensource.johnhenry.me/isomorphic-jj/)
 
-> Previously published as `isomorphic-jj` (last release 1.7.0, now deprecated).
-> Renamed to `@johnhenry/isomorphic-jj` and restarted at 0.0.0 on import into
-> the @johnhenry family — a new address and era, not a maturity signal.
+> Previously published as `isomorphic-jj` (final release 1.8.0, deprecated in
+> favor of this package). Renamed to `@johnhenry/isomorphic-jj` and restarted
+> at 0.0.0 on import into the @johnhenry family — a new address and era, not
+> a maturity signal.
 
-[![npm version](https://img.shields.io/npm/v/isomorphic-jj.svg)](https://www.npmjs.com/package/isomorphic-jj)
-[![test coverage](https://img.shields.io/badge/tests-1701%20passing-brightgreen.svg)](https://github.com/johnhenry/isomorphic-jj)
-[![license](https://img.shields.io/npm/l/isomorphic-jj.svg)](LICENSE)
-
-> **Jujutsu version control for JavaScript**—stable change IDs, fearless undo, and no staging area. Works in Node.js and browsers.
+[![npm version](https://img.shields.io/npm/v/%40johnhenry%2Fisomorphic-jj.svg)](https://www.npmjs.com/package/@johnhenry/isomorphic-jj)
+[![CI](https://github.com/johnhenry/isomorphic-jj/actions/workflows/test.yml/badge.svg)](https://github.com/johnhenry/isomorphic-jj/actions/workflows/test.yml)
+[![license](https://img.shields.io/npm/l/%40johnhenry%2Fisomorphic-jj.svg)](LICENSE)
 
 **What makes it different:**
 - 🎯 **Stable change IDs** that survive rebases/squashes
@@ -36,6 +37,60 @@ await jj.undo();
 
 ---
 
+## Try it in 60 seconds
+
+### CLI
+
+Every method is reachable from the `isojj` CLI (`bin/isojj.js`). Run it with
+`npx`, or install it globally (`npm i -g @johnhenry/isomorphic-jj`) and call
+`isojj` directly:
+
+```bash
+npx @johnhenry/isomorphic-jj init
+echo "# hello" > README.md
+npx @johnhenry/isomorphic-jj describe -m "Initial commit"
+npx @johnhenry/isomorphic-jj new -m "Add a feature"
+npx @johnhenry/isomorphic-jj log
+```
+
+```
+Change History:
+
+  cb7b4e93fd23  Add a feature
+             You  9/2/2026, 7:20:30 AM
+
+  a2f6f5af8107  Initial commit
+             You  9/2/2026, 7:20:30 AM
+```
+
+Run `npx @johnhenry/isomorphic-jj --help` for the full command list.
+
+### Node.js
+
+```javascript
+import { createJJ } from '@johnhenry/isomorphic-jj';
+import fs from 'fs';
+
+const jj = await createJJ({ fs, dir: './my-repo' });
+await jj.init({ userName: 'You', userEmail: 'you@example.com' });
+await jj.write({ path: 'README.md', data: '# hello\n' });
+await jj.describe({ message: 'Initial commit' });
+console.log(await jj.log({ limit: 5 }));
+```
+
+### Browser
+
+```javascript
+import { createJJ } from '@johnhenry/isomorphic-jj';
+import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
+
+const fs = createBrowserFS({ name: 'my-repo' });
+const jj = await createJJ({ fs, dir: '/repo' });
+// Same API as Node from here on — see examples/12-browser.mjs.
+```
+
+---
+
 ## Quick Start
 
 **Coming from isomorphic-git?** Read the [Migration Guide](./MIGRATION_FROM_ISOMORPHIC_GIT.md) to see how isomorphic-jj simplifies your JavaScript version control workflow.
@@ -45,6 +100,43 @@ await jj.undo();
 node demo.mjs
 ```
 This showcases all 17 feature categories (including v1.0 enhancements) in ~3 seconds with beautiful output.
+
+---
+
+## Examples
+
+The [`examples/`](./examples) directory has 12 numbered, runnable, self-asserting
+scripts — each creates a repo in a temp dir, demonstrates one area, and cleans
+up after itself. Run one with `npm run example:01` (etc.), or the whole set
+(the same loop CI runs) with:
+
+```bash
+npm run examples
+```
+
+| # | What it shows |
+|---|----------------|
+| [01](./examples/01-init-commit-log.mjs) | The core loop: init → write → `describe()` → `new()` → `log()` |
+| [02](./examples/02-stacked-changes.mjs) | Stable change IDs across a 3-layer stack; `edit()`+`amend()` a bottom layer |
+| [03](./examples/03-history-editing.mjs) | `split()`, `squash({ into })`, `abandon()`/`unabandon()`, `duplicate()` |
+| [04](./examples/04-branching-and-merging.mjs) | Diverging without branches; content merge vs. true merge changes |
+| [05](./examples/05-conflicts.mjs) | First-class conflicts: dry-run preview, `conflicts.list()`/`resolve()` |
+| [06](./examples/06-revsets.mjs) | The revset query language, end to end |
+| [07](./examples/07-bookmarks-and-tags.mjs) | Bookmarks, tags, and remote tracking |
+| [08](./examples/08-git-interop.mjs) | Real `git.clone()`/`push()`/`fetch()` against a local fixture, zero network |
+| [09](./examples/09-config.mjs) | Config layers: persisted, programmatic, deep-merge, reset |
+| [10](./examples/10-undo-and-oplog.mjs) | `undo()`/`redo()`, `operations.at()` time travel, `obslog()` |
+| [11](./examples/11-file-operations.mjs) | The `file.*` namespace: historical `show()`, `annotate()`, `search()` |
+| [12](./examples/12-browser.mjs) | Browser usage (IndexedDB fs, persistence, CORS proxy) as a reference |
+
+See [`examples/README.md`](./examples/README.md) for details and conventions.
+
+Three fuller example applications live under [`example/`](./example) — each
+exercises the library from a different angle and documents the bugs it found:
+
+- [`jj-review-tool`](./example/jj-review-tool) — a code-review CLI built on stacked changes and bookmarks.
+- [`jj-storage-server`](./example/jj-storage-server) — a REST API using isomorphic-jj as a versioned document store.
+- [`jj-wiki`](./example/jj-wiki) — a collaborative wiki exercising workspaces and conflict resolution.
 
 ---
 
@@ -92,10 +184,10 @@ isomorphic-jj v1.0 now implements virtually all commonly-used JJ CLI commands:
 - **`operations.show/diff/restore()`** - Advanced operation log features
 - **`remote.*`** - Convenience aliases for git operations (push, fetch, add)
 
-See [JJ_CLI_PARITY.md](./JJ_CLI_PARITY.md) for complete feature comparison.
+See [ROADMAP.md](./ROADMAP.md) for the release-by-release feature comparison and what's still planned.
 
 ### Testing & Quality
-- **1714 tests** passing — ~97% statement / 91% branch coverage (v1.0–v0.1.0 post-rename)
+- **1730 tests** passing — ~97% statement / 91% branch coverage
 - **100% backward compatible** - All existing code continues to work
 - **Zero breaking changes** - Deprecated features show warnings but still function
 
@@ -905,10 +997,10 @@ repo/
 
 ## Project Status
 
-**Current Version**: v0.1.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj` v1.7.0)
-**Test Coverage**: 1714 tests, ~97% statements / 91% branches
+**Current Version**: 0.2.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.7.0 before the rename — see the provenance note at the top of this file)
+**Test Coverage**: 1730 tests passing, ~97% statements / 91% branches
 **JJ CLI parity**: tracks Jujutsu through v0.44
-**Status**: Ready for experimentation and prototyping
+**Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#related-projects). Not yet 1.0 — API surface can still shift; pin a version and read the CHANGELOG before upgrading.
 
 **Completed:**
 - ✅ v0.1: Core JJ experience (stable IDs, undo, bookmarks, revsets)
@@ -918,7 +1010,8 @@ repo/
 - ✅ v0.5: Custom merge drivers, enhanced revsets (time-based, graph analytics), conflict resolution enhancements
 - ✅ v1.0: Full JJ CLI semantic parity, complete `file.*`/`operations.*`/`git.*` namespaces
 - ✅ v1.5: Parity refresh tracking jj through **v0.43** — new revsets (`change_id`, `commit_id`, `subject`, `author_name`/`email`, `committer*`, `signed`, `divergent`, `merges`, `forks`, `first_parent`, `first_ancestors`, `fork_point`, `merge_point`, `exactly`, `present`, `coalesce`, `remote_tags`, `ancestors(x, depth)`), working `tags()`/`remote_tags()` revsets, and new commands: `revert()`, `redo()`, `sign()`/`unsign()`, `file.search()`, `bookmark.advance()`, `tag.set()`. See [CHANGELOG.md](./CHANGELOG.md).
-- ✅ v0.1.0 (post-rename): Parity refresh tracking jj through **v0.44** — `tag.track()`/`tag.untrack()`, the `builtin_log()` revset alias, and `file.search({ nameOnly: true })`; `git_refs()`/`git_head()` documented as deprecated (jj removed both in v0.43). See [CHANGELOG.md](./CHANGELOG.md) for what was deliberately left for a maintainer call (`jj run`, fetch-time remote tag/bookmark import).
+- ✅ 0.1.0 (post-rename): Parity refresh tracking jj through **v0.44** — `tag.track()`/`tag.untrack()`, the `builtin_log()` revset alias, and `file.search({ nameOnly: true })`; `git_refs()`/`git_head()` documented as deprecated (jj removed both in v0.43). See [CHANGELOG.md](./CHANGELOG.md) for what was deliberately left for a maintainer call (`jj run`, fetch-time remote tag/bookmark import).
+- ✅ 0.2.0: Storage-layer audit fixes — same-process storage locking, `undo()` reverting in-place graph/tag mutations, ambiguous change-id detection, categorized `push()` error codes, a conflict-marker newline fix, atomic protobuf writes, and open-ended revset ranges (`..b`, `a..`, `::`). See [CHANGELOG.md](./CHANGELOG.md).
 
 See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELOG.md) for the release history.
 
@@ -990,7 +1083,7 @@ A: Yes! Colocated repos expose normal Git commits. Git users never see JJ metada
 A: Comparable to isomorphic-git for Git operations. JJ metadata (JSON) is fast in Node, acceptable in browsers. Large histories need pagination.
 
 **Q: Does this support all JJ features?**
-A: Not yet. We're at v0.4. See [ROADMAP.md](./ROADMAP.md) for planned features.
+A: Broad semantic parity (tracks Jujutsu through v0.44), not every CLI/UX detail — it's a library, not a terminal UI. See [ROADMAP.md](./ROADMAP.md) for what's planned and what's deliberately out of scope.
 
 **Q: Can I migrate my Git repo?**
 A: Yes! `jj.git.init()` works on existing Git repositories.
@@ -1001,6 +1094,16 @@ A: JJ's model genuinely improves common workflows—stable change IDs, fearless 
 ---
 
 ## Related Projects
+
+### JJHub
+
+[JJHub](https://jjhub.erisera.com) is a Jujutsu-native overlay on GitHub, built
+on this library (it uses `createJJ` directly): stable change IDs and stacked
+PRs on top of your existing GitHub repos, platform-wide undo, and an MCP
+server so coding agents get the same fearless-undo, no-staging-area workflow.
+Install the CLI with `npm i -g jjhub`.
+
+### Others
 
 - [isomorphic-git](https://isomorphic-git.org/) - Pure JS Git implementation (our foundation)
 - [Jujutsu](https://jj-vcs.github.io/jj/) - The original JJ version control system
@@ -1021,5 +1124,3 @@ Built on the shoulders of:
 - [isomorphic-git](https://github.com/isomorphic-git/isomorphic-git) by William Hilton
 - [Jujutsu](https://github.com/martinvonz/jj) by Martin von Zweigbergk
 - The Git and JavaScript communities
-
-**Status**: v1.0.0 | **Tests**: 371 passing | **Ready for**: Production use
