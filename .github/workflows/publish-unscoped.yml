@@ -1,0 +1,74 @@
+name: Publish unscoped bridge release
+
+# Manual, one-off bridge: publishes a final release under the OLD unscoped
+# `isomorphic-jj` name that points users at the new `@johnhenry/isomorphic-jj`
+# package. Not tag-triggered like publish.yml — this is a deliberate,
+# infrequent action run by hand via workflow_dispatch.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish under the old unscoped name (e.g. 1.8.0)'
+        required: true
+      ref:
+        description: 'Git ref to build and publish from'
+        required: false
+        default: main
+
+permissions:
+  contents: read
+  id-token: write # Enables npm provenance (attests this build came from this repo/workflow)
+
+jobs:
+  publish-unscoped:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: 'npm'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Test (with coverage)
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Rename package for the unscoped bridge release
+        run: npm pkg set name=isomorphic-jj version=${{ inputs.version }}
+
+      - name: Prepend rename banner to README
+        run: |
+          sed -i '0,/^# /{/^# /a\
+          \
+          > **This package has moved to `@johnhenry/isomorphic-jj`.** This is the final release under the old name.
+          }' README.md
+
+      - name: Publish to npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Print manual deprecate command
+        run: |
+          echo "Run this manually after verifying the publish:"
+          echo "npm deprecate isomorphic-jj@\"*\" \"Renamed to @johnhenry/isomorphic-jj — ${{ inputs.version }} is the final release under this name. See https://github.com/johnhenry/isomorphic-jj\""
