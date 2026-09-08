@@ -64,7 +64,16 @@ jobs:
           }' README.md
 
       - name: Publish to npm
-        run: npm publish --provenance --access public
+        # Idempotent: `npm view` exits non-zero for a version that isn't on
+        # the registry yet, which is the signal to publish. Name/version here
+        # come from the workflow input, not package.json — the rename step
+        # above already overwrote package.json's own name/version fields.
+        run: |
+          if npm view "isomorphic-jj@${{ inputs.version }}" version >/dev/null 2>&1; then
+            echo "::notice title=Already published::isomorphic-jj@${{ inputs.version }} is already on npm; nothing to do."
+            exit 0
+          fi
+          npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
