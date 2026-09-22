@@ -17,7 +17,9 @@ jobs:
         # cover the realistic cross-platform risk (path separators, line
         # endings, filesystem case-sensitivity).
         os: [ubuntu-latest, windows-latest]
-        node: [20, 22]
+        # engines.node >=26.0.0 -- test the floor version directly rather
+        # than a matrix of now-unsupported older majors.
+        node: [26]
 
     steps:
       - uses: actions/checkout@v3
@@ -47,18 +49,18 @@ jobs:
       # behavior — and it's a different leg than the coverage gate to keep
       # per-job wall time balanced.
       - name: Examples
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 26
         run: npm run examples
 
       # Coverage thresholds are enforced on a single canonical platform. Coverage
       # is intrinsically machine-independent for our code, so running the gate on
       # every OS only adds cross-platform flakiness without extra signal.
       - name: Coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 20
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 26
         run: npm run test:coverage
 
       - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 20
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 26
         uses: codecov/codecov-action@v3
         with:
           files: ./coverage/lcov.info
