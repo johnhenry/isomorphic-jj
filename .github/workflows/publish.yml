@@ -9,65 +9,29 @@ on:
     tags:
       - 'v*.*.*'
 
-permissions:
-  contents: read
-  id-token: write # Enables npm provenance (attests this build came from this repo/workflow)
-
 jobs:
   publish:
-    runs-on: ubuntu-latest
-    # Optional extra gate: create an "npm-publish" environment in the repo's
-    # Settings > Environments and add required reviewers to demand manual
-    # approval before this job runs. With no such environment configured,
-    # this line is a no-op and the job runs immediately.
-    environment: npm-publish
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 26
-          cache: 'npm'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Verify tag matches package.json version
-        run: |
-          PKG_VERSION="v$(node -p "require('./package.json').version")"
-          TAG_VERSION="${GITHUB_REF#refs/tags/}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
-            exit 1
-          fi
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-      - name: Type check
-        run: npm run typecheck
-
-      - name: Test (with coverage)
-        run: npm run test:coverage
-
-      - name: Build
-        run: npm run build
-
-      - name: Publish to npm
-        # Idempotent: `npm view` exits non-zero for a version that isn't on
-        # the registry yet, which is the signal to publish.
-        run: |
-          PKG_NAME=$(node -p "require('./package.json').name")
-          PKG_VERSION=$(node -p "require('./package.json').version")
-          if npm view "$PKG_NAME@$PKG_VERSION" version >/dev/null 2>&1; then
-            echo "::notice title=Already published::$PKG_NAME@$PKG_VERSION is already on npm; nothing to do."
-            exit 0
-          fi
-          npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write # required by the reusable workflow's provenance step --
+        # see johnhenry/workflows' README for why this must be declared here too.
+    uses: johnhenry/workflows/.github/workflows/npm-publish.yml@v1
+    with:
+      node-version: "26"
+      # Folds in the pre-publish tag/package.json version check that used
+      # to be its own step -- the reusable workflow only exposes a single
+      # gate-commands script, so it runs first here and exits non-zero
+      # (failing the gate) on a mismatch.
+      gate-commands: |
+        PKG_VERSION="v$(node -p "require('./package.json').version")"
+        TAG_VERSION="${GITHUB_REF#refs/tags/}"
+        if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+          echo "::error::Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
+          exit 1
+        fi
+        npm run lint
+        npm run format:check
+        npm run typecheck
+        npm run test:coverage
+        npm run build
+    secrets: inherit

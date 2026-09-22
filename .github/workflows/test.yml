@@ -8,59 +8,44 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        # macOS intentionally excluded: hosted macOS runners are the
-        # scarcest/slowest to schedule, and this is a pure-JS library with
-        # no native/platform-specific code path — Linux + Windows already
-        # cover the realistic cross-platform risk (path separators, line
-        # endings, filesystem case-sensitivity).
-        os: [ubuntu-latest, windows-latest]
-        # engines.node >=26.0.0 -- test the floor version directly rather
-        # than a matrix of now-unsupported older majors.
-        node: [26]
+    uses: johnhenry/workflows/.github/workflows/ci.yml@v1
+    with:
+      node-versions: '["26"]'
+      os: '["ubuntu-latest", "windows-latest"]'
+      gate-commands: |
+        npm run lint
+        npm run format:check
+        npm run typecheck
+        npm run test
 
+  # Examples double as a smoke test, and coverage/codecov run on a single
+  # canonical leg -- see the inline comments. Not expressible through the
+  # reusable ci.yml (no per-matrix-leg conditionals, no way to slot a
+  # codecov upload action into gate-commands), so this stays a native job
+  # alongside the reusable `test` job above.
+  coverage:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 26
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
-      
-      - name: Lint
-        run: npm run lint
-      
-      - name: Format check
-        run: npm run format:check
-      
-      - name: Type check
-        run: npm run typecheck
-      
-      - name: Test
-        run: npm test
 
       # Examples double as a smoke test (each asserts what it demonstrates).
-      # One leg is enough — they exercise library behavior, not platform
-      # behavior — and it's a different leg than the coverage gate to keep
-      # per-job wall time balanced.
       - name: Examples
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 26
         run: npm run examples
 
-      # Coverage thresholds are enforced on a single canonical platform. Coverage
-      # is intrinsically machine-independent for our code, so running the gate on
-      # every OS only adds cross-platform flakiness without extra signal.
+      # Coverage is intrinsically machine-independent for our code, so it's
+      # enforced on a single canonical platform rather than every leg.
       - name: Coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 26
         run: npm run test:coverage
 
       - name: Upload coverage
-        if: matrix.os == 'ubuntu-latest' && matrix.node == 26
         uses: codecov/codecov-action@v3
         with:
           files: ./coverage/lcov.info
