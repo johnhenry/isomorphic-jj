@@ -37,6 +37,29 @@ await jj.undo();
 
 ---
 
+## Contents
+
+- [Try it in 60 seconds](#try-it-in-60-seconds)
+- [Quick Start](#quick-start)
+- [Examples](#examples)
+- [What's New in v1.0](#whats-new-in-v10)
+- [How is this Different?](#how-is-this-different)
+- [Features](#features)
+- [Use Cases](#use-cases)
+- [API Reference](#api-reference)
+- [Why isomorphic-jj?](#why-isomorphic-jj)
+- [Architecture](#architecture)
+- [Project Status](#project-status)
+- [Installation & Environment](#installation--environment)
+- [Security model](#security-model)
+- [Contributing](#contributing)
+- [FAQ](#faq)
+- [Family](#family)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
+---
+
 ## Try it in 60 seconds
 
 ### CLI
@@ -1000,7 +1023,7 @@ repo/
 **Current Version**: 0.2.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.7.0 before the rename — see the provenance note at the top of this file)
 **Test Coverage**: 1730 tests passing, ~97% statements / 91% branches
 **JJ CLI parity**: tracks Jujutsu through v0.44
-**Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#related-projects). Not yet 1.0 — API surface can still shift; pin a version and read the CHANGELOG before upgrading.
+**Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#family). Not yet 1.0 — API surface can still shift; pin a version and read the CHANGELOG before upgrading.
 
 **Completed:**
 - ✅ v0.1: Core JJ experience (stable IDs, undo, bookmarks, revsets)
@@ -1021,7 +1044,7 @@ See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELO
 
 ### Requirements
 
-- **Node.js**: 20.0.0 or higher (uses the Web Crypto global, stabilized in Node 20; Node 18 is EOL)
+- **Node.js**: 26.0.0 or higher, matching `engines.node` and CI (uses the Web Crypto global, stabilized in Node 20 — the family floor is higher than the functional minimum)
 - **Browsers**: Chrome 90+, Firefox 88+, Safari 14+, Edge 90+
 - **Optional**: Git CLI (for JJ CLI interop testing)
 
@@ -1039,6 +1062,58 @@ See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELO
 - Uses IndexedDB or OPFS for storage
 - Remote operations require CORS proxy for most Git hosts
 - Memory limits apply (use `limit` options for large repos)
+
+---
+
+## Security model
+
+isomorphic-jj is a headless reimplementation of JJ's model, not a wrapper
+around the `jj` or `git` binaries — that architectural choice is also its
+main security property. It does not run a sandbox and does not vet the
+repositories you point it at.
+
+**What isomorphic-jj guarantees:**
+
+- **No shell-out, ever.** The library never spawns a child process to run
+  `git`, `jj`, or any other binary — repository paths, branch/bookmark
+  names, and commit messages are handled as plain JS values through
+  `isomorphic-git`'s and `protobufjs`'s pure-JS encoders, never interpolated
+  into a shell command string. This removes the whole class of
+  shell-injection risk that a CLI-wrapping library (like `simple-git`) has
+  to defend against by construction, not by escaping.
+- **Storage writes are atomic.** `jj-operation-store.js`, `jj-view-store.js`,
+  and `jj-tree-state.js` route every write through a shared
+  `atomicWriteFile()` temp+rename helper, and same-process concurrent writes
+  to the same path are serialized through a path-keyed async mutex — a
+  crash or a racing autosnapshot mid-write cannot leave a truncated or
+  undecodable store file. Fixed in [PR #19](https://github.com/johnhenry/isomorphic-jj/pull/19) (0.2.0); scoped to
+  same-process concurrency — cross-process locking is not yet implemented
+  (see "still yours" below).
+
+**What is still yours:**
+
+- **Remote authentication and transport trust.** `git.push()`/`git.fetch()`
+  delegate to `isomorphic-git`'s HTTP client (and, in the browser, whatever
+  CORS proxy you configure) — isomorphic-jj neither stores nor validates
+  credentials, and does not verify a remote server's identity beyond what
+  that HTTP layer does. A misconfigured or malicious CORS proxy sees
+  everything a normal Git remote would.
+- **Custom merge drivers run arbitrary code with full process access.**
+  `mergeDrivers.register()` lets you register a function per file
+  pattern (`'*.json'`, `'package.json'`, …); a registered driver — yours or
+  a dependency's — executes with the same privileges as the rest of your
+  process during every merge that touches a matching path. isomorphic-jj
+  does not sandbox driver execution; treat a third-party merge driver the
+  same as any other third-party code you'd `require()`.
+- **Cross-process locking is not implemented.** The same-process mutex
+  above does not protect a repository opened by two separate OS processes
+  at once (e.g. two CLI invocations, or a CLI run concurrently with a
+  long-running server process) — don't rely on isomorphic-jj to serialize
+  those for you.
+- **No allowlisting of untrusted repository content.** Cloning or importing
+  a Git history runs its objects through the same parsing code regardless
+  of whether you trust the source, matching `isomorphic-git`'s own model —
+  this library adds no additional vetting layer.
 
 ---
 
@@ -1093,22 +1168,35 @@ A: JJ's model genuinely improves common workflows—stable change IDs, fearless 
 
 ---
 
-## Related Projects
+## Family
 
-### JJHub
+isomorphic-jj has no other package in the `@johnhenry` npm scope yet — it
+consumes and is consumed by projects outside that scope. Those relationships
+are still concrete enough to document precisely, so they're recorded here
+rather than under a vaguer "see also".
 
-[JJHub](https://jjhub.erisera.com) is a Jujutsu-native overlay on GitHub, built
-on this library (it uses `createJJ` directly): stable change IDs and stacked
-PRs on top of your existing GitHub repos, platform-wide undo, and an MCP
-server so coding agents get the same fearless-undo, no-staging-area workflow.
-Install the CLI with `npm i -g jjhub`.
+- **[JJHub](https://jjhub.erisera.com)** — a Jujutsu-native overlay on GitHub,
+  and the closest thing this library has to a downstream consumer: it calls
+  `createJJ()` directly (not a wrapped or forked copy) to get stable change
+  IDs and stacked PRs on top of existing GitHub repos, platform-wide undo,
+  and an MCP server exposing the same fearless-undo, no-staging-area
+  workflow to coding agents. JJHub is a private Erisera product, not a
+  `@johnhenry/*` package — install its CLI with `npm i -g jjhub`.
+- **[`isomorphic-git`](https://github.com/isomorphic-git/isomorphic-git)** —
+  a real, non-optional dependency: this library's Git backend support
+  (`jj.git.init/clone/push/fetch`) is built directly on isomorphic-git's
+  pure-JS Git object model, not a fork or reimplementation of it. Peer
+  dependency, not bundled — see [Installation & Environment](#installation--environment).
 
-### Others
+### Prior art
 
-- [isomorphic-git](https://isomorphic-git.org/) - Pure JS Git implementation (our foundation)
-- [Jujutsu](https://jj-vcs.github.io/jj/) - The original JJ version control system
-- [simple-git](https://github.com/steveukx/git-js) - Git wrapper for Node.js
-- [Git plumbing vs porcelain](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain) - Architecture pattern we follow
+- [Jujutsu](https://jj-vcs.github.io/jj/) — the original JJ version control
+  system this library reimplements the semantics of (headlessly, in JS; not
+  a wrapper around the `jj` binary).
+- [simple-git](https://github.com/steveukx/git-js) — a Git CLI wrapper for
+  Node.js; unlike isomorphic-jj, it shells out to the `git` binary rather
+  than reimplementing the object model in JS.
+- [Git plumbing vs porcelain](https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain) — the architecture pattern this library's own layering follows.
 
 ---
 
