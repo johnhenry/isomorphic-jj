@@ -1,19 +1,17 @@
-name: Publish unscoped bridge release
+name: Publish to npm (unscoped mirror)
 
-# Manual, one-off bridge: publishes a final release under the OLD unscoped
-# `isomorphic-jj` name that points users at the new `@johnhenry/isomorphic-jj`
-# package. Not tag-triggered like publish.yml — this is a deliberate,
-# infrequent action run by hand via workflow_dispatch.
+# Permanent parallel release: every tagged release publishes under BOTH
+# `@johnhenry/isomorphic-jj` and the unscoped `isomorphic-jj` name, same
+# version, same tag, same trigger as publish.yml -- deliberately not a
+# matrix, since the two publishes share one identical build/test run and
+# differ only in package.json's `name` field at the very end; a matrix
+# would just pay for that build/test twice for no benefit. Two names, one
+# job, each gated by its own `npm view` idempotency check so a partial
+# failure (e.g. the scoped one lands but this one fails) is safe to retry.
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to publish under the old unscoped name (e.g. 1.8.0)'
-        required: true
-      ref:
-        description: 'Git ref to build and publish from'
-        required: false
-        default: main
+  push:
+    tags:
+      - 'v*.*.*'
 
 permissions:
   contents: read
@@ -26,14 +24,21 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-node@v3
         with:
           node-version: 26
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify tag matches package.json version
+        run: |
+          PKG_VERSION="v$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -53,31 +58,19 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Rename package for the unscoped bridge release
-        run: npm pkg set name=isomorphic-jj version=${{ inputs.version }}
-
-      - name: Prepend rename banner to README
-        run: |
-          sed -i '0,/^# /{/^# /a\
-          \
-          > **This package has moved to `@johnhenry/isomorphic-jj`.** This is the final release under the old name.
-          }' README.md
+      - name: Rename package for the unscoped mirror
+        # Only the `name` field changes -- version stays whatever the tag
+        # already checked out (see the tag/version gate above), so both
+        # names always ship the exact same version together.
+        run: npm pkg set name=isomorphic-jj
 
       - name: Publish to npm
-        # Idempotent: `npm view` exits non-zero for a version that isn't on
-        # the registry yet, which is the signal to publish. Name/version here
-        # come from the workflow input, not package.json — the rename step
-        # above already overwrote package.json's own name/version fields.
         run: |
-          if npm view "isomorphic-jj@${{ inputs.version }}" version >/dev/null 2>&1; then
-            echo "::notice title=Already published::isomorphic-jj@${{ inputs.version }} is already on npm; nothing to do."
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "isomorphic-jj@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice title=Already published::isomorphic-jj@$VERSION is already on npm; nothing to do."
             exit 0
           fi
           npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Print manual deprecate command
-        run: |
-          echo "Run this manually after verifying the publish:"
-          echo "npm deprecate isomorphic-jj@\"*\" \"Renamed to @johnhenry/isomorphic-jj — ${{ inputs.version }} is the final release under this name. See https://github.com/johnhenry/isomorphic-jj\""
