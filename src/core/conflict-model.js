@@ -176,6 +176,15 @@ export class ConflictModel {
       const conflict = this._detectPathConflict(path, baseContent, leftContent, rightContent);
       if (conflict) {
         conflicts.push(conflict);
+      } else if (workingCopyDir) {
+        // No conflict, but "no conflict" doesn't mean "nothing to do": of
+        // _detectPathConflict's null-returning cases, every one *except*
+        // "right side changed, left didn't" already matches what's on disk,
+        // because `leftContent` **is** what's on disk (read straight from
+        // the working copy above) -- so only that one case needs a write.
+        if (baseContent === leftContent && baseContent !== rightContent) {
+          await this._applyCleanResolution(workingCopyDir, path, rightContent);
+        }
       }
     }
 
@@ -504,6 +513,36 @@ export class ConflictModel {
     );
 
     return result;
+  }
+
+  /**
+   * Apply a clean (non-conflicting) three-way resolution to the working
+   * copy, for the default (no merge driver) path in detectConflicts(): the
+   * "right side wins" case, where the resolved content differs from what's
+   * currently on disk (see the call site for why this is the only clean
+   * case that needs one).
+   *
+   * @param {string} workingCopyDir - Working copy directory
+   * @param {string} filePath - File path
+   * @param {any} content - The winning (right) side's content, or
+   *   `undefined` to mean the file was deleted on that side
+   */
+  async _applyCleanResolution(workingCopyDir, filePath, content) {
+    const fullPath = path.join(workingCopyDir, filePath);
+
+    if (content === undefined) {
+      await this.fs.promises.unlink(fullPath).catch(() => {});
+      return;
+    }
+
+    const dir = path.dirname(fullPath);
+    await mkdirp(this.fs, dir);
+
+    if (isBytes(content)) {
+      await this.fs.promises.writeFile(fullPath, content);
+    } else {
+      await this.fs.promises.writeFile(fullPath, content, 'utf8');
+    }
   }
 
   /**
