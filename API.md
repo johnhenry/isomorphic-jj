@@ -187,6 +187,47 @@ const jj = await createJJ({
 isomorphic-jj provides additional browser-specific utilities, all exported from
 the `@johnhenry/isomorphic-jj/browser` entry point (see `src/browser/helpers.js`):
 
+#### `createBrowserFS(opts?)`
+Create an isomorphic-git-compatible filesystem for the browser. By default,
+dynamically `import()`s `@isomorphic-git/lightning-fs` (an optional
+dependency you install yourself) and constructs an IndexedDB-backed
+instance. **Asynchronous** — always `await` the result.
+
+**Options**:
+```typescript
+{
+  backend?: 'idb' | 'memory'; // storage backend (default 'idb')
+  name?: string;              // IndexedDB database name (default 'jj')
+  wipe?: boolean;             // wipe existing data (default false)
+  fs?: any;                   // bring your own fs — see below
+}
+```
+
+**Returns**: `Promise<Object>` — a filesystem instance compatible with
+isomorphic-git (has a `.promises` API).
+
+**Example**:
+```javascript
+import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
+
+const fs = await createBrowserFS({ name: 'my-repo' });
+```
+
+**Bring your own filesystem**: pass `opts.fs` to skip the LightningFS
+auto-import entirely — useful for `memfs`, a custom OPFS-backed fs, or a
+LightningFS instance you already constructed. If `opts.fs` is a function it
+is treated as a LightningFS-shaped constructor and instantiated as
+`new opts.fs(name, { wipe })`; otherwise it is assumed to already be a
+ready-to-use fs instance and is returned unchanged.
+
+```javascript
+import { fs as memfs } from 'memfs';
+
+const fs = await createBrowserFS({ fs: memfs });
+```
+
+---
+
 #### `detectCapabilities()`
 Detect browser capabilities for storage and worker support. Synchronous —
 returns `{ environment: 'node', ... }` outside a browser instead of throwing.
@@ -2434,7 +2475,7 @@ jj.on('conflict-detected', async (event) => {
 
 isomorphic-jj includes utilities for browser environments (see
 [Browser Utilities](#browser-utilities) above for full signatures):
-`detectCapabilities()`, `requestPersistentStorage()`,
+`createBrowserFS()`, `detectCapabilities()`, `requestPersistentStorage()`,
 `isPersistentStorage()`, `getStorageQuota()`, and `serviceWorker`.
 
 ### Example
@@ -2454,7 +2495,7 @@ if (caps.persistentStorage) {
 }
 
 // Create JJ instance with an IndexedDB-backed filesystem
-const fs = createBrowserFS({ name: 'my-repo' });
+const fs = await createBrowserFS({ name: 'my-repo' });
 const jj = await createJJ({ fs, dir: '/repo' });
 ```
 

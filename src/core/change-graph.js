@@ -6,6 +6,7 @@
 
 import { JJError } from '../utils/errors.js';
 import { validateChangeId } from '../utils/validation.js';
+import { randomHex } from '../utils/id-generation.js';
 
 export class ChangeGraph {
   /**
@@ -243,10 +244,9 @@ export class ChangeGraph {
    * @returns {Promise<Record<string, any>>} Created change object
    */
   async createChange(params = {}) {
-    const crypto = await import('crypto');
-    const changeId = params.changeId || crypto.randomBytes(16).toString('hex');
-    const commitId = params.commitId || crypto.randomBytes(20).toString('hex');
-    const tree = params.tree || crypto.randomBytes(20).toString('hex');
+    const changeId = params.changeId || randomHex(16);
+    const commitId = params.commitId || randomHex(20);
+    const tree = params.tree || randomHex(20);
     const timestamp = params.timestamp || new Date().toISOString();
 
     /** @type {Record<string, any>} */

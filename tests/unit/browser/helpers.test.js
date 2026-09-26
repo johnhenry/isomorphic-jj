@@ -2,9 +2,21 @@
  * Tests for src/browser/helpers.js
  *
  * These helpers depend on browser globals (window, navigator, indexedDB,
- * SharedArrayBuffer, Worker, and a bundler-provided `require`). Jest's default
- * environment is `node`, so we toggle those globals on `globalThis` to drive
- * both the "supported" and "unsupported" branches of each helper.
+ * SharedArrayBuffer, Worker). Jest's default environment is `node`, so we
+ * toggle those globals on `globalThis` to drive both the "supported" and
+ * "unsupported" branches of each helper.
+ *
+ * createBrowserFS()'s default path (dynamic `import()` of
+ * '@isomorphic-git/lightning-fs' — not `require`, which does not exist in an
+ * ESM browser bundle; see issue #28) is covered in the sibling
+ * helpers-lightning-fs.test.js and helpers-lightning-fs-missing.test.js
+ * files instead, since exercising it needs a
+ * jest.unstable_mockModule()'d '@isomorphic-git/lightning-fs' (this repo's
+ * Jest env is `node`, with no real IndexedDB for a genuine LightningFS
+ * instance to talk to), and that mock registration is file-scoped. This
+ * file covers everything that doesn't need the dynamic import: the
+ * not-in-a-browser guard and the opts.fs injection paths, which both return
+ * before createBrowserFS() ever imports LightningFS.
  */
 
 import {
@@ -18,7 +30,7 @@ import {
 
 // Capture the original descriptors so each test can freely mutate globals and
 // we can restore a clean slate afterwards.
-const GLOBAL_KEYS = ['window', 'navigator', 'indexedDB', 'SharedArrayBuffer', 'Worker', 'require'];
+const GLOBAL_KEYS = ['window', 'navigator', 'indexedDB', 'SharedArrayBuffer', 'Worker'];
 const originals = {};
 
 beforeEach(() => {
@@ -39,17 +51,18 @@ afterEach(() => {
 });
 
 describe('createBrowserFS', () => {
-  it('throws when not in a browser (no window)', () => {
-    expect(() => createBrowserFS()).toThrow(/only be used in browser/);
+  it('throws when not in a browser (no window)', async () => {
+    await expect(createBrowserFS()).rejects.toThrow(/only be used in browser/);
   });
 
-  it('throws a helpful error when LightningFS cannot be required', () => {
+  it('returns an injected fs instance as-is, skipping the LightningFS import', async () => {
     globalThis.window = {};
-    // No `require` defined -> referencing it throws -> caught and rethrown.
-    expect(() => createBrowserFS({ name: 'repo' })).toThrow(/LightningFS not found/);
+    const fakeFs = { promises: { readFile: async () => {}, writeFile: async () => {} } };
+    const fs = await createBrowserFS({ fs: fakeFs });
+    expect(fs).toBe(fakeFs);
   });
 
-  it('constructs a LightningFS instance when require resolves it', () => {
+  it('instantiates an injected LightningFS-shaped constructor', async () => {
     globalThis.window = {};
     const ctorCalls = [];
     class FakeLightningFS {
@@ -59,29 +72,10 @@ describe('createBrowserFS', () => {
         this.opts = opts;
       }
     }
-    // The module references a bare `require`, which resolves to globalThis.require.
-    globalThis.require = (id) => {
-      expect(id).toBe('@isomorphic-git/lightning-fs');
-      return FakeLightningFS;
-    };
 
-    const fs = createBrowserFS({ name: 'my-repo', wipe: true });
+    const fs = await createBrowserFS({ fs: FakeLightningFS, name: 'my-repo', wipe: true });
     expect(fs).toBeInstanceOf(FakeLightningFS);
     expect(ctorCalls[0]).toEqual({ name: 'my-repo', opts: { wipe: true } });
-  });
-
-  it('defaults the db name and wipe flag', () => {
-    globalThis.window = {};
-    const ctorCalls = [];
-    class FakeLightningFS {
-      constructor(name, opts) {
-        ctorCalls.push({ name, opts });
-      }
-    }
-    globalThis.require = () => FakeLightningFS;
-
-    createBrowserFS();
-    expect(ctorCalls[0]).toEqual({ name: 'jj', opts: { wipe: false } });
   });
 });
 

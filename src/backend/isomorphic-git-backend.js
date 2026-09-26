@@ -11,7 +11,8 @@ import { JJCheckout } from '../core/jj-checkout.js';
 import { JJTreeState } from '../core/jj-tree-state.js';
 import { JJOperationStore } from '../core/jj-operation-store.js';
 import { JJViewStore } from '../core/jj-view-store.js';
-import crypto from 'crypto';
+import { randomHex } from '../utils/id-generation.js';
+import { mkdirp } from '../utils/mkdirp.js';
 
 /**
  * Backend adapter for isomorphic-git
@@ -674,14 +675,14 @@ export class IsomorphicGitBackend {
     const jjRepo = `${jjDir}/repo`;
 
     // Create directory structure
-    await this.fs.promises.mkdir(`${jjRepo}/store`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjRepo}/store/extra/heads`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjRepo}/op_store/operations`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjRepo}/op_store/views`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjRepo}/op_heads/heads`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjRepo}/index`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjRepo}/submodule_store`, { recursive: true });
-    await this.fs.promises.mkdir(`${jjDir}/working_copy`, { recursive: true });
+    await mkdirp(this.fs, `${jjRepo}/store`);
+    await mkdirp(this.fs, `${jjRepo}/store/extra/heads`);
+    await mkdirp(this.fs, `${jjRepo}/op_store/operations`);
+    await mkdirp(this.fs, `${jjRepo}/op_store/views`);
+    await mkdirp(this.fs, `${jjRepo}/op_heads/heads`);
+    await mkdirp(this.fs, `${jjRepo}/index`);
+    await mkdirp(this.fs, `${jjRepo}/submodule_store`);
+    await mkdirp(this.fs, `${jjDir}/working_copy`);
 
     // Write type files
     await this.fs.promises.writeFile(`${jjRepo}/store/type`, 'git');
@@ -708,8 +709,8 @@ export class IsomorphicGitBackend {
    */
   async _createInitialJJState() {
     // Generate unique IDs for initial state
-    const operationId = crypto.randomBytes(64).toString('hex'); // 512-bit = 128 hex chars
-    const viewId = crypto.randomBytes(64).toString('hex');
+    const operationId = randomHex(64); // 512-bit = 128 hex chars
+    const viewId = randomHex(64);
     const emptyTreeId = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'; // Git's empty tree hash
 
     // Get the initial commit from Git
@@ -721,7 +722,7 @@ export class IsomorphicGitBackend {
         ref: 'HEAD',
       });
       if (headOid) {
-        initialCommitId = crypto.randomBytes(64).toString('hex');
+        initialCommitId = randomHex(64);
       }
     } catch (error) {
       // No initial commit yet

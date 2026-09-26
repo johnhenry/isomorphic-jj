@@ -14,6 +14,13 @@ export interface BrowserFSOptions {
   name?: string;
   /** Wipe existing data on initialization */
   wipe?: boolean;
+  /**
+   * Bring your own filesystem instead of the default LightningFS
+   * auto-import. Pass either an already-constructed isomorphic-git
+   * compatible fs (returned as-is) or a LightningFS-shaped constructor
+   * (`new Ctor(name, { wipe })`).
+   */
+  fs?: any;
 }
 
 /**
@@ -99,11 +106,11 @@ export interface ServiceWorkerUtils {
  * import git from 'isomorphic-git';
  * import http from 'isomorphic-git/http/web';
  *
- * const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
+ * const fs = await createBrowserFS({ backend: 'idb', name: 'my-repo' });
  * const jj = await createJJ({ fs, dir: '/repo', git, http });
  * ```
  */
-export function createBrowserFS(opts?: BrowserFSOptions): any;
+export function createBrowserFS(opts?: BrowserFSOptions): Promise<any>;
 
 /**
  * Get storage quota information (browser only)

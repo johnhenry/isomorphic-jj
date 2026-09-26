@@ -10,9 +10,11 @@
  * This matches JJ's philosophy: conflicts never block you.
  */
 
-import path from 'path';
+import * as path from '../utils/posix-path.js';
 import { JJError } from '../utils/errors.js';
+import { isBytes } from '../utils/bytes.js';
 import { generateId } from '../utils/id-generation.js';
+import { mkdirp } from '../utils/mkdirp.js';
 
 /**
  * Conflict types supported by JJ
@@ -516,14 +518,14 @@ export class ConflictModel {
 
     // Ensure directory exists
     const dir = path.dirname(fullPath);
-    await this.fs.promises.mkdir(dir, { recursive: true });
+    await mkdirp(this.fs, dir);
 
     // Write main file
     if (result.content !== null && result.content !== undefined) {
-      if (Buffer.isBuffer(result.content)) {
+      if (isBytes(result.content)) {
         await this.fs.promises.writeFile(fullPath, result.content);
       } else {
-        await this.fs.promises.writeFile(fullPath, result.content, 'utf-8');
+        await this.fs.promises.writeFile(fullPath, result.content, 'utf8');
       }
     }
 
@@ -532,12 +534,12 @@ export class ConflictModel {
       for (const [additionalPath, additionalContent] of Object.entries(result.additionalFiles)) {
         const additionalFullPath = path.join(workingCopyDir, additionalPath);
         const additionalDir = path.dirname(additionalFullPath);
-        await this.fs.promises.mkdir(additionalDir, { recursive: true });
+        await mkdirp(this.fs, additionalDir);
 
-        if (Buffer.isBuffer(additionalContent)) {
+        if (isBytes(additionalContent)) {
           await this.fs.promises.writeFile(additionalFullPath, additionalContent);
         } else {
-          await this.fs.promises.writeFile(additionalFullPath, additionalContent, 'utf-8');
+          await this.fs.promises.writeFile(additionalFullPath, additionalContent, 'utf8');
         }
       }
     }

@@ -2,9 +2,30 @@
  * Tests for ID generation utilities
  */
 
-import { generateChangeId, generateOperationId } from '../../../src/utils/id-generation.js';
+import {
+  generateChangeId,
+  generateOperationId,
+  randomHex,
+} from '../../../src/utils/id-generation.js';
 
 describe('ID Generation', () => {
+  describe('randomHex', () => {
+    it('generates a byteLength * 2 character lowercase hex string', () => {
+      expect(randomHex(16)).toMatch(/^[0-9a-f]{32}$/);
+      expect(randomHex(20)).toMatch(/^[0-9a-f]{40}$/);
+      expect(randomHex(64)).toMatch(/^[0-9a-f]{128}$/);
+    });
+
+    it('generates different values on repeated calls (no Node crypto import needed)', () => {
+      // Regression guard for issue #28: this must work via the global
+      // Web Crypto API only — no `import 'crypto'`/`require('crypto')`,
+      // which don't exist in a browser bundle.
+      const a = randomHex(16);
+      const b = randomHex(16);
+      expect(a).not.toBe(b);
+    });
+  });
+
   describe('generateChangeId', () => {
     it('should generate 32-character hex string', () => {
       const changeId = generateChangeId();

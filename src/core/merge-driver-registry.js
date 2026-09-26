@@ -6,6 +6,7 @@
  */
 
 import { JJError } from '../utils/errors.js';
+import { isBytes, utf8Encode, utf8Decode } from '../utils/bytes.js';
 
 /**
  * Check if a file path matches a glob pattern
@@ -38,11 +39,11 @@ function matchesPattern(path, pattern) {
 /**
  * Check if a file is likely binary based on content
  *
- * @param {string|Buffer} content - File content
+ * @param {string|Uint8Array} content - File content
  * @returns {boolean} Whether content appears binary
  */
 function isBinaryContent(content) {
-  if (Buffer.isBuffer(content)) return true;
+  if (isBytes(content)) return true;
   if (typeof content !== 'string') return false;
 
   // Check for null bytes (common in binary files)
@@ -357,9 +358,9 @@ export class MergeDriverRegistry {
   /**
    * Prepare content for driver based on binary/text
    *
-   * @param {string|Buffer|null} content - Raw content
-   * @param {boolean} isBinary - Whether to return as Buffer
-   * @returns {string|Buffer|null} Prepared content
+   * @param {string|Uint8Array|null} content - Raw content
+   * @param {boolean} isBinary - Whether to return as bytes
+   * @returns {string|Uint8Array|null} Prepared content
    */
   prepareContent(content, isBinary) {
     if (content === null || content === undefined) {
@@ -367,14 +368,14 @@ export class MergeDriverRegistry {
     }
 
     if (isBinary) {
-      // Convert to Buffer if needed
-      if (Buffer.isBuffer(content)) return content;
-      if (typeof content === 'string') return Buffer.from(content, 'utf-8');
-      return Buffer.from(String(content));
+      // Convert to bytes if needed
+      if (isBytes(content)) return content;
+      if (typeof content === 'string') return utf8Encode(content);
+      return utf8Encode(String(content));
     } else {
       // Convert to string if needed
       if (typeof content === 'string') return content;
-      if (Buffer.isBuffer(content)) return content.toString('utf-8');
+      if (isBytes(content)) return utf8Decode(content);
       return String(content);
     }
   }

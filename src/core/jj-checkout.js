@@ -5,18 +5,8 @@
  * This file tracks which operation the working copy is at.
  */
 
-import protobuf from 'protobufjs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Determine proto path based on whether we're running from dist or src
-const inDist = __dirname.includes('/dist') || __dirname.includes('\\dist');
-const protoDir = inDist
-  ? path.join(__dirname, '..', 'src', 'protos')
-  : path.join(__dirname, '..', 'protos');
+import { getLocalWorkingCopyRoot } from '../protos/schema.js';
+import { hexToBytes } from '../utils/bytes.js';
 
 export class JJCheckout {
   /**
@@ -26,7 +16,6 @@ export class JJCheckout {
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
-    this.protoPath = path.join(protoDir, 'local_working_copy.proto');
   }
 
   /**
@@ -37,11 +26,11 @@ export class JJCheckout {
    */
   async writeCheckout(operationId, workspaceName = 'default') {
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getLocalWorkingCopyRoot();
     const Checkout = root.lookupType('local_working_copy.Checkout');
 
     // Convert hex operation ID to bytes
-    const opIdBuffer = Buffer.from(operationId, 'hex');
+    const opIdBuffer = hexToBytes(operationId);
 
     // Create message (use camelCase for protobufjs)
     const message = Checkout.create({
@@ -73,7 +62,7 @@ export class JJCheckout {
     const buffer = await this.fs.promises.readFile(checkoutPath);
 
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getLocalWorkingCopyRoot();
     const Checkout = root.lookupType('local_working_copy.Checkout');
 
     // Decode

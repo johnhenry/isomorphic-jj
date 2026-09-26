@@ -25,7 +25,7 @@
 //
 // // 3. An IndexedDB-backed filesystem (LightningFS under the hood; install
 // //    @isomorphic-git/lightning-fs alongside).
-// const fs = createBrowserFS({ name: 'my-app-repos' });
+// const fs = await createBrowserFS({ name: 'my-app-repos' });
 //
 // // 4. Same API as Node from here on.
 // const jj = await createJJ({

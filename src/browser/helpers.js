@@ -5,15 +5,21 @@
  */
 
 /**
- * Create a browser-compatible filesystem using LightningFS
+ * Create a browser-compatible filesystem, defaulting to LightningFS.
  *
- * Requires: @isomorphic-git/lightning-fs
+ * Requires (unless `opts.fs` is supplied): @isomorphic-git/lightning-fs
  *
- * @param {Object} opts - Options
+ * @param {Object} [opts] - Options
  * @param {string} [opts.backend='idb'] - Storage backend ('idb' or 'memory')
  * @param {string} [opts.name='jj'] - Database name for IndexedDB
  * @param {boolean} [opts.wipe=false] - Wipe existing data
- * @returns {Object} LightningFS instance
+ * @param {any} [opts.fs] - Bring your own filesystem instead of the default
+ *   LightningFS auto-import. Pass either an already-constructed
+ *   isomorphic-git-compatible fs (e.g. a `memfs` volume, or your own
+ *   LightningFS instance) — returned as-is — or a constructor with the
+ *   LightningFS signature (`new Ctor(name, { wipe })`), which is
+ *   instantiated the same way the default LightningFS would be.
+ * @returns {Promise<Object>} Filesystem instance compatible with isomorphic-git
  *
  * @example
  * ```javascript
@@ -22,7 +28,7 @@
  * import git from 'isomorphic-git';
  * import http from 'isomorphic-git/http/web';
  *
- * const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
+ * const fs = await createBrowserFS({ backend: 'idb', name: 'my-repo' });
  * const jj = await createJJ({
  *   fs,
  *   dir: '/repo',
@@ -30,24 +36,36 @@
  *   http
  * });
  * ```
+ *
+ * @example Bring your own fs (e.g. memfs)
+ * ```javascript
+ * import { fs as memfs } from 'memfs';
+ * const fs = await createBrowserFS({ fs: memfs });
+ * ```
  */
-export function createBrowserFS(opts = {}) {
+export async function createBrowserFS(opts = {}) {
   // Check if we're in a browser environment
   if (typeof window === 'undefined') {
     throw new Error('createBrowserFS() should only be used in browser environments');
   }
 
-  // Dynamic import to avoid issues in Node.js
-  // Users must install @isomorphic-git/lightning-fs separately
+  // Caller supplied their own filesystem — use it directly instead of
+  // pulling in LightningFS at all.
+  if (opts.fs) {
+    if (typeof opts.fs === 'function') {
+      return new opts.fs(opts.name || 'jj', { wipe: opts.wipe || false });
+    }
+    return opts.fs;
+  }
+
+  // Dynamic `import()` (not `require`) so this resolves in an ESM browser
+  // bundle — `require` does not exist there (see issue #28). Users must
+  // install @isomorphic-git/lightning-fs separately; it's an optional
+  // peer/dev dependency of this package.
+  let LightningFS;
   try {
-    // This will be resolved by the bundler
-    const LightningFS = require('@isomorphic-git/lightning-fs');
-
-    const fs = new LightningFS(opts.name || 'jj', {
-      wipe: opts.wipe || false,
-    });
-
-    return fs;
+    const mod = await import('@isomorphic-git/lightning-fs');
+    LightningFS = mod.default ?? mod;
   } catch (error) {
     throw new Error(
       'LightningFS not found. Install it with: npm install @isomorphic-git/lightning-fs\n' +
@@ -55,6 +73,10 @@ export function createBrowserFS(opts = {}) {
         error.message
     );
   }
+
+  return new LightningFS(opts.name || 'jj', {
+    wipe: opts.wipe || false,
+  });
 }
 
 /**

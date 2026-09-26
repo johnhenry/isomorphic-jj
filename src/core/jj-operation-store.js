@@ -5,19 +5,9 @@
  * Operations track the history of changes to the repository.
  */
 
-import protobuf from 'protobufjs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { atomicWriteFile } from '../utils/atomic-write.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Determine proto path based on whether we're running from dist or src
-const inDist = __dirname.includes('/dist') || __dirname.includes('\\dist');
-const protoDir = inDist
-  ? path.join(__dirname, '..', 'src', 'protos')
-  : path.join(__dirname, '..', 'protos');
+import { getSimpleOpStoreRoot } from '../protos/schema.js';
+import { hexToBytes } from '../utils/bytes.js';
 
 export class JJOperationStore {
   /**
@@ -27,7 +17,6 @@ export class JJOperationStore {
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
-    this.protoPath = path.join(protoDir, 'simple_op_store.proto');
   }
 
   /**
@@ -40,12 +29,12 @@ export class JJOperationStore {
    */
   async writeOperation(operationId, viewId, parentIds, metadata) {
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getSimpleOpStoreRoot();
     const Operation = root.lookupType('simple_op_store.Operation');
 
     // Convert hex IDs to bytes
-    const viewIdBuffer = Buffer.from(viewId, 'hex');
-    const parentBuffers = parentIds.map((id) => Buffer.from(id, 'hex'));
+    const viewIdBuffer = hexToBytes(viewId);
+    const parentBuffers = parentIds.map((id) => hexToBytes(id));
 
     // Create metadata message (use camelCase for protobufjs)
     const metadataMsg = {
@@ -101,7 +90,7 @@ export class JJOperationStore {
     const buffer = await this.fs.promises.readFile(opPath);
 
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getSimpleOpStoreRoot();
     const Operation = root.lookupType('simple_op_store.Operation');
 
     // Decode

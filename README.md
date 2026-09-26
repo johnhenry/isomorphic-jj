@@ -107,7 +107,7 @@ console.log(await jj.log({ limit: 5 }));
 import { createJJ } from '@johnhenry/isomorphic-jj';
 import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
 
-const fs = createBrowserFS({ name: 'my-repo' });
+const fs = await createBrowserFS({ name: 'my-repo' });
 const jj = await createJJ({ fs, dir: '/repo' });
 // Same API as Node from here on — see examples/12-browser.mjs.
 ```
@@ -275,7 +275,7 @@ import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/web';
 
 // Create browser filesystem (uses IndexedDB)
-const fs = createBrowserFS({ name: 'my-repo' });
+const fs = await createBrowserFS({ name: 'my-repo' });
 
 const jj = await createJJ({ fs, dir: '/repo', git, http });
 await jj.git.init({ userName: 'User', userEmail: 'user@example.com' });
@@ -753,7 +753,7 @@ import { createBrowserFS, requestPersistentStorage } from '@johnhenry/isomorphic
 const persistent = await requestPersistentStorage();
 
 // Create filesystem with IndexedDB backend
-const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
+const fs = await createBrowserFS({ backend: 'idb', name: 'my-repo' });
 
 // Check browser capabilities
 import { detectCapabilities } from '@johnhenry/isomorphic-jj/browser';

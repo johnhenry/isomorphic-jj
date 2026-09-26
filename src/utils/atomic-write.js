@@ -12,6 +12,8 @@
  * calling `writeFile()` directly on the canonical path — see issue #16.
  */
 
+import { mkdirp } from './mkdirp.js';
+
 /**
  * @param {any} fs - Filesystem implementation (Node fs, LightningFS, etc.)
  * @param {string} targetPath - Canonical path to write to
@@ -27,7 +29,7 @@ export async function atomicWriteFile(fs, targetPath, content) {
   try {
     const dirPath = targetPath.substring(0, targetPath.lastIndexOf('/'));
     if (dirPath) {
-      await fs.promises.mkdir(dirPath, { recursive: true });
+      await mkdirp(fs, dirPath);
     }
 
     await fs.promises.writeFile(tmpPath, content);

@@ -119,7 +119,7 @@ Dynamic configuration in browser environments:
 import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
 import { createJJ } from '@johnhenry/isomorphic-jj';
 
-const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
+const fs = await createBrowserFS({ backend: 'idb', name: 'my-repo' });
 const repo = await createJJ({ fs, dir: '/repo' });
 
 // Configure from user input
@@ -363,7 +363,7 @@ All configuration features work in the browser using LightningFS:
 import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
 import { createJJ } from '@johnhenry/isomorphic-jj';
 
-const fs = createBrowserFS({ backend: 'idb', name: 'my-repo' });
+const fs = await createBrowserFS({ backend: 'idb', name: 'my-repo' });
 const repo = await createJJ({ fs, dir: '/repo' });
 
 // File-based config stored in IndexedDB

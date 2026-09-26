@@ -17,7 +17,8 @@ import { UserConfig } from '../core/user-config.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
 import { generateChangeId } from '../utils/id-generation.js';
-import path from 'path';
+import * as path from '../utils/posix-path.js';
+import { mkdirp } from '../utils/mkdirp.js';
 
 /**
  * Create and initialize a JJ repository instance
@@ -116,7 +117,7 @@ export async function createJJ(options) {
             break;
           }
 
-          const content = await fs.promises.readFile(fullPath, 'utf-8');
+          const content = await fs.promises.readFile(fullPath, 'utf8');
           fileSnapshot[filePath] = content;
           totalSnapshotSize += stats.size;
         } catch (error) {
@@ -494,7 +495,7 @@ export async function createJJ(options) {
       if (pathParts.length > 1) {
         const dirPath = pathParts.slice(0, -1).join('/');
         const fullDirPath = `${dir}/${dirPath}`;
-        await fs.promises.mkdir(fullDirPath, { recursive: true });
+        await mkdirp(fs, fullDirPath);
       }
 
       // Write the file
@@ -552,7 +553,7 @@ export async function createJJ(options) {
         const fullPath = path.join(dir, args.path);
         try {
           if (encoding === 'utf-8' || encoding === 'utf8') {
-            return await fs.promises.readFile(fullPath, 'utf-8');
+            return await fs.promises.readFile(fullPath, 'utf8');
           } else {
             return await fs.promises.readFile(fullPath);
           }
@@ -774,7 +775,7 @@ export async function createJJ(options) {
       if (pathParts.length > 1) {
         const dirPath = pathParts.slice(0, -1).join('/');
         const fullDirPath = path.join(dir, dirPath);
-        await fs.promises.mkdir(fullDirPath, { recursive: true });
+        await mkdirp(fs, fullDirPath);
       }
 
       // Create writable stream
@@ -887,7 +888,7 @@ export async function createJJ(options) {
       // Ensure destination directory exists
       const toDir = toPath.substring(0, toPath.lastIndexOf('/'));
       try {
-        await fs.promises.mkdir(toDir, { recursive: true });
+        await mkdirp(fs, toDir);
       } catch (error) {
         throw new JJError(
           'FILE_SYSTEM_ERROR',
@@ -1208,7 +1209,7 @@ export async function createJJ(options) {
               break;
             }
 
-            const content = await fs.promises.readFile(fullPath, 'utf-8');
+            const content = await fs.promises.readFile(fullPath, 'utf8');
             fileSnapshot[filePath] = content;
             totalSnapshotSize += stats.size;
           } catch (error) {
@@ -1931,7 +1932,7 @@ export async function createJJ(options) {
             if (pathParts.length > 1) {
               const dirPath = pathParts.slice(0, -1).join('/');
               const fullDirPath = path.join(dir, dirPath);
-              await fs.promises.mkdir(fullDirPath, { recursive: true });
+              await mkdirp(fs, fullDirPath);
             }
 
             // Write file content
@@ -2047,7 +2048,7 @@ export async function createJJ(options) {
             if (pathParts.length > 1) {
               const dirPath = pathParts.slice(0, -1).join('/');
               const fullDirPath = path.join(dir, dirPath);
-              await fs.promises.mkdir(fullDirPath, { recursive: true });
+              await mkdirp(fs, fullDirPath);
             }
 
             // Write file content
@@ -2157,7 +2158,7 @@ export async function createJJ(options) {
             const pathParts = filePath.split('/');
             if (pathParts.length > 1) {
               const fullDirPath = path.join(dir, pathParts.slice(0, -1).join('/'));
-              await fs.promises.mkdir(fullDirPath, { recursive: true });
+              await mkdirp(fs, fullDirPath);
             }
             await fs.promises.writeFile(fullPath, content, 'utf8');
           } catch (error) {
@@ -4832,7 +4833,7 @@ export async function createJJ(options) {
       const wcFiles = await workingCopy.listFiles();
       for (const file of wcFiles) {
         try {
-          const content = await fs.promises.readFile(path.join(dir, file), 'utf-8');
+          const content = await fs.promises.readFile(path.join(dir, file), 'utf8');
           leftFiles.set(file, content);
         } catch (error) {
           // File might be deleted or binary - throw error for explicit handling
@@ -4975,7 +4976,7 @@ export async function createJJ(options) {
         }
 
         // Write resolved content to file
-        await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf-8');
+        await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf8');
 
         // Mark conflict as resolved
         await conflicts.resolveConflict(args.conflictId, 'manual');
@@ -5018,7 +5019,7 @@ export async function createJJ(options) {
             const resolvedContent = _resolveWithStrategy(conflict, args.strategy);
 
             // Write resolved content
-            await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf-8');
+            await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf8');
 
             // Mark as resolved
             await conflicts.resolveConflict(conflict.conflictId, args.strategy);
@@ -5458,7 +5459,7 @@ export async function createJJ(options) {
                 if (pathParts.length > 1) {
                   const dirPath = pathParts.slice(0, -1).join('/');
                   const fullDirPath = path.join(args.path, dirPath);
-                  await fs.promises.mkdir(fullDirPath, { recursive: true });
+                  await mkdirp(fs, fullDirPath);
                 }
 
                 // Write file content
