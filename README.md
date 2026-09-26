@@ -210,7 +210,7 @@ isomorphic-jj v1.0 now implements virtually all commonly-used JJ CLI commands:
 See [ROADMAP.md](./ROADMAP.md) for the release-by-release feature comparison and what's still planned.
 
 ### Testing & Quality
-- **1730 tests** passing — ~97% statement / 91% branch coverage
+- **1823 tests** passing — ~97% statement / 91% branch coverage
 - **100% backward compatible** - All existing code continues to work
 - **Zero breaking changes** - Deprecated features show warnings but still function
 
@@ -926,8 +926,8 @@ const jj: JJ = await createJJ(options: CreateJJOptions);
 - **Repository**: `init()`, `status()`, `stats()`
 - **Files**: `write()`, `read()`, `cat()`, `move()` (deprecated for history), `remove()`, `listFiles()` | **Namespace**: `file.write()`, `file.show()`, `file.list()`, `file.move()`, `file.remove()`
 - **Changes**: `describe()`, `new()`, `amend()`, `commit()`, `edit()`, `show()`
-- **History**: `log()`, `obslog()`, `squash()`, `split()`, `rebase()`, `abandon()`, `unabandon()`
-- **Operations**: `undo()`, `operations.list()`, `operations.at()`
+- **History**: `log()`, `obslog()`, `squash()`, `split()`, `rebase()`, `abandon()`, `unabandon()`, `converge()`
+- **Operations**: `undo()`, `redo()`, `operations.list()`, `operations.at()`, `operations.restore()`
 - **Bookmarks**: `bookmark.list()`, `bookmark.set()`, `bookmark.move()`, `bookmark.delete()`
 - **Git**: `git.init()`, `git.fetch()`, `git.push()`, `git.import()`, `git.export()`
 - **Remotes**: `remote.add()`, `remote.fetch()`, `remote.push()`
@@ -1020,9 +1020,9 @@ repo/
 
 ## Project Status
 
-**Current Version**: 0.2.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.7.0 before the rename — see the provenance note at the top of this file)
-**Test Coverage**: 1730 tests passing, ~97% statements / 91% branches
-**JJ CLI parity**: tracks Jujutsu through v0.44
+**Current Version**: 0.3.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.7.0 before the rename — see the provenance note at the top of this file)
+**Test Coverage**: 1823 tests passing, ~97% statements / 91% branches
+**JJ CLI parity**: tracks Jujutsu through v0.45.1
 **Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#family). Not yet 1.0 — API surface can still shift; pin a version and read the CHANGELOG before upgrading.
 
 **Completed:**
@@ -1035,6 +1035,7 @@ repo/
 - ✅ v1.5: Parity refresh tracking jj through **v0.43** — new revsets (`change_id`, `commit_id`, `subject`, `author_name`/`email`, `committer*`, `signed`, `divergent`, `merges`, `forks`, `first_parent`, `first_ancestors`, `fork_point`, `merge_point`, `exactly`, `present`, `coalesce`, `remote_tags`, `ancestors(x, depth)`), working `tags()`/`remote_tags()` revsets, and new commands: `revert()`, `redo()`, `sign()`/`unsign()`, `file.search()`, `bookmark.advance()`, `tag.set()`. See [CHANGELOG.md](./CHANGELOG.md).
 - ✅ 0.1.0 (post-rename): Parity refresh tracking jj through **v0.44** — `tag.track()`/`tag.untrack()`, the `builtin_log()` revset alias, and `file.search({ nameOnly: true })`; `git_refs()`/`git_head()` documented as deprecated (jj removed both in v0.43). See [CHANGELOG.md](./CHANGELOG.md) for what was deliberately left for a maintainer call (`jj run`, fetch-time remote tag/bookmark import).
 - ✅ 0.2.0: Storage-layer audit fixes — same-process storage locking, `undo()` reverting in-place graph/tag mutations, ambiguous change-id detection, categorized `push()` error codes, a conflict-marker newline fix, atomic protobuf writes, and open-ended revset ranges (`..b`, `a..`, `::`). See [CHANGELOG.md](./CHANGELOG.md).
+- ✅ 0.3.0: Parity refresh tracking jj through **v0.45.1** — a working `/browser` entry (async `createBrowserFS()`, bundle-safe protobuf schema loading, no stray Node-only imports), `undo()`/`operations.restore()` reverting graph rewrites with real progressive undo/redo, `squash()`/`abandon()`/`edit()`/`new()` fully syncing content instead of only metadata, `rebase()` performing a real three-way merge and recording conflicts, and the new `converge()` command (jj v0.45.0) to auto-resolve divergent commits. See [CHANGELOG.md](./CHANGELOG.md).
 
 See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELOG.md) for the release history.
 
@@ -1158,7 +1159,7 @@ A: Yes! Colocated repos expose normal Git commits. Git users never see JJ metada
 A: Comparable to isomorphic-git for Git operations. JJ metadata (JSON) is fast in Node, acceptable in browsers. Large histories need pagination.
 
 **Q: Does this support all JJ features?**
-A: Broad semantic parity (tracks Jujutsu through v0.44), not every CLI/UX detail — it's a library, not a terminal UI. See [ROADMAP.md](./ROADMAP.md) for what's planned and what's deliberately out of scope.
+A: Broad semantic parity (tracks Jujutsu through v0.45.1), not every CLI/UX detail — it's a library, not a terminal UI. See [ROADMAP.md](./ROADMAP.md) for what's planned and what's deliberately out of scope.
 
 **Q: Can I migrate my Git repo?**
 A: Yes! `jj.git.init()` works on existing Git repositories.
