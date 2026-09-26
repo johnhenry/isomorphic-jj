@@ -1252,6 +1252,47 @@ export async function createJJ(options) {
       // reverse the reparenting — see issue #29.
       const changeSnapshotBefore = structuredClone(change);
 
+      // Three-way merge against the OLD base before reparenting (issue #31):
+      // real jj's rebase re-derives the rebased change's content as
+      // (old base, old commit, new base) — if a sibling changed the same
+      // lines differently, that's a genuine conflict, not something
+      // reparenting-and-copying-verbatim can silently paper over. This
+      // reuses the exact same detectConflicts() machinery merge() already
+      // uses (see merge(), a few hundred lines down) rather than
+      // duplicating three-way-merge logic a third time in this codebase.
+      const oldParentId = change.parents[0];
+      const oldParentChange = oldParentId ? await graph.getChange(oldParentId) : null;
+      const baseFiles = new Map(
+        Object.entries((oldParentChange && oldParentChange.fileSnapshot) || {})
+      );
+      const leftFiles = new Map(Object.entries(change.fileSnapshot || {}));
+      const rightFiles = new Map(Object.entries(newParentChange.fileSnapshot || {}));
+
+      await conflicts.load();
+      const conflictsSnapshot = {
+        conflicts: Object.fromEntries(conflicts.conflicts),
+        fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+      };
+
+      const detectedConflicts = oldParentChange
+        ? await conflicts.detectConflicts({
+            baseFiles,
+            leftFiles,
+            rightFiles,
+            drivers: {},
+            // Not necessarily the checked-out working copy, so don't let
+            // merge drivers write to disk on its behalf.
+            workingCopyDir: /** @type {any} */ (null),
+            baseChange: oldParentId,
+            leftChange: changeId,
+            rightChange: newParent,
+          })
+        : [];
+
+      for (const conflict of detectedConflicts) {
+        await conflicts.addConflict(conflict);
+      }
+
       // Update parent
       change.parents = [newParent];
       await graph.updateChange(change);
@@ -1263,6 +1304,7 @@ export async function createJJ(options) {
         description: `move change ${changeId.slice(0, 8)} to ${newParent.slice(0, 8)}`,
         parents: [],
         changeSnapshot: { [changeId]: changeSnapshotBefore },
+        conflictsSnapshot,
         view: {
           bookmarks: {},
           remoteBookmarks: {},
@@ -1271,7 +1313,7 @@ export async function createJJ(options) {
         },
       });
 
-      return change;
+      return { ...change, conflicts: detectedConflicts };
     },
 
     /**
