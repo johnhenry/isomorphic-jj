@@ -208,6 +208,36 @@ export class ChangeGraph {
   }
 
   /**
+   * Remove a change from the graph outright.
+   *
+   * Used to reverse an addChange() — e.g. undoing an operation that created
+   * a change (new(), or squash()'s synthetic empty working-copy change) —
+   * where restoring a "before" snapshot doesn't apply because there was no
+   * "before": the change simply didn't exist yet. A soft-delete (setting
+   * `abandoned: true` via updateChange()) is NOT the same thing and is used
+   * separately for abandon() itself.
+   *
+   * @param {string} changeId - Change ID to remove
+   * @returns {Promise<boolean>} Whether a change was actually removed
+   */
+  async deleteChange(changeId) {
+    validateChangeId(changeId);
+
+    const change = this.nodes.get(changeId);
+    if (!change) {
+      return false;
+    }
+
+    this.nodes.delete(changeId);
+    if (this.commitIndex.get(change.commitId) === changeId) {
+      this.commitIndex.delete(change.commitId);
+    }
+
+    await this.save();
+    return true;
+  }
+
+  /**
    * Get all ancestors of a change (recursive parent traversal)
    *
    * @param {string} changeId - Starting change ID

@@ -132,6 +132,226 @@ export async function createJJ(options) {
   };
 
   /**
+   * Fully sync the working directory to a target file snapshot: writes
+   * every file the target has (create/update), AND deletes every currently
+   * tracked file the target does NOT have.
+   *
+   * Both edit() and new() used to only overlay the target's files on top of
+   * whatever was already on disk, so a file that existed in the previously
+   * checked-out change but not in the target leaked into the next
+   * snapshot — see issue #30. undo()/redo() had the same gap restoring
+   * file state — see issue #29. This is the one place that does it
+   * correctly, used by all four.
+   *
+   * @param {Record<string, string>} targetSnapshot - path -> file content
+   * @returns {Promise<void>}
+   */
+  const syncWorkingCopyFiles = async (targetSnapshot) => {
+    const snapshot = targetSnapshot || {};
+    const currentFiles = await workingCopy.listFiles();
+
+    // Remove files that aren't part of the target.
+    for (const filePath of currentFiles) {
+      if (!(filePath in snapshot)) {
+        try {
+          const fullPath = path.join(dir, filePath);
+          await fs.promises.unlink(fullPath);
+        } catch (error) {
+          // Already gone / inaccessible — fine, we just want it absent.
+        }
+        await workingCopy.untrackFile(filePath);
+      }
+    }
+
+    // Write/update every file the target has.
+    for (const [filePath, content] of Object.entries(snapshot)) {
+      const fullPath = path.join(dir, filePath);
+      const pathParts = filePath.split('/');
+      if (pathParts.length > 1) {
+        const fullDirPath = path.join(dir, pathParts.slice(0, -1).join('/'));
+        await mkdirp(fs, fullDirPath);
+      }
+      await fs.promises.writeFile(fullPath, content, 'utf8');
+
+      const stats = await fs.promises.stat(fullPath);
+      await workingCopy.trackFile(filePath, {
+        mtime: stats.mtime,
+        size: stats.size,
+        mode: stats.mode,
+      });
+    }
+  };
+
+  /**
+   * Compute the ChangeGraph/file/conflicts state that existed right after
+   * `landingOp` finished — i.e. what undo()/redo()/operations.restore()
+   * need to re-establish when winding the repository forward or back to
+   * that point (see issue #29).
+   *
+   * Every operation that mutates EXISTING change records in place records
+   * (additively — most operations touch none of this and that's fine,
+   * there's nothing to reverse for them):
+   *   - changeSnapshot: { [changeId]: fullRecordBeforeThisOpRan }
+   *   - view.fileSnapshot: on-disk file state right BEFORE this op ran
+   *   - conflictsSnapshot: ConflictModel state right BEFORE this op ran
+   *
+   * Deliberately NOT reverted: changes an operation newly *created* (via
+   * graph.addChange() — new(), squash()'s synthetic empty working-copy
+   * change, ...). Undoing their creation only un-refs them (restores the
+   * working-copy pointer/heads that made them reachable) — it does not
+   * delete the change record — matching real jj, where an "unreachable"
+   * change stays resolvable by its change id (hidden, not gone) until
+   * explicitly gc'd, and this package's own history-editing tests rely on
+   * exactly that: rebasing onto a change created by a since-undone new()
+   * must still work.
+   *
+   * "The state right after landingOp" is therefore exactly what the FIRST
+   * operation after landingOp recorded as ITS "before" state, merged across
+   * every operation between landingOp and the current head in case
+   * different operations touched different changeIds (a single op's own
+   * snapshot only covers what IT touched). Concretely, per field:
+   *   - changeSnapshot: first (earliest / closest-to-landingOp) entry per
+   *     changeId wins — later entries in the range reflect that changeId's
+   *     state at a LATER point than we're restoring to.
+   *   - fileSnapshot / conflictsSnapshot: the first op in the range that
+   *     recorded one, since whole-state snapshots aren't per-changeId and
+   *     an op that didn't record one simply didn't change that state.
+   *
+   * This same helper backs undo() (landingOp = the parent of whatever's
+   * being undone), redo() (landingOp = the operation a prior undo()
+   * reverted), and operations.restore() (landingOp = the target operation
+   * itself) — one reversal primitive, not three.
+   *
+   * @param {Array<any>} ops - Full chronological operation list (oplog.list())
+   * @param {any} landingOp - The operation whose resulting state to recompute
+   * @returns {{
+   *   changeSnapshotToApply: Record<string, any>,
+   *   fileSnapshot: Record<string, string>|undefined,
+   *   conflictsSnapshot: any,
+   * }}
+   */
+  const computeGraphReversal = (ops, landingOp) => {
+    const landingIndex = ops.findIndex((op) => op.id === landingOp.id);
+
+    /** @type {Record<string, any>} */
+    const changeSnapshotToApply = {};
+    /** @type {Record<string, string>|undefined} */
+    let fileSnapshot;
+    /** @type {any} */
+    let conflictsSnapshot;
+
+    for (let i = landingIndex + 1; i < ops.length; i++) {
+      const op = ops[i];
+
+      if (op.changeSnapshot) {
+        for (const [changeId, snapshot] of Object.entries(op.changeSnapshot)) {
+          if (!(changeId in changeSnapshotToApply)) {
+            changeSnapshotToApply[changeId] = snapshot;
+          }
+        }
+      }
+
+      // `!= null` (not `!== undefined`) on purpose: some operations record
+      // an explicit `null` for "I ran, and I deliberately took no snapshot"
+      // (e.g. describe() of a non-working-copy revision) — that's exactly
+      // as uninformative as never having set the field, so keep scanning
+      // rather than "finding" a null snapshot.
+      if (fileSnapshot === undefined && op.view && op.view.fileSnapshot != null) {
+        fileSnapshot = op.view.fileSnapshot;
+      }
+
+      if (conflictsSnapshot === undefined && op.conflictsSnapshot != null) {
+        conflictsSnapshot = op.conflictsSnapshot;
+      }
+    }
+
+    return { changeSnapshotToApply, fileSnapshot, conflictsSnapshot };
+  };
+
+  /**
+   * Apply a reversal computed by computeGraphReversal() to the live graph,
+   * working-copy files, and conflict state. Does NOT touch the working-copy
+   * pointer or bookmarks — callers set those from the landing op's own
+   * `view` directly (pointers, unlike file/graph/conflict content, are
+   * already correct as recorded, see computeGraphReversal's doc comment).
+   *
+   * @param {ReturnType<typeof computeGraphReversal>} reversal
+   * @returns {Promise<void>}
+   */
+  const applyGraphReversal = async (reversal) => {
+    await graph.load();
+    for (const [changeId, snapshot] of Object.entries(reversal.changeSnapshotToApply)) {
+      if (await graph.getChange(changeId)) {
+        await graph.updateChange(snapshot);
+      }
+    }
+
+    if (reversal.fileSnapshot !== undefined) {
+      await syncWorkingCopyFiles(reversal.fileSnapshot);
+    }
+
+    await conflicts.load();
+    if (reversal.conflictsSnapshot !== undefined) {
+      conflicts.conflicts = new Map(Object.entries(reversal.conflictsSnapshot.conflicts || {}));
+      conflicts.fileConflicts = new Map(
+        Object.entries(reversal.conflictsSnapshot.fileConflicts || {})
+      );
+      await conflicts.save();
+    }
+    // Else: no operation in the reverted range touched conflicts — leave
+    // current conflict state alone. (Previously undo() unconditionally
+    // cleared ALL conflicts whenever the op being undone hadn't recorded
+    // its own conflictsSnapshot, which is nearly every non-merge() op —
+    // undoing an unrelated describe() would silently wipe conflicts from
+    // an earlier, unrelated merge(). Fixed as part of issue #29.)
+  };
+
+  /**
+   * Determine which operation a fresh undo() call should revert, matching
+   * real jj's progressive-undo semantics (`jj-undo(1)`: "If used once after
+   * a normal operation, this will undo that last operation by restoring its
+   * parent. If jj undo is used repeatedly, it will restore increasingly
+   * older operations, going further back into the past.").
+   *
+   * The raw op-log parent chain can't answer this directly once undo/redo
+   * bookkeeping operations are mixed into the log: an 'undo' operation's
+   * own parent is the operation it just undid, so naively targeting
+   * `ops[ops.length - 1]` on a SECOND undo() would undo the undo (toggle
+   * back to the future) instead of stepping one further step into the past
+   * — this was issue #29's "undo() twice only undoes the undo" bug.
+   *
+   * @param {Array<any>} ops - Full chronological operation list
+   * @returns {any} The operation object undo() should revert
+   */
+  const resolveUndoTarget = (ops) => {
+    const head = ops[ops.length - 1];
+    const findOp = (/** @type {any} */ id) => ops.find((op) => op.id === id);
+
+    if (head.eventType === 'undo') {
+      // We're stepping further into the past: what should be undone now is
+      // the operation right BEFORE the one `head` already undid — not
+      // head's own parent, which IS the operation head undid (targeting it
+      // again would just toggle back to the present).
+      const previouslyUndone = head.targetOpId && findOp(head.targetOpId);
+      const stepBack = previouslyUndone && findOp(previouslyUndone.parents[0]);
+      return stepBack || previouslyUndone || head;
+    }
+
+    if (head.eventType === 'redo') {
+      // A redo re-established some earlier operation as current; a fresh
+      // undo right after it should behave exactly as if that operation
+      // were freshly current and had never been touched by undo/redo at
+      // all — i.e. undo it again (real jj: redo "moves in the direction of
+      // the future"; undoing right after simply resumes stepping back).
+      const redoneUndo = head.redoOf && findOp(head.redoOf);
+      const target = redoneUndo && redoneUndo.targetOpId && findOp(redoneUndo.targetOpId);
+      return target || head;
+    }
+
+    return head;
+  };
+
+  /**
    * Automatic working-copy snapshot (v1.6).
    *
    * Walks the working directory on disk and reconciles tracked file state so
@@ -314,6 +534,14 @@ export async function createJJ(options) {
           await hooks.onUpdateChange(change);
         }
       },
+
+      // Used by undo()/redo()/operations.restore() to reverse an
+      // addChange() when winding the graph back — see issue #29. No Git
+      // sync hook: a change created after the operation being reverted was
+      // never pushed anywhere to unwind, and the Git backend has no
+      // "forget this commit" operation (nor should it — Git objects are
+      // content-addressed and harmless to leave orphaned).
+      deleteChange: (/** @type {any} */ changeId) => baseGraph.deleteChange(changeId),
 
       // Delegate other operations
       init: () => baseGraph.init(),
@@ -1006,6 +1234,10 @@ export async function createJJ(options) {
       // TODO: Prevent creating cycles in the change graph
       // For now, we'll allow it but it should be validated
 
+      // Snapshot BEFORE mutating so undo()/redo()/operations.restore() can
+      // reverse the reparenting — see issue #29.
+      const changeSnapshotBefore = structuredClone(change);
+
       // Update parent
       change.parents = [newParent];
       await graph.updateChange(change);
@@ -1016,6 +1248,7 @@ export async function createJJ(options) {
         user: await getUserOplogInfo(),
         description: `move change ${changeId.slice(0, 8)} to ${newParent.slice(0, 8)}`,
         parents: [],
+        changeSnapshot: { [changeId]: changeSnapshotBefore },
         view: {
           bookmarks: {},
           remoteBookmarks: {},
@@ -1407,6 +1640,8 @@ export async function createJJ(options) {
 
       // Snapshot filesystem BEFORE operation (for undo) unless preserveSnapshot is true
       let fileSnapshot;
+      /** @type {Record<string, any>} */
+      const changeSnapshot = {};
       if (!args.preserveSnapshot) {
         fileSnapshot = await snapshotFilesystem();
 
@@ -1415,6 +1650,10 @@ export async function createJJ(options) {
         const currentChangeId = workingCopy.getCurrentChangeId();
         const currentChange = await graph.getChange(currentChangeId);
         if (currentChange && fileSnapshot) {
+          // Snapshot BEFORE mutating so undo()/redo() can revert this
+          // in-place update too, not just the pointer/new-change creation
+          // below — see issue #29.
+          changeSnapshot[currentChangeId] = structuredClone(currentChange);
           currentChange.fileSnapshot = fileSnapshot;
           await graph.updateChange(currentChange);
         }
@@ -1485,6 +1724,7 @@ export async function createJJ(options) {
       // Handle insertBefore: rebase target to have new change as parent
       if (args.insertBefore) {
         const targetChange = await graph.getChange(args.insertBefore);
+        changeSnapshot[args.insertBefore] = structuredClone(targetChange);
         targetChange.parents = [newChangeId];
         await graph.updateChange(targetChange);
       }
@@ -1501,6 +1741,13 @@ export async function createJJ(options) {
         },
         description: `new change ${newChangeId.slice(0, 8)}`,
         parents: [],
+        // See issue #29: lets undo()/redo()/operations.restore() reverse
+        // the existing records this op updated in place (the old
+        // working-copy change's refreshed fileSnapshot, and insertBefore's
+        // target's reparented parents). The newly created change itself
+        // (newChangeId) is intentionally NOT torn down on undo — see
+        // computeGraphReversal's doc comment.
+        changeSnapshot,
         view: {
           bookmarks: {},
           remoteBookmarks: {},
@@ -2003,106 +2250,107 @@ export async function createJJ(options) {
     /**
      * Undo last operation
      *
+     * Reverts the most recent operation — including graph-rewriting ones
+     * (squash/rebase/abandon/new/edit), not just working-copy/file state
+     * (see issue #29). Matches real jj's progressive-undo semantics
+     * (`jj-undo(1)`): called again with nothing else in between, it steps
+     * one further operation into the past rather than undoing itself.
+     *
      * @returns {Promise<Object>} Information about the undo including the undone operation and restored state
      */
     async undo() {
-      // Get the operation we're about to undo to access its pre-state
       await oplog.load();
       const ops = await oplog.list();
       if (ops.length === 0) {
         throw new JJError('NOTHING_TO_UNDO', 'No operations to undo');
       }
 
-      // Get the current operation (the one being undone) to restore its pre-state
-      const currentOp = ops[ops.length - 1];
+      const targetOp = resolveUndoTarget(ops);
+      const landingOpId = targetOp.parents && targetOp.parents[0];
+      const landingOp = landingOpId ? ops.find((op) => op.id === landingOpId) : null;
 
-      const previousView = /** @type {any} */ (await oplog.undo());
-
-      // Restore state from previous view
-      await workingCopy.setCurrentChange(previousView.workingCopy);
-
-      // Restore ChangeGraph content mutated in place by the operation being
-      // undone (e.g. describe() editing change.description) — see issue #12.
-      // currentOp.changeSnapshot holds the affected change record(s) as they
-      // were BEFORE currentOp ran, captured the same way fileSnapshot is.
-      await graph.load();
-      if (currentOp && currentOp.changeSnapshot) {
-        for (const snapshot of Object.values(
-          /** @type {Record<string, any>} */ (currentOp.changeSnapshot)
-        )) {
-          if (snapshot && (await graph.getChange(snapshot.changeId))) {
-            await graph.updateChange(snapshot);
-          }
-        }
-      }
-
-      // Restore filesystem from previous operation's snapshot (taken BEFORE that operation)
-      // This is how JJ snapshots the working copy before every command
-      if (previousView.fileSnapshot) {
-        for (const [filePath, content] of Object.entries(previousView.fileSnapshot)) {
-          try {
-            const fullPath = path.join(dir, filePath);
-
-            // Ensure directory exists
-            const pathParts = filePath.split('/');
-            if (pathParts.length > 1) {
-              const dirPath = pathParts.slice(0, -1).join('/');
-              const fullDirPath = path.join(dir, dirPath);
-              await mkdirp(fs, fullDirPath);
-            }
-
-            // Write file content
-            await fs.promises.writeFile(fullPath, content, 'utf8');
-          } catch (error) {
-            throw new JJError(
-              'UNDO_FILE_RESTORE_FAILED',
-              `Failed to restore file ${filePath} during undo: ${error.message}`,
-              { filePath, originalError: error.message }
-            );
-          }
-        }
-      }
-
-      // Restore conflicts state from before the undone operation
-      // The conflictsSnapshot in an operation represents the state BEFORE that operation ran
-      await conflicts.load();
-      if (currentOp && currentOp.conflictsSnapshot) {
-        // Restore conflicts from the operation we're undoing (its pre-state)
-        conflicts.conflicts = new Map(Object.entries(currentOp.conflictsSnapshot.conflicts || {}));
-        conflicts.fileConflicts = new Map(
-          Object.entries(currentOp.conflictsSnapshot.fileConflicts || {})
-        );
-        await conflicts.save();
+      /** @type {ReturnType<typeof computeGraphReversal>} */
+      let reversal;
+      /** @type {any} */
+      let landingView;
+      if (landingOp) {
+        reversal = computeGraphReversal(ops, landingOp);
+        landingView = landingOp.view || {};
       } else {
-        // No conflicts snapshot - clear conflicts
-        await conflicts.clear();
+        // Undoing the very first (root) operation: there's nothing before
+        // it to restore to, so land on its own recorded state rather than
+        // throwing (mirrors the previous no-parent fallback).
+        reversal = {
+          changeSnapshotToApply: {},
+          fileSnapshot: undefined,
+          conflictsSnapshot: undefined,
+        };
+        landingView = targetOp.view || {};
       }
 
-      // Record undo operation. Tag it with the view it undid so that redo()
-      // can re-apply it (jj's progressive undo/redo, added in jj v0.33).
+      // Capture EXACTLY what's about to be overwritten, from ground truth,
+      // before applying the reversal — this is what redo() re-applies
+      // later. It can't just recompute "the state after targetOp" the way
+      // undo() itself computes "the state after landingOp" (by scanning
+      // for a LATER op that also touched the same changeId/files/
+      // conflicts): that scan only works going backward, where "nothing
+      // touched it since" means "it's already correct". Going forward,
+      // "nothing touched it since targetOp" means the opposite — its
+      // effect is still live and needs to be captured now, not rederived.
+      await graph.load();
+      /** @type {Record<string, any>} */
+      const redoChangeSnapshot = {};
+      for (const changeId of Object.keys(reversal.changeSnapshotToApply)) {
+        const current = await graph.getChange(changeId);
+        if (current) redoChangeSnapshot[changeId] = current;
+      }
+      const redoFileSnapshot =
+        reversal.fileSnapshot !== undefined ? await snapshotFilesystem() : undefined;
+      let redoConflictsSnapshot;
+      if (reversal.conflictsSnapshot !== undefined) {
+        await conflicts.load();
+        redoConflictsSnapshot = {
+          conflicts: Object.fromEntries(conflicts.conflicts),
+          fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+        };
+      }
+
+      if (landingView.workingCopy) {
+        await workingCopy.setCurrentChange(landingView.workingCopy);
+      }
+      await applyGraphReversal(reversal);
+
+      // Record undo as its own operation (matching real jj) — tagged with
+      // which operation it targeted so a following undo() can walk one
+      // step further back (resolveUndoTarget) instead of toggling, and
+      // carrying exactly what redo() needs to re-apply (captured above).
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: await getUserOplogInfo(),
         description: 'undo operation',
         eventType: 'undo',
-        undoneOpId: currentOp.id,
-        undoneView: currentOp.view,
-        undoneConflictsSnapshot: currentOp.conflictsSnapshot || null,
+        targetOpId: targetOp.id,
+        undoneOpId: targetOp.id, // kept for API/type compatibility
+        redoChangeSnapshot,
+        redoFileSnapshot,
+        redoConflictsSnapshot,
         parents: [],
-        view: previousView,
+        view: landingView,
       });
 
-      // Return information about what was undone
+      const restoredFileCount =
+        reversal.fileSnapshot !== undefined ? Object.keys(reversal.fileSnapshot).length : 0;
+
       return {
         undoneOperation: {
-          description: currentOp.description,
-          timestamp: currentOp.timestamp,
-          user: currentOp.user,
+          description: targetOp.description,
+          timestamp: targetOp.timestamp,
+          user: targetOp.user,
         },
         restoredState: {
-          workingCopy: previousView.workingCopy,
-          heads: previousView.heads,
-          fileCount: previousView.fileSnapshot ? Object.keys(previousView.fileSnapshot).length : 0,
+          workingCopy: landingView.workingCopy,
+          heads: landingView.heads,
+          fileCount: restoredFileCount,
         },
       };
     },
@@ -2110,9 +2358,9 @@ export async function createJJ(options) {
     /**
      * Redo an operation previously undone with undo() (v1.5)
      *
-     * Mirrors `jj redo` (jj v0.33): progressively re-applies the operations that
-     * `undo()` reverted, most-recent-undo first. Each redo consumes exactly one
-     * pending undo.
+     * Mirrors `jj redo` (jj v0.33): re-applies the operation that the most
+     * recent not-yet-redone undo() reverted — including its graph rewrites,
+     * not just working-copy/file state (see issue #29).
      *
      * @returns {Promise<Object>} Information about the redone operation
      */
@@ -2143,42 +2391,36 @@ export async function createJJ(options) {
         });
       }
 
-      const redoneView = undoOp.undoneView || {};
+      const targetOpId = undoOp.targetOpId || undoOp.undoneOpId;
+      const targetOp = targetOpId && ops.find((op) => op.id === targetOpId);
+      const redoneView = (targetOp && targetOp.view) || {};
 
-      // Restore the working-copy pointer.
       if (redoneView.workingCopy) {
         await workingCopy.setCurrentChange(redoneView.workingCopy);
       }
 
-      // Restore the working-copy files captured in the undone view.
-      if (redoneView.fileSnapshot) {
-        for (const [filePath, content] of Object.entries(redoneView.fileSnapshot)) {
-          try {
-            const fullPath = path.join(dir, filePath);
-            const pathParts = filePath.split('/');
-            if (pathParts.length > 1) {
-              const fullDirPath = path.join(dir, pathParts.slice(0, -1).join('/'));
-              await mkdirp(fs, fullDirPath);
-            }
-            await fs.promises.writeFile(fullPath, content, 'utf8');
-          } catch (error) {
-            throw new JJError(
-              'REDO_FILE_RESTORE_FAILED',
-              `Failed to restore file ${filePath} during redo: ${error.message}`,
-              { filePath, originalError: error.message }
-            );
-          }
+      // Re-apply exactly what this undo captured right before it reverted
+      // things — NOT computeGraphReversal(ops, targetOp): that scans for a
+      // LATER op touching the same changeId/files/conflicts, which is the
+      // right question for undo() ("has anything since made my target
+      // stale?") but the wrong one here — after an undo, NOTHING later
+      // re-established targetOp's own effect, so there's nothing to find
+      // by scanning forward. undo() captured it directly for exactly this
+      // reason (see its own comment).
+      await graph.load();
+      for (const [changeId, snapshot] of Object.entries(undoOp.redoChangeSnapshot || {})) {
+        if (await graph.getChange(changeId)) {
+          await graph.updateChange(snapshot);
         }
       }
-
-      // Restore conflicts to the state that existed after the redone operation.
+      if (undoOp.redoFileSnapshot !== undefined) {
+        await syncWorkingCopyFiles(undoOp.redoFileSnapshot);
+      }
       await conflicts.load();
-      if (undoOp.undoneConflictsSnapshot) {
-        conflicts.conflicts = new Map(
-          Object.entries(undoOp.undoneConflictsSnapshot.conflicts || {})
-        );
+      if (undoOp.redoConflictsSnapshot !== undefined) {
+        conflicts.conflicts = new Map(Object.entries(undoOp.redoConflictsSnapshot.conflicts || {}));
         conflicts.fileConflicts = new Map(
-          Object.entries(undoOp.undoneConflictsSnapshot.fileConflicts || {})
+          Object.entries(undoOp.redoConflictsSnapshot.fileConflicts || {})
         );
         await conflicts.save();
       }
@@ -2193,15 +2435,18 @@ export async function createJJ(options) {
         view: redoneView,
       });
 
+      const restoredFileCount =
+        undoOp.redoFileSnapshot !== undefined ? Object.keys(undoOp.redoFileSnapshot).length : 0;
+
       return {
         redoneOperation: {
           description: undoOp.description,
-          undoneOpId: undoOp.undoneOpId,
+          undoneOpId: targetOpId,
         },
         restoredState: {
           workingCopy: redoneView.workingCopy,
           heads: redoneView.heads,
-          fileCount: redoneView.fileSnapshot ? Object.keys(redoneView.fileSnapshot).length : 0,
+          fileCount: restoredFileCount,
         },
       };
     },
@@ -2428,6 +2673,12 @@ export async function createJJ(options) {
       /**
        * Restore repository to a specific operation (matches `jj operation restore`)
        *
+       * Fully reverts everything recorded after the target operation —
+       * including graph rewrites (squash/rebase/abandon/new/edit), working
+       * copy files, and conflict state, not just bookmarks/the working-copy
+       * pointer (see issue #29) — using the same reversal primitive as
+       * undo()/redo().
+       *
        * @param {Record<string, any>} args - Arguments
        * @returns {Promise<Object>} Restore result
        */
@@ -2466,6 +2717,11 @@ export async function createJJ(options) {
           await workingCopy.load();
           await workingCopy.setCurrentChange(targetOp.view.workingCopy);
         }
+
+        // Revert the change graph, working-copy files, and conflict state
+        // to exactly what they were right after targetOp ran.
+        const reversal = computeGraphReversal(ops, targetOp);
+        await applyGraphReversal(reversal);
 
         // Record this restoration as a new operation
         await oplog.recordOperation({
@@ -2758,6 +3014,15 @@ export async function createJJ(options) {
         timestamp: new Date().toISOString(),
       });
 
+      // Snapshot BEFORE mutating so undo()/redo()/operations.restore() can
+      // reverse the squash (un-abandon source, restore dest's description
+      // and content) — see issue #29.
+      /** @type {Record<string, any>} */
+      const changeSnapshot = {
+        [source]: structuredClone(sourceChange),
+        [destChangeId]: structuredClone(destChange),
+      };
+
       // Mark source as abandoned
       sourceChange.abandoned = true;
       await graph.updateChange(sourceChange);
@@ -2803,6 +3068,7 @@ export async function createJJ(options) {
         user: await getUserOplogInfo(),
         description: `squash ${source.slice(0, 8)} into ${destChangeId.slice(0, 8)}`,
         parents: [],
+        changeSnapshot,
         view: {
           bookmarks: {},
           remoteBookmarks: {},
@@ -2881,6 +3147,10 @@ export async function createJJ(options) {
         timestamp: new Date().toISOString(),
       });
 
+      // Snapshot BEFORE mutating so undo()/redo()/operations.restore() can
+      // reverse the abandon (un-abandon this change) — see issue #29.
+      const changeSnapshot = { [changeId]: structuredClone(change) };
+
       change.abandoned = true;
       await graph.updateChange(change);
 
@@ -2890,6 +3160,7 @@ export async function createJJ(options) {
         user: { name: user.name, email: user.email, hostname: 'localhost' },
         description: `abandon change ${changeId.slice(0, 8)}`,
         parents: [],
+        changeSnapshot,
         view: {
           bookmarks: {},
           remoteBookmarks: {},

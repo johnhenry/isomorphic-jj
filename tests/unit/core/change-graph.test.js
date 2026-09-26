@@ -317,6 +317,44 @@ describe('ChangeGraph', () => {
     });
   });
 
+  describe('deleteChange', () => {
+    beforeEach(async () => {
+      await graph.init();
+    });
+
+    it('removes a change outright (unlike updateChange({ abandoned: true }))', async () => {
+      const change = await graph.createChange({ description: 'to remove' });
+
+      const removed = await graph.deleteChange(change.changeId);
+
+      expect(removed).toBe(true);
+      expect(await graph.getChange(change.changeId)).toBeNull();
+      expect(graph.getAll()).toHaveLength(0);
+    });
+
+    it('also drops the commitId -> changeId index entry', async () => {
+      const change = await graph.createChange({ description: 'x' });
+      expect(graph.findByCommitId(change.commitId)).toBe(change.changeId);
+
+      await graph.deleteChange(change.changeId);
+
+      expect(graph.findByCommitId(change.commitId)).toBeNull();
+    });
+
+    it('returns false for an unknown change id (no-op, does not throw)', async () => {
+      const NOPE = 'deadbeef'.repeat(4);
+      await expect(graph.deleteChange(NOPE)).resolves.toBe(false);
+    });
+
+    it('persists the removal to storage', async () => {
+      const change = await graph.createChange({ description: 'x' });
+      await graph.deleteChange(change.changeId);
+
+      const data = await storage.read('repo/store/graph.json');
+      expect(data.changes[change.changeId]).toBeUndefined();
+    });
+  });
+
   describe('concurrency (issue #11 — no locking in the storage layer)', () => {
     it('should not lose a change when two addChange()/save() calls race', async () => {
       await graph.init();
