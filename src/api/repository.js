@@ -700,6 +700,20 @@ export async function createJJ(options) {
     /**
      * Write a file to the working copy
      *
+     * Note (issue #30): this does NOT update the working-copy change's
+     * `commitId`/`fileSnapshot` — those stay as they were until the next
+     * command that snapshots the working copy (describe(), new(), edit(),
+     * status(), or any other call that goes through
+     * autoSnapshotWorkingCopy()/snapshot()). This is intentional, not a
+     * bug: jj has no staging area, but it also doesn't recompute a git
+     * tree/commit hash on every single file write (that would mean
+     * hashing on every keystroke of an external editor) — real jj only
+     * takes a fresh working-copy snapshot when an actual `jj` command
+     * runs. write() is the equivalent of editing a file with your OS's own
+     * tools outside of jj entirely; describe()/new()/edit()/status()/etc.
+     * are the equivalent of running a jj command, which is what triggers
+     * the (auto) snapshot in both real jj and here.
+     *
      * @param {Record<string, any>} args - Arguments
      * @returns {Promise<Object>} File information including path, size, and mode
      */
@@ -1681,6 +1695,7 @@ export async function createJJ(options) {
       const user = /** @type {any} */ (userConfig.getUser());
 
       // Initialize with parent's file snapshot
+      /** @type {Record<string, string>} */
       let initialSnapshot = {};
       if (parents && parents.length > 0) {
         const parent = await graph.getChange(parents[0]);
@@ -1728,6 +1743,14 @@ export async function createJJ(options) {
         targetChange.parents = [newChangeId];
         await graph.updateChange(targetChange);
       }
+
+      // Sync the working directory to the new change's snapshot: write
+      // everything it has AND remove anything it doesn't (issue #30 — this
+      // used to never touch disk at all, so `new({ parents: [...] })`
+      // targeting anything other than the current head silently left the
+      // OLD working copy's files in place instead of checking out the new
+      // parent's).
+      await syncWorkingCopyFiles(initialSnapshot);
 
       await workingCopy.setCurrentChange(newChangeId);
 
@@ -2128,6 +2151,13 @@ export async function createJJ(options) {
 
       const previousChangeId = workingCopy.getCurrentChangeId();
 
+      /** @type {Record<string, any>} */
+      const changeSnapshot = {};
+
+      // Capture disk state right before we touch anything, for undo() —
+      // see issue #29.
+      const fileSnapshotBeforeSwitch = await snapshotFilesystem();
+
       // CRITICAL FIX: Clean working directory BEFORE snapshotting to prevent cross-branch pollution
       // Remove files that don't belong to the current changeId before we snapshot it
       if (previousChangeId !== args.changeId) {
@@ -2149,13 +2179,14 @@ export async function createJJ(options) {
               }
             }
           }
-        }
 
-        // Now snapshot the CLEAN working directory (no pollution!)
-        const currentSnapshot = await snapshotFilesystem();
-        if (currentSnapshot && Object.keys(currentSnapshot).length > 0) {
-          previousChange.fileSnapshot = currentSnapshot;
-          await graph.updateChange(previousChange);
+          // Now snapshot the CLEAN working directory (no pollution!)
+          const currentSnapshot = await snapshotFilesystem();
+          if (currentSnapshot && Object.keys(currentSnapshot).length > 0) {
+            changeSnapshot[previousChangeId] = structuredClone(previousChange);
+            previousChange.fileSnapshot = currentSnapshot;
+            await graph.updateChange(previousChange);
+          }
         }
       }
 
@@ -2168,38 +2199,17 @@ export async function createJJ(options) {
         timestamp: new Date().toISOString(),
       });
 
-      // Restore files from the change's snapshot to working directory
-      if (change.fileSnapshot) {
-        for (const [filePath, content] of Object.entries(change.fileSnapshot)) {
-          try {
-            const fullPath = path.join(dir, filePath);
-
-            // Ensure directory exists
-            const pathParts = filePath.split('/');
-            if (pathParts.length > 1) {
-              const dirPath = pathParts.slice(0, -1).join('/');
-              const fullDirPath = path.join(dir, dirPath);
-              await mkdirp(fs, fullDirPath);
-            }
-
-            // Write file content
-            await fs.promises.writeFile(fullPath, content, 'utf8');
-
-            // Update working copy tracking
-            const stats = await fs.promises.stat(fullPath);
-            await workingCopy.trackFile(filePath, {
-              mtime: stats.mtime,
-              size: stats.size,
-              mode: stats.mode,
-            });
-          } catch (error) {
-            throw new JJError(
-              'FILE_RESTORE_FAILED',
-              `Failed to restore file ${filePath}: ${error.message}`,
-              { filePath, originalError: error.message }
-            );
-          }
-        }
+      // Fully sync the working directory to the target change's snapshot:
+      // write everything it has AND remove anything it doesn't (issue #30
+      // — this used to only overlay the target's files on top of whatever
+      // was already on disk, so a file present in the PREVIOUS change but
+      // absent from the target leaked into the next snapshot).
+      try {
+        await syncWorkingCopyFiles(change.fileSnapshot || {});
+      } catch (error) {
+        throw new JJError('FILE_RESTORE_FAILED', `Failed to restore files: ${error.message}`, {
+          originalError: error.message,
+        });
       }
 
       // Set this change as the working copy
@@ -2215,11 +2225,13 @@ export async function createJJ(options) {
         },
         description: `edit change ${args.changeId.slice(0, 8)}`,
         parents: [],
+        changeSnapshot,
         view: {
           bookmarks: {},
           remoteBookmarks: {},
           heads: [args.changeId],
           workingCopy: args.changeId,
+          fileSnapshot: fileSnapshotBeforeSwitch,
         },
       });
 
@@ -3027,6 +3039,40 @@ export async function createJJ(options) {
       sourceChange.abandoned = true;
       await graph.updateChange(sourceChange);
 
+      // Merge source's file content into dest (issue #30: squash() used to
+      // only combine descriptions, leaving dest's tree untouched). Compute
+      // what source itself actually changed relative to ITS OWN parent
+      // (its "diff") and fold just that onto dest, rather than overwriting
+      // dest's whole snapshot with source's — a path source never touched
+      // (inherited unchanged from that parent) must not clobber a
+      // dest-specific version of the same path.
+      const sourceParentId = sourceChange.parents && sourceChange.parents[0];
+      const sourceParentChange = sourceParentId ? await graph.getChange(sourceParentId) : null;
+      const sourceBaseSnapshot = (sourceParentChange && sourceParentChange.fileSnapshot) || {};
+      const sourceSnapshot = sourceChange.fileSnapshot || {};
+      const mergedSnapshot = { ...(destChange.fileSnapshot || {}) };
+      const touchedPaths = new Set([
+        ...Object.keys(sourceBaseSnapshot),
+        ...Object.keys(sourceSnapshot),
+      ]);
+      for (const filePath of touchedPaths) {
+        const baseValue = sourceBaseSnapshot[filePath];
+        const sourceValue = sourceSnapshot[filePath];
+        if (sourceValue === baseValue) {
+          // source never touched this path (inherited as-is from its own
+          // parent) — leave whatever dest already had for it alone.
+          continue;
+        }
+        if (sourceValue === undefined) {
+          // source deleted a file it inherited from its parent.
+          delete mergedSnapshot[filePath];
+        } else {
+          // source added or modified this path.
+          mergedSnapshot[filePath] = sourceValue;
+        }
+      }
+      destChange.fileSnapshot = mergedSnapshot;
+
       // Update description of dest to indicate squash (middleware will sync to Git)
       destChange.description += `\n\n(squashed from ${source.slice(0, 8)})`;
       await graph.updateChange(destChange);
@@ -3148,11 +3194,33 @@ export async function createJJ(options) {
       });
 
       // Snapshot BEFORE mutating so undo()/redo()/operations.restore() can
-      // reverse the abandon (un-abandon this change) — see issue #29.
+      // reverse the abandon (un-abandon this change, un-reparent children)
+      // — see issue #29.
+      /** @type {Record<string, any>} */
       const changeSnapshot = { [changeId]: structuredClone(change) };
 
       change.abandoned = true;
       await graph.updateChange(change);
+
+      // Re-parent children onto the abandoned change's own parent(s)
+      // (issue #30: this used to leave children pointing at the now-
+      // abandoned commit). Matches real `jj abandon`: the abandoned
+      // change is elided from the graph and its children attach directly
+      // to whatever it was attached to.
+      const childIds = graph.getChildren(changeId);
+      for (const childId of childIds) {
+        const child = await graph.getChange(childId);
+        if (!child) continue;
+        changeSnapshot[childId] = structuredClone(child);
+        const reparented = child.parents.flatMap((/** @type {string} */ p) =>
+          p === changeId ? change.parents : [p]
+        );
+        // De-dupe (e.g. the child could already have one of the abandoned
+        // change's parents as another of its own parents) while preserving
+        // first-seen order.
+        child.parents = [...new Set(reparented)];
+        await graph.updateChange(child);
+      }
 
       // Record operation
       await oplog.recordOperation({
