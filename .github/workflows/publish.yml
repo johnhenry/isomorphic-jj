@@ -29,6 +29,24 @@ jobs:
           echo "::error::Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
           exit 1
         fi
+        # Both @johnhenry/isomorphic-jj and the unscoped isomorphic-jj mirror
+        # (publish-unscoped.yml) publish the same version on every release --
+        # see CHANGELOG.md's 1.9.0 entry for why. Refuse to publish a version
+        # that wouldn't move BOTH names' `latest` tag forward, so this can't
+        # silently regress into a version-number downgrade on either side.
+        node -e '
+          const semverParts = (v) => v.split(".").map(Number);
+          const gt = (a, b) => { const A = semverParts(a), B = semverParts(b); for (let i = 0; i < 3; i++) { if (A[i] > B[i]) return true; if (A[i] < B[i]) return false; } return false; };
+          const { execSync } = require("child_process");
+          const live = (pkg) => { try { return execSync(`npm view ${pkg} version`, { encoding: "utf8" }).trim(); } catch { return "0.0.0"; } };
+          const newVersion = require("./package.json").version;
+          const scoped = live("@johnhenry/isomorphic-jj");
+          const unscoped = live("isomorphic-jj");
+          if (!gt(newVersion, scoped) || !gt(newVersion, unscoped)) {
+            console.error(`::error::${newVersion} must be greater than both the scoped (${scoped}) and unscoped (${unscoped}) published versions`);
+            process.exit(1);
+          }
+        '
         npm run lint
         npm run format:check
         npm run typecheck

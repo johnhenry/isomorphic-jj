@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.9.0 — merge the scoped and unscoped version lineages
+
+No code change — a deliberate, one-time exception to this family's usual
+"version restarts at 0.0.0 on a scope move" convention, forced by making
+the unscoped `isomorphic-jj` mirror permanent (see the unscoped-mirror
+workflow's own history) rather than a one-off "final release" bridge:
+`isomorphic-jj`'s unscoped name already had real published history through
+**1.8.0** from before the `@johnhenry/*` rename, while the scoped package
+had separately restarted at 0.0.0 and reached 0.4.0. Both names publish
+the same version on every release from here on, so the shared version has
+to sit above BOTH names' currently-published maximum, or the unscoped
+mirror's `npm install isomorphic-jj` would move npm's `latest` tag
+*backward* in version number the moment it published. `1.9.0` is one
+minor above the unscoped side's existing 1.8.0 ceiling — chosen over a
+patch bump because this release also carries real new functionality
+(0.3.0/0.4.0's `jj converge`, N-way divergence resolution, and the four
+other jj-v0.45 fixes), not just the version-numbering fix itself.
+
+Going forward, `publish.yml`/`publish-unscoped.yml` both preflight-check
+that the tag being published is strictly greater than whatever's
+currently live under EITHER name before publishing either one, so this
+can't silently regress again.
+
 ## 0.4.0 — `converge()` resolves any number of divergent copies
 
 Follow-up to 0.3.0's `converge()` (#32): it originally capped automatic

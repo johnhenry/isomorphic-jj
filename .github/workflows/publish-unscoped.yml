@@ -40,6 +40,27 @@ jobs:
             exit 1
           fi
 
+      - name: Verify this version moves both names' latest tag forward
+        # Both names publish the same version every release (see
+        # CHANGELOG.md's 1.9.0 entry) -- refuse to publish a version that
+        # isn't strictly greater than what's already live under EITHER
+        # name, so this can't silently move npm's `latest` tag backward on
+        # either side again.
+        run: |
+          node -e '
+            const semverParts = (v) => v.split(".").map(Number);
+            const gt = (a, b) => { const A = semverParts(a), B = semverParts(b); for (let i = 0; i < 3; i++) { if (A[i] > B[i]) return true; if (A[i] < B[i]) return false; } return false; };
+            const { execSync } = require("child_process");
+            const live = (pkg) => { try { return execSync(`npm view ${pkg} version`, { encoding: "utf8" }).trim(); } catch { return "0.0.0"; } };
+            const newVersion = require("./package.json").version;
+            const scoped = live("@johnhenry/isomorphic-jj");
+            const unscoped = live("isomorphic-jj");
+            if (!gt(newVersion, scoped) || !gt(newVersion, unscoped)) {
+              console.error(`::error::${newVersion} must be greater than both the scoped (${scoped}) and unscoped (${unscoped}) published versions`);
+              process.exit(1);
+            }
+          '
+
       - name: Install dependencies
         run: npm ci
 
