@@ -3326,27 +3326,37 @@ export async function createJJ(options) {
 
     /**
      * Converge divergent copies of a change (matches `jj converge`, jj
-     * v0.45.0) — issue #32.
+     * v0.45.0+ — issue #32, extended for N-way per the isomorphic-jj v0.45
+     * catch-up follow-up) — resolves ANY number of divergent copies of one
+     * changeId in a single call. Real jj's own CLI currently only
+     * converges one change-id per invocation (an explicit TODO in its own
+     * source as of v0.45.1: "consider adding logic to deal with more than
+     * one divergent change-id in one invocation"), which is what fixed
+     * this package's own changeId-at-a-time API design — but its
+     * underlying engine (`TruncatedEvolutionGraph`/`find_divergent_changes`)
+     * already resolves every divergent revision of THAT one change-id
+     * together, not just a pair. This generalizes the same per-path rule
+     * accordingly: two-way "does the other side's value differ from base"
+     * becomes N-way "how many DISTINCT values, across every copy, differ
+     * from base" — 0 means nobody touched it, 1 means exactly one copy (or
+     * several copies agreeing on the same new value) changed it and that
+     * value wins, 2+ is a genuine conflict between that many copies.
      *
      * A change is divergent when more than one visible commit shares its
      * change id (see the `divergent()` revset, and
      * ChangeGraph.addDivergentCopy() for how a divergent copy gets added
      * in the first place — nothing in this library creates one on its
      * own yet; this resolves one once something has, e.g. a future git
-     * fetch/concurrent-operation integration). converge() attempts
-     * automatic resolution using the exact same three-way-merge/conflict-
-     * detection machinery rebase() uses (issue #31) — reused, not
-     * duplicated a third time in this codebase.
+     * fetch/concurrent-operation integration).
      *
      * Non-interactive-mode convention, matching this package's other
      * ambiguous-outcome APIs: like merge(), a genuine per-path conflict is
      * returned as data (`{ resolved: false, conflicts }`), not thrown —
      * you get a result back either way and decide what to do with
      * unresolved conflicts. What DOES throw is anything that isn't even a
-     * well-formed convergence attempt (no divergence to resolve at all, or
-     * more divergent copies than a pairwise merge can attempt) — the same
-     * category as merge()'s own `MERGE_ERROR` throw for "no common
-     * ancestor found".
+     * well-formed convergence attempt (no divergence to resolve at all) —
+     * the same category as merge()'s own `MERGE_ERROR` throw for "no
+     * common ancestor found".
      *
      * @param {Record<string, any>|string} args - `{ changeId }`, or a bare changeId string
      * @returns {Promise<Object>} `{ changeId, resolved, conflicts, commitId? }`
@@ -3375,39 +3385,34 @@ export async function createJJ(options) {
         );
       }
 
-      if (siblings.length > 2) {
-        throw new JJError(
-          'CONVERGE_AMBIGUOUS',
-          `Change ${changeId} has ${siblings.length} divergent copies; automatic convergence only supports resolving exactly two at a time`,
-          {
-            changeId,
-            copyCount: siblings.length,
-            suggestion:
-              'Converge two copies at a time (e.g. abandon all but two, or resolve manually) — matches real jj aborting non-interactive resolution it cannot disambiguate',
-          }
-        );
-      }
-
       // The primary copy is whichever one getChange() resolves (stored
-      // under the plain changeId key); the other is the divergent copy
-      // added via addDivergentCopy().
+      // under the plain changeId key); every other one is a divergent copy
+      // added via addDivergentCopy(). No cap on how many — see the doc
+      // comment above.
       const primary = /** @type {any} */ (await graph.getChange(changeId));
-      const other = siblings.find((/** @type {any} */ s) => s.commitId !== primary.commitId);
+      const others = siblings.filter((/** @type {any} */ s) => s.commitId !== primary.commitId);
 
-      // Base for the three-way merge: what this change looked like before
-      // it diverged. This package doesn't retain historical snapshots
-      // (only current content), so — same pragmatic choice rebase() makes
-      // for "old base" — use the shared parent's current content; a
-      // divergent pair realistically shares the same parent, since they're
-      // two rewrites of one prior position in history, not unrelated
-      // commits that happen to collide.
+      // Base for the N-way merge: what this change looked like before it
+      // diverged. This package doesn't retain historical snapshots (only
+      // current content), so — same pragmatic choice rebase() makes for
+      // "old base" — use the shared parent's current content; divergent
+      // copies realistically share the same parent, since they're all
+      // rewrites of one prior position in history, not unrelated commits
+      // that happen to collide. Applied uniformly to every copy, not
+      // per-copy — the same simplification the original two-way version
+      // made, just not newly introduced by going N-way.
       const baseParentId = primary.parents && primary.parents[0];
       const baseParentChange = baseParentId ? await graph.getChange(baseParentId) : null;
       const baseFiles = new Map(
         Object.entries((baseParentChange && baseParentChange.fileSnapshot) || {})
       );
-      const leftFiles = new Map(Object.entries(primary.fileSnapshot || {}));
-      const rightFiles = new Map(Object.entries(other.fileSnapshot || {}));
+
+      // Every copy (primary + others), each as its own file map, paired
+      // with its commitId for conflict reporting.
+      const copies = [primary, ...others].map((/** @type {any} */ c) => ({
+        commitId: c.commitId,
+        files: new Map(Object.entries(c.fileSnapshot || {})),
+      }));
 
       await conflicts.load();
       const conflictsSnapshot = {
@@ -3415,16 +3420,46 @@ export async function createJJ(options) {
         fileConflicts: Object.fromEntries(conflicts.fileConflicts),
       };
 
-      const detectedConflicts = await conflicts.detectConflicts({
-        baseFiles,
-        leftFiles,
-        rightFiles,
-        drivers: {},
-        workingCopyDir: /** @type {any} */ (null),
-        baseChange: baseParentId,
-        leftChange: changeId,
-        rightChange: changeId,
-      });
+      const allPaths = new Set([
+        ...baseFiles.keys(),
+        ...copies.flatMap((c) => [...c.files.keys()]),
+      ]);
+
+      /** @type {Record<string, string>} */
+      const mergedSnapshot = {};
+      /** @type {any[]} */
+      const detectedConflicts = [];
+
+      for (const filePath of allPaths) {
+        const baseValue = baseFiles.get(filePath);
+        // Every DISTINCT value across all copies that differs from base,
+        // each paired with (one of) the commitId(s) that has it — mirrors
+        // ConflictModel._detectPathConflict's two-way "no conflict" rules,
+        // generalized: 0 distinct changed values means nobody touched it
+        // (base wins, i.e. nothing to write), 1 means only one side (or
+        // several copies agreeing) changed it (that value wins), 2+ is a
+        // genuine conflict.
+        const changed = new Map();
+        for (const copy of copies) {
+          const value = copy.files.get(filePath);
+          if (value !== baseValue && !changed.has(value)) {
+            changed.set(value, copy.commitId);
+          }
+        }
+
+        if (changed.size === 0) {
+          if (baseValue !== undefined) mergedSnapshot[filePath] = baseValue;
+        } else if (changed.size === 1) {
+          const [[value]] = changed;
+          if (value !== undefined) mergedSnapshot[filePath] = value;
+        } else {
+          const versions = [...changed.entries()].map(([content, commitId]) => ({
+            commitId,
+            content,
+          }));
+          detectedConflicts.push(conflicts.createNWayConflict(filePath, baseValue, versions));
+        }
+      }
 
       if (detectedConflicts.length > 0) {
         // Matches real jj: non-interactive mode aborts automatic
@@ -3449,33 +3484,15 @@ export async function createJJ(options) {
         return { changeId, resolved: false, conflicts: detectedConflicts };
       }
 
-      // Clean resolution: for each path, apply whichever side actually
-      // changed it relative to the shared base (mirrors
-      // ConflictModel._detectPathConflict's own "no conflict" rules, which
-      // is exactly why detectConflicts() found nothing to report here).
-      /** @type {Record<string, string>} */
-      const mergedSnapshot = {};
-      const allPaths = new Set([...baseFiles.keys(), ...leftFiles.keys(), ...rightFiles.keys()]);
-      for (const filePath of allPaths) {
-        const baseValue = baseFiles.get(filePath);
-        const leftValue = leftFiles.get(filePath);
-        const rightValue = rightFiles.get(filePath);
-        const resolved =
-          leftValue === rightValue ? leftValue : baseValue === leftValue ? rightValue : leftValue;
-        if (resolved !== undefined) {
-          mergedSnapshot[filePath] = resolved;
-        }
-      }
-
       const user = /** @type {any} */ (userConfig.getUser());
       const changeSnapshot = { [changeId]: structuredClone(primary) };
+      const otherIds = others.map((/** @type {any} */ o) => o.commitId.slice(0, 8)).join(', ');
 
       const convergedChange = {
         ...primary,
         commitId: randomHex(20),
         fileSnapshot: mergedSnapshot,
-        description:
-          primary.description + `\n\n(converged with divergent copy ${other.commitId.slice(0, 8)})`,
+        description: primary.description + `\n\n(converged divergent copies: ${otherIds})`,
         timestamp: new Date().toISOString(),
         committer: {
           name: user.name,
@@ -3485,7 +3502,9 @@ export async function createJJ(options) {
         divergent: false,
       };
       await graph.updateChange(convergedChange);
-      await graph.deleteDivergentCopy(changeId, other.commitId);
+      for (const other of others) {
+        await graph.deleteDivergentCopy(changeId, other.commitId);
+      }
 
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),

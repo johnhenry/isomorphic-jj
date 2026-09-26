@@ -273,6 +273,30 @@ export class ConflictModel {
   }
 
   /**
+   * Create a content conflict with more than two disagreeing versions —
+   * every other conflict in this module has exactly two sides (`left`/
+   * `right`, or `left`/`right` on an add-add), because every OTHER caller
+   * (merge, rebase) only ever three-way-merges two changes at a time.
+   * converge() (issue #32) can face more than two divergent copies of one
+   * change in a single call, so `sides` here is `{ base, versions }`
+   * instead: `versions` is every distinct value found across all copies
+   * that differs from `base`, each paired with (one of) the commitId(s)
+   * that has it.
+   *
+   * @param {string} path
+   * @param {any} base
+   * @param {Array<{commitId: string, content: any}>} versions
+   */
+  createNWayConflict(path, base, versions) {
+    return this._createConflict({
+      type: ConflictType.CONTENT,
+      path,
+      sides: { base, versions },
+      message: `${versions.length} divergent copies disagree on this file's content`,
+    });
+  }
+
+  /**
    * Create a conflict object
    *
    * @param {{ type: any, path: any, sides: any, message: any, driverFailed?: any, driverError?: any, driverResult?: any }} args

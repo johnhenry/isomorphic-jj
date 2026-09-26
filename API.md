@@ -833,10 +833,19 @@ await jj.abandon({ changeId: ['old-1', 'old-2'] });
 
 ### `jj.converge(options)`
 Auto-resolve divergent copies of a change — multiple visible commits sharing
-one change id (see the `divergent()` revset) — into one, via the same
-three-way-merge/conflict-detection machinery `rebase()` uses.
+one change id (see the `divergent()` revset) — into one. Handles **any
+number** of divergent copies in a single call, not just a pair: for each
+file path, only the distinct values that actually differ from the shared
+base matter — 0 means nobody touched it, 1 means exactly one side (or
+several copies agreeing on the same new value) changed it and that value
+wins, 2+ is a genuine conflict between that many copies.
 
-**CLI equivalent**: `jj converge` (jj v0.45.0)
+**CLI equivalent**: `jj converge` (jj v0.45.0+). Real jj's own CLI still
+only converges one *change id* per invocation as of v0.45.1 (an explicit
+TODO in its own source) — this package's changeId-at-a-time API already
+matched that. Its underlying engine does resolve every divergent revision
+of that one change id together, though, which is what N-way support here
+matches.
 
 **Parameters**:
 ```typescript
@@ -849,7 +858,7 @@ three-way-merge/conflict-detection machinery `rebase()` uses.
 ```typescript
 Promise<{
   changeId: string;
-  resolved: boolean;      // true if the copies were merged into one
+  resolved: boolean;      // true if every copy was merged into one
   conflicts: Conflict[];  // non-empty only when resolved is false
   commitId?: string;      // present only when resolved is true
 }>
@@ -857,13 +866,13 @@ Promise<{
 
 Matches `merge()`'s own convention for ambiguous outcomes: a genuine
 per-path conflict is **returned as data** (`resolved: false`), not thrown —
-the conflict is also recorded, so `conflicts.list()` reflects it. What
-**does** throw:
-- `NOT_DIVERGENT` — the changeId has no divergent copies to converge.
-- `CONVERGE_AMBIGUOUS` — more than two visible copies exist; automatic
-  resolution only attempts a pairwise merge (matches real jj's
-  non-interactive mode aborting resolution it can't disambiguate rather
-  than guessing).
+the conflict is also recorded, so `conflicts.list()` reflects it. A
+conflict with more than two disagreeing copies carries `sides: { base,
+versions }` instead of the usual `{ base, left, right }` — `versions` is
+`Array<{ commitId, content }>`, one entry per distinct disagreeing value
+(copies that agree with the base, or with each other, don't add extra
+entries). What **does** throw: `NOT_DIVERGENT` — the changeId has no
+divergent copies to converge.
 
 **Example**:
 ```javascript
@@ -872,6 +881,9 @@ if (result.resolved) {
   console.log('Converged to commit', result.commitId);
 } else {
   console.log(`${result.conflicts.length} conflict(s) left unresolved`);
+  for (const c of result.conflicts) {
+    console.log(c.path, '-', c.sides.versions.length, 'disagreeing versions');
+  }
 }
 ```
 

@@ -74,15 +74,117 @@ describe('issue #32 — converge() resolves divergent copies', () => {
       });
     });
 
-    it('throws CONVERGE_AMBIGUOUS when more than two copies exist', async () => {
-      const root = await currentId();
+    it('cleanly resolves three-or-more copies that touch disjoint files', async () => {
+      await jj.write({ path: 'unchanged.txt', data: 'base' });
       await jj.describe({ message: 'root' });
-      await makeDivergent(root, { commitId: 'aaaa0000'.repeat(5) });
-      await makeDivergent(root, { commitId: 'bbbb1111'.repeat(5) });
+      const base = await currentId();
 
-      await expect(jj.converge({ changeId: root })).rejects.toMatchObject({
-        code: 'CONVERGE_AMBIGUOUS',
+      const primaryChange = await jj.new({ parents: [base] });
+      await jj.write({ path: 'from-primary.txt', data: 'p' });
+      await jj.describe({ message: 'primary' });
+
+      await makeDivergent(primaryChange.changeId, {
+        commitId: 'aaaa0000'.repeat(5),
+        parents: [base],
+        fileSnapshot: { 'unchanged.txt': 'base', 'from-copy-a.txt': 'a' },
       });
+      await makeDivergent(primaryChange.changeId, {
+        commitId: 'bbbb1111'.repeat(5),
+        parents: [base],
+        fileSnapshot: { 'unchanged.txt': 'base', 'from-copy-b.txt': 'b' },
+      });
+
+      const result = await jj.converge({ changeId: primaryChange.changeId });
+
+      expect(result.resolved).toBe(true);
+      expect(result.conflicts).toEqual([]);
+
+      const converged = await jj.graph.getChange(primaryChange.changeId);
+      expect(converged.fileSnapshot['from-primary.txt']).toBe('p');
+      expect(converged.fileSnapshot['from-copy-a.txt']).toBe('a');
+      expect(converged.fileSnapshot['from-copy-b.txt']).toBe('b');
+      expect(converged.fileSnapshot['unchanged.txt']).toBe('base');
+      expect(converged.divergent).toBe(false);
+
+      // All three divergent copies are gone in one call — not just a pair.
+      expect(await jj.log({ revset: 'divergent()' })).toEqual([]);
+      expect(jj.graph.getDivergentSiblings(primaryChange.changeId)).toHaveLength(1);
+    });
+
+    it('resolves cleanly when several copies independently make the same change', async () => {
+      await jj.write({ path: 'shared.txt', data: 'base' });
+      await jj.describe({ message: 'root' });
+      const base = await currentId();
+
+      // primaryChange doesn't touch shared.txt itself, so it inherits
+      // 'base' unchanged from its own parent -- the same starting point
+      // the two divergent copies below diverge from.
+      const primaryChange = await jj.new({ parents: [base] });
+      await jj.write({ path: 'other.txt', data: 'unrelated' });
+      await jj.describe({ message: 'primary' });
+
+      // Two divergent copies both change shared.txt to the *same* new
+      // value -- one distinct changed value across all three copies, so
+      // this is a clean resolution, not a conflict.
+      await makeDivergent(primaryChange.changeId, {
+        commitId: 'aaaa0000'.repeat(5),
+        parents: [base],
+        fileSnapshot: { 'shared.txt': 'agreed' },
+      });
+      await makeDivergent(primaryChange.changeId, {
+        commitId: 'bbbb1111'.repeat(5),
+        parents: [base],
+        fileSnapshot: { 'shared.txt': 'agreed' },
+      });
+
+      const result = await jj.converge({ changeId: primaryChange.changeId });
+      expect(result.resolved).toBe(true);
+      expect(result.conflicts).toEqual([]);
+      expect((await jj.graph.getChange(primaryChange.changeId)).fileSnapshot['shared.txt']).toBe(
+        'agreed'
+      );
+    });
+
+    it('reports an N-way conflict naming every disagreeing copy, when 2+ of 3+ disagree', async () => {
+      await jj.write({ path: 'file.txt', data: 'base\n' });
+      await jj.describe({ message: 'root' });
+      const base = await currentId();
+
+      const primaryChange = await jj.new({ parents: [base] });
+      await jj.write({ path: 'file.txt', data: 'edited by primary\n' });
+      await jj.describe({ message: 'primary' });
+
+      const copyA = await makeDivergent(primaryChange.changeId, {
+        commitId: 'aaaa0000'.repeat(5),
+        parents: [base],
+        fileSnapshot: { 'file.txt': 'edited by copy A\n' },
+      });
+      // A third copy that AGREES with base on this path shouldn't add a
+      // third version to the conflict -- only the two that actually
+      // changed it belong in `versions`.
+      await makeDivergent(primaryChange.changeId, {
+        commitId: 'bbbb1111'.repeat(5),
+        parents: [base],
+        fileSnapshot: { 'file.txt': 'base\n' },
+      });
+
+      const result = await jj.converge({ changeId: primaryChange.changeId });
+
+      expect(result.resolved).toBe(false);
+      expect(result.conflicts.length).toBe(1);
+      expect(result.conflicts[0].path).toBe('file.txt');
+      expect(result.conflicts[0].sides.base).toBe('base\n');
+      expect(result.conflicts[0].sides.versions).toHaveLength(2);
+      const contents = result.conflicts[0].sides.versions.map((/** @type {any} */ v) => v.content);
+      expect(contents).toContain('edited by primary\n');
+      expect(contents).toContain('edited by copy A\n');
+      const commitIds = result.conflicts[0].sides.versions.map(
+        (/** @type {any} */ v) => v.commitId
+      );
+      expect(commitIds).toContain(copyA.commitId);
+
+      // Unresolved — still divergent, all three copies remain.
+      expect(jj.graph.getDivergentSiblings(primaryChange.changeId)).toHaveLength(3);
     });
 
     it('cleanly resolves two copies that touch disjoint files, keeping both changes', async () => {
