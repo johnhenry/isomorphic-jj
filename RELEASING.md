@@ -1,42 +1,32 @@
 # Releasing
 
-## Scoped release (`@johnhenry/isomorphic-jj`)
-
-This is the normal path.
+isomorphic-jj publishes under two npm names, kept permanently in lockstep at the same
+version: the scoped `@johnhenry/isomorphic-jj` (the canonical name) and the unscoped
+`isomorphic-jj` (kept alive as a first-class mirror, not a deprecated legacy pointer).
+One release process drives both.
 
 1. Bump `version` in `package.json` and add an entry to `CHANGELOG.md`.
 2. Commit the changes on `main` (e.g. `git commit -am "release: v0.2.0"`).
 3. Tag the release: `git tag v0.2.0`.
 4. Push the tag: `git push --tags`.
 
-Pushing a `v*.*.*` tag triggers [`.github/workflows/publish.yml`](.github/workflows/publish.yml),
-which checks that the tag matches `package.json`, runs lint/format/typecheck/tests/build, and
-publishes to npm with `--provenance`. If the `npm-publish` GitHub Environment has required
-reviewers configured, the run pauses for approval before publishing.
+Pushing a `v*.*.*` tag triggers both workflows in parallel:
 
-## Unscoped bridge release (`isomorphic-jj`, legacy name)
+- [`.github/workflows/publish.yml`](.github/workflows/publish.yml) checks that the tag
+  matches `package.json`, runs lint/format/typecheck/tests/build, and publishes to npm as
+  `@johnhenry/isomorphic-jj` with `--provenance`. If the `npm-publish` GitHub Environment
+  has required reviewers configured, the run pauses for approval before publishing.
+- [`.github/workflows/publish-unscoped.yml`](.github/workflows/publish-unscoped.yml) runs
+  the identical gates (lint/format/typecheck/tests/build) in its own job, then sets only
+  `name` in a throwaway `package.json` (version is whatever the tag already checked out)
+  and publishes the same build as `isomorphic-jj` with `--provenance --access public`.
 
-Use this only for the one-off final release(s) under the old unscoped `isomorphic-jj` name,
-pointing users at the new `@johnhenry/isomorphic-jj` package. This does not touch the repo's
-`package.json` — it's a manual, ad hoc workflow.
-
-1. Go to Actions → **Publish unscoped bridge release** → **Run workflow**.
-2. Fill in:
-   - `version`: the version to publish under the old name (e.g. `1.8.0`).
-   - `ref`: the git ref to build from (defaults to `main`).
-3. Run it. [`.github/workflows/publish-unscoped.yml`](.github/workflows/publish-unscoped.yml)
-   runs the same gates as `publish.yml` (lint/format/typecheck/tests/build), then sets
-   `name` and `version` in a throwaway `package.json`, prepends a "this package has moved"
-   banner to the README, and publishes to npm as `isomorphic-jj` with `--provenance --access public`.
-4. After the run finishes, deprecate the old package by hand (this is intentionally not
-   automated):
-
-   ```sh
-   npm deprecate isomorphic-jj@"*" "Renamed to @johnhenry/isomorphic-jj — 1.8.0 is the final release under this name. See https://github.com/johnhenry/isomorphic-jj"
-   ```
-
-   Substitute the actual final version for `1.8.0`. The workflow's last step prints this
-   exact command with the version you entered, ready to copy.
+Not a matrix: the two publishes share one identical build/test and differ only in the
+package name at the very end, so running them as two full matrix legs would just pay for
+that build/test twice. Each has its own `npm view` idempotency guard, so if one succeeds
+and the other fails, re-running is safe — it only publishes the one that's still missing.
+Both need `secrets.NPM_TOKEN` to cover both package names (see the `isomorphic-jj` entry
+in `~/Projects/@johnhenry/ecosystem/npm-tokens/tokens.json`).
 
 ## Verifying a publish
 
