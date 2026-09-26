@@ -5,6 +5,22 @@
  */
 
 /**
+ * Generate `byteLength` cryptographically random bytes as a lowercase hex string.
+ *
+ * Uses the standard Web Crypto API (`crypto.getRandomValues`), available as
+ * a global in both Node.js (18.14+) and every browser — unlike Node's
+ * `crypto.randomBytes`, which requires `import 'crypto'` and does not exist
+ * in a browser bundle (see issue #28).
+ *
+ * @param {number} byteLength - Number of random bytes to generate
+ * @returns {string} `byteLength * 2`-character lowercase hex string
+ */
+export function randomHex(byteLength) {
+  const bytes = crypto.getRandomValues(new Uint8Array(byteLength));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Generate a stable change ID
  *
  * Uses 128-bit cryptographically random value encoded as 32-character hex string.
@@ -13,8 +29,7 @@
  * @returns {string} 32-character lowercase hex string
  */
 export function generateChangeId() {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return randomHex(16);
 }
 
 /**
@@ -48,7 +63,6 @@ export async function generateOperationId(operation) {
  * @returns {string} ID string
  */
 export function generateId(prefix = '') {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  const id = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  const id = randomHex(16);
   return prefix ? `${prefix}-${id}` : id;
 }

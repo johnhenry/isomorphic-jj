@@ -187,6 +187,47 @@ const jj = await createJJ({
 isomorphic-jj provides additional browser-specific utilities, all exported from
 the `@johnhenry/isomorphic-jj/browser` entry point (see `src/browser/helpers.js`):
 
+#### `createBrowserFS(opts?)`
+Create an isomorphic-git-compatible filesystem for the browser. By default,
+dynamically `import()`s `@isomorphic-git/lightning-fs` (an optional
+dependency you install yourself) and constructs an IndexedDB-backed
+instance. **Asynchronous** — always `await` the result.
+
+**Options**:
+```typescript
+{
+  backend?: 'idb' | 'memory'; // storage backend (default 'idb')
+  name?: string;              // IndexedDB database name (default 'jj')
+  wipe?: boolean;             // wipe existing data (default false)
+  fs?: any;                   // bring your own fs — see below
+}
+```
+
+**Returns**: `Promise<Object>` — a filesystem instance compatible with
+isomorphic-git (has a `.promises` API).
+
+**Example**:
+```javascript
+import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
+
+const fs = await createBrowserFS({ name: 'my-repo' });
+```
+
+**Bring your own filesystem**: pass `opts.fs` to skip the LightningFS
+auto-import entirely — useful for `memfs`, a custom OPFS-backed fs, or a
+LightningFS instance you already constructed. If `opts.fs` is a function it
+is treated as a LightningFS-shaped constructor and instantiated as
+`new opts.fs(name, { wipe })`; otherwise it is assumed to already be a
+ready-to-use fs instance and is returned unchanged.
+
+```javascript
+import { fs as memfs } from 'memfs';
+
+const fs = await createBrowserFS({ fs: memfs });
+```
+
+---
+
 #### `detectCapabilities()`
 Detect browser capabilities for storage and worker support. Synchronous —
 returns `{ environment: 'node', ... }` outside a browser instead of throwing.
@@ -786,6 +827,52 @@ await jj.abandon();
 
 // Abandon specific changes
 await jj.abandon({ changeId: ['old-1', 'old-2'] });
+```
+
+---
+
+### `jj.converge(options)`
+Auto-resolve divergent copies of a change — multiple visible commits sharing
+one change id (see the `divergent()` revset) — into one, via the same
+three-way-merge/conflict-detection machinery `rebase()` uses.
+
+**CLI equivalent**: `jj converge` (jj v0.45.0)
+
+**Parameters**:
+```typescript
+{
+  changeId: string;  // The divergent changeId to converge (or pass a bare string)
+}
+```
+
+**Returns**:
+```typescript
+Promise<{
+  changeId: string;
+  resolved: boolean;      // true if the copies were merged into one
+  conflicts: Conflict[];  // non-empty only when resolved is false
+  commitId?: string;      // present only when resolved is true
+}>
+```
+
+Matches `merge()`'s own convention for ambiguous outcomes: a genuine
+per-path conflict is **returned as data** (`resolved: false`), not thrown —
+the conflict is also recorded, so `conflicts.list()` reflects it. What
+**does** throw:
+- `NOT_DIVERGENT` — the changeId has no divergent copies to converge.
+- `CONVERGE_AMBIGUOUS` — more than two visible copies exist; automatic
+  resolution only attempts a pairwise merge (matches real jj's
+  non-interactive mode aborting resolution it can't disambiguate rather
+  than guessing).
+
+**Example**:
+```javascript
+const result = await jj.converge({ changeId: divergentId });
+if (result.resolved) {
+  console.log('Converged to commit', result.commitId);
+} else {
+  console.log(`${result.conflicts.length} conflict(s) left unresolved`);
+}
 ```
 
 ---
@@ -2434,7 +2521,7 @@ jj.on('conflict-detected', async (event) => {
 
 isomorphic-jj includes utilities for browser environments (see
 [Browser Utilities](#browser-utilities) above for full signatures):
-`detectCapabilities()`, `requestPersistentStorage()`,
+`createBrowserFS()`, `detectCapabilities()`, `requestPersistentStorage()`,
 `isPersistentStorage()`, `getStorageQuota()`, and `serviceWorker`.
 
 ### Example
@@ -2454,7 +2541,7 @@ if (caps.persistentStorage) {
 }
 
 // Create JJ instance with an IndexedDB-backed filesystem
-const fs = createBrowserFS({ name: 'my-repo' });
+const fs = await createBrowserFS({ name: 'my-repo' });
 const jj = await createJJ({ fs, dir: '/repo' });
 ```
 

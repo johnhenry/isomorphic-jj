@@ -5,19 +5,9 @@
  * This file tracks the working copy tree and file states.
  */
 
-import protobuf from 'protobufjs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { atomicWriteFile } from '../utils/atomic-write.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Determine proto path based on whether we're running from dist or src
-const inDist = __dirname.includes('/dist') || __dirname.includes('\\dist');
-const protoDir = inDist
-  ? path.join(__dirname, '..', 'src', 'protos')
-  : path.join(__dirname, '..', 'protos');
+import { getLocalWorkingCopyRoot } from '../protos/schema.js';
+import { hexToBytes } from '../utils/bytes.js';
 
 export class JJTreeState {
   /**
@@ -27,7 +17,6 @@ export class JJTreeState {
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
-    this.protoPath = path.join(protoDir, 'local_working_copy.proto');
   }
 
   /**
@@ -38,11 +27,11 @@ export class JJTreeState {
    */
   async writeTreeState(treeId, fileStates = []) {
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getLocalWorkingCopyRoot();
     const TreeState = root.lookupType('local_working_copy.TreeState');
 
     // Convert hex tree ID to bytes
-    const treeIdBuffer = Buffer.from(treeId, 'hex');
+    const treeIdBuffer = hexToBytes(treeId);
 
     // Convert file states to protobuf format
     const fileStateEntries = fileStates.map((fs) => ({
@@ -88,7 +77,7 @@ export class JJTreeState {
     const buffer = await this.fs.promises.readFile(treeStatePath);
 
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getLocalWorkingCopyRoot();
     const TreeState = root.lookupType('local_working_copy.TreeState');
 
     // Decode

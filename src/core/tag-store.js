@@ -6,6 +6,7 @@
  */
 
 import { JJError } from '../utils/errors.js';
+import { mkdirp } from '../utils/mkdirp.js';
 
 /**
  * Validates tag name format
@@ -100,11 +101,7 @@ export class TagStore {
   async save(tags) {
     // Ensure the store directory exists
     const storeDir = `${this.jjDir}/store`;
-    try {
-      await this.fs.promises.mkdir(storeDir, { recursive: true });
-    } catch (err) {
-      // Directory might already exist, ignore
-    }
+    await mkdirp(this.fs, storeDir);
     await this.fs.promises.writeFile(
       this.tagsFile,
       JSON.stringify({ tags, tracked: this.tracking || {} }, null, 2)

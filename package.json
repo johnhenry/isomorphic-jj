@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/isomorphic-jj",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Jujutsu (jj) version control semantics in pure JavaScript — stable change IDs, fearless undo, no staging area — for Node.js and browsers",
   "type": "module",
   "bin": {
@@ -11,13 +11,13 @@
   "types": "./src/types.d.ts",
   "exports": {
     ".": {
+      "types": "./src/types.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs",
-      "types": "./src/types.d.ts"
+      "require": "./dist/index.cjs"
     },
     "./browser": {
-      "import": "./src/browser/index.js",
-      "types": "./src/browser/index.d.ts"
+      "types": "./src/browser/index.d.ts",
+      "import": "./src/browser/index.js"
     }
   },
   "files": [
@@ -47,7 +47,8 @@
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
     "test:browser": "playwright test",
-    "build": "rollup -c",
+    "build:protos": "node scripts/build-protos.mjs",
+    "build": "npm run build:protos && rollup -c",
     "lint": "eslint src tests",
     "format": "prettier --write \"src/**/*.js\" \"tests/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"tests/**/*.js\"",

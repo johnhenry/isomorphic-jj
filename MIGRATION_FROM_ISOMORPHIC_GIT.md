@@ -392,7 +392,8 @@ import { createBrowserFS } from '@johnhenry/isomorphic-jj/browser';
 import http from 'isomorphic-git/http/web';
 
 // Create once
-const { fs, dir } = await createBrowserFS('repo');
+const fs = await createBrowserFS({ name: 'repo' });
+const dir = '/repo';
 const jj = await createJJ({ fs, dir });
 
 // Clean API, fs/dir remembered

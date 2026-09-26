@@ -482,6 +482,26 @@ export interface UnabandonArgs {
 }
 
 /**
+ * Converge (auto-resolve divergent copies) arguments
+ */
+export interface ConvergeArgs {
+  changeId: ChangeID;
+}
+
+/**
+ * Converge result
+ */
+export interface ConvergeResult {
+  changeId: ChangeID;
+  /** Whether the divergent copies were successfully merged into one. */
+  resolved: boolean;
+  /** Per-path conflicts found — non-empty only when `resolved` is false. */
+  conflicts: Conflict[];
+  /** The resulting commit id, present only when `resolved` is true. */
+  commitId?: string;
+}
+
+/**
  * Log query options
  */
 export interface LogOptions {
@@ -1063,6 +1083,19 @@ export interface JJ {
   abandon(args: AbandonArgs): Promise<void>;
   unabandon(args: UnabandonArgs): Promise<void>;
   absorb(args?: AbsorbArgs): Promise<AbsorbResult>;
+
+  /**
+   * Auto-resolve divergent copies of a change — multiple visible commits
+   * sharing one change id (see the `divergent()` revset) — by three-way
+   * merging them (matches `jj converge`, jj v0.45.0).
+   *
+   * A genuine per-path conflict is reported as data (`resolved: false`),
+   * matching merge()'s own convention, rather than thrown. Throws when
+   * there's nothing to converge, or when more than two visible copies
+   * exist (automatic resolution only attempts a pairwise merge — matches
+   * real jj aborting non-interactive resolution it can't disambiguate).
+   */
+  converge(args: ConvergeArgs | ChangeID): Promise<ConvergeResult>;
 
   /**
    * Create a change that reverses another change (matches `jj revert`, v1.5).

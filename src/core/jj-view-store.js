@@ -5,19 +5,9 @@
  * Views represent the state of the repository at a given operation.
  */
 
-import protobuf from 'protobufjs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { atomicWriteFile } from '../utils/atomic-write.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Determine proto path based on whether we're running from dist or src
-const inDist = __dirname.includes('/dist') || __dirname.includes('\\dist');
-const protoDir = inDist
-  ? path.join(__dirname, '..', 'src', 'protos')
-  : path.join(__dirname, '..', 'protos');
+import { getSimpleOpStoreRoot } from '../protos/schema.js';
+import { hexToBytes } from '../utils/bytes.js';
 
 export class JJViewStore {
   /**
@@ -27,7 +17,6 @@ export class JJViewStore {
   constructor(fs, dir) {
     this.fs = fs;
     this.dir = dir;
-    this.protoPath = path.join(protoDir, 'simple_op_store.proto');
   }
 
   /**
@@ -39,17 +28,17 @@ export class JJViewStore {
    */
   async writeView(viewId, headIds, wcCommitIds = {}) {
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getSimpleOpStoreRoot();
     const View = root.lookupType('simple_op_store.View');
 
     // Convert hex IDs to bytes
-    const headBuffers = headIds.map((id) => Buffer.from(id, 'hex'));
+    const headBuffers = headIds.map((id) => hexToBytes(id));
 
     // Convert wcCommitIds object to map
     /** @type {Record<string, any>} */
     const wcCommitIdsMap = {};
     for (const [workspace, commitId] of Object.entries(wcCommitIds)) {
-      wcCommitIdsMap[workspace] = Buffer.from(commitId, 'hex');
+      wcCommitIdsMap[workspace] = hexToBytes(commitId);
     }
 
     // Create view message (use camelCase for protobufjs)
@@ -90,7 +79,7 @@ export class JJViewStore {
     const buffer = await this.fs.promises.readFile(viewPath);
 
     // Load protobuf schema
-    const root = await protobuf.load(this.protoPath);
+    const root = getSimpleOpStoreRoot();
     const View = root.lookupType('simple_op_store.View');
 
     // Decode

@@ -6,6 +6,7 @@
 
 import { JJError } from '../utils/errors.js';
 import { validateChangeId } from '../utils/validation.js';
+import { randomHex } from '../utils/id-generation.js';
 
 export class ChangeGraph {
   /**
@@ -93,6 +94,68 @@ export class ChangeGraph {
     this.commitIndex.set(change.commitId, change.changeId);
 
     await this.save();
+  }
+
+  /**
+   * Add a DIVERGENT copy of an existing change: another commit that also
+   * claims `change.changeId` (see issue #32 / the `divergent()` revset —
+   * "multiple visible commits sharing one change id"). `addChange()`
+   * can't represent this: `nodes` is a `Map<changeId, change>`, one entry
+   * per key, by design — every other API (getChange, getParents,
+   * getChildren, ...) keys on plain changeId and would be ambiguous if
+   * that stopped being unique.
+   *
+   * Divergent copies are therefore stored under a synthetic internal key
+   * (`${changeId}\0${commitId}`) so the `nodes` Map stays a true map, but
+   * each copy's *own* `changeId` field is unchanged — so `getAll()` (and
+   * therefore the existing `divergent()` revset filter, which counts
+   * occurrences of `c.changeId` across `getAll()`) sees both/all of them
+   * and correctly reports the change as divergent. `getChange(changeId)`
+   * deliberately keeps resolving to just the primary copy (the one
+   * actually stored under the plain `changeId` key) — for anything that
+   * needs every copy, see getDivergentSiblings().
+   *
+   * @param {Record<string, any>} change - The divergent copy (must have
+   *   the same `changeId` as an existing change, and its own `commitId`)
+   */
+  async addDivergentCopy(change) {
+    validateChangeId(change.changeId);
+
+    if (!this.nodes.has(change.changeId)) {
+      throw new JJError(
+        'CHANGE_NOT_FOUND',
+        `Cannot add a divergent copy of ${change.changeId}: no existing change with that id`,
+        { changeId: change.changeId, suggestion: 'Use addChange() to create the first copy' }
+      );
+    }
+
+    const key = `${change.changeId}\0${change.commitId}`;
+    if (this.nodes.has(key)) {
+      throw new JJError(
+        'CHANGE_EXISTS',
+        `Change ${change.changeId} already has a divergent copy with commit ${change.commitId}`,
+        { changeId: change.changeId, commitId: change.commitId }
+      );
+    }
+
+    change.divergent = true;
+    this.nodes.set(key, change);
+    this.commitIndex.set(change.commitId, change.changeId);
+
+    await this.save();
+  }
+
+  /**
+   * Get every visible copy of a (possibly divergent) change id — just the
+   * one copy in the common case, or the primary plus every divergent copy
+   * added via addDivergentCopy().
+   *
+   * @param {string} changeId - Change ID
+   * @returns {Array<any>} All copies sharing this changeId, primary first
+   */
+  getDivergentSiblings(changeId) {
+    validateChangeId(changeId);
+    return this.getAll().filter((change) => change.changeId === changeId);
   }
 
   /**
@@ -207,6 +270,65 @@ export class ChangeGraph {
   }
 
   /**
+   * Remove one divergent copy added via addDivergentCopy() — e.g. after
+   * converge() (issue #32) resolves a divergence and only needs to drop
+   * the now-superseded copy. The *primary* copy (stored under the plain
+   * `changeId` key) is never touched by this — use deleteChange() (or
+   * updateChange() to overwrite it with a resolved result) for that.
+   *
+   * @param {string} changeId
+   * @param {string} commitId - The divergent copy's own commit id
+   * @returns {Promise<boolean>} Whether a copy was actually removed
+   */
+  async deleteDivergentCopy(changeId, commitId) {
+    validateChangeId(changeId);
+
+    const key = `${changeId}\0${commitId}`;
+    const change = this.nodes.get(key);
+    if (!change) {
+      return false;
+    }
+
+    this.nodes.delete(key);
+    if (this.commitIndex.get(commitId) === changeId) {
+      this.commitIndex.delete(commitId);
+    }
+
+    await this.save();
+    return true;
+  }
+
+  /**
+   * Remove a change from the graph outright.
+   *
+   * Used to reverse an addChange() — e.g. undoing an operation that created
+   * a change (new(), or squash()'s synthetic empty working-copy change) —
+   * where restoring a "before" snapshot doesn't apply because there was no
+   * "before": the change simply didn't exist yet. A soft-delete (setting
+   * `abandoned: true` via updateChange()) is NOT the same thing and is used
+   * separately for abandon() itself.
+   *
+   * @param {string} changeId - Change ID to remove
+   * @returns {Promise<boolean>} Whether a change was actually removed
+   */
+  async deleteChange(changeId) {
+    validateChangeId(changeId);
+
+    const change = this.nodes.get(changeId);
+    if (!change) {
+      return false;
+    }
+
+    this.nodes.delete(changeId);
+    if (this.commitIndex.get(change.commitId) === changeId) {
+      this.commitIndex.delete(change.commitId);
+    }
+
+    await this.save();
+    return true;
+  }
+
+  /**
    * Get all ancestors of a change (recursive parent traversal)
    *
    * @param {string} changeId - Starting change ID
@@ -243,10 +365,9 @@ export class ChangeGraph {
    * @returns {Promise<Record<string, any>>} Created change object
    */
   async createChange(params = {}) {
-    const crypto = await import('crypto');
-    const changeId = params.changeId || crypto.randomBytes(16).toString('hex');
-    const commitId = params.commitId || crypto.randomBytes(20).toString('hex');
-    const tree = params.tree || crypto.randomBytes(20).toString('hex');
+    const changeId = params.changeId || randomHex(16);
+    const commitId = params.commitId || randomHex(20);
+    const tree = params.tree || randomHex(20);
     const timestamp = params.timestamp || new Date().toISOString();
 
     /** @type {Record<string, any>} */

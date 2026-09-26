@@ -10,7 +10,8 @@
 import { JJError } from '../utils/errors.js';
 import { validateChangeId } from '../utils/validation.js';
 import { generateId } from '../utils/id-generation.js';
-import path from 'path';
+import * as path from '../utils/posix-path.js';
+import { mkdirp } from '../utils/mkdirp.js';
 
 export class WorkspaceManager {
   /**
@@ -108,11 +109,11 @@ export class WorkspaceManager {
     };
 
     // Create workspace directory
-    await this.fs.promises.mkdir(args.path, { recursive: true });
+    await mkdirp(this.fs, args.path);
 
     // Create workspace-specific working_copy directory in .jj
     const workspaceCopyDir = path.join(this.repoDir, '.jj', 'working_copy', workspaceId);
-    await this.fs.promises.mkdir(workspaceCopyDir, { recursive: true });
+    await mkdirp(this.fs, workspaceCopyDir);
 
     // Create .git file pointing to main repo's .git directory
     // This allows Git tools to work in the workspace

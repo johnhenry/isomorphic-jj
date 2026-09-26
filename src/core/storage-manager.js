@@ -6,6 +6,7 @@
 
 import { JJError } from '../utils/errors.js';
 import { KeyedMutex } from '../utils/mutex.js';
+import { mkdirp } from '../utils/mkdirp.js';
 
 export class Storage {
   /**
@@ -40,17 +41,17 @@ export class Storage {
   async init() {
     try {
       // Create main directories
-      await this.fs.promises.mkdir(this.jjDir, { recursive: true });
-      await this.fs.promises.mkdir(this.repoDir, { recursive: true });
-      await this.fs.promises.mkdir(this.workingCopyDir, { recursive: true });
+      await mkdirp(this.fs, this.jjDir);
+      await mkdirp(this.fs, this.repoDir);
+      await mkdirp(this.fs, this.workingCopyDir);
 
       // Create repo subdirectories
-      await this.fs.promises.mkdir(`${this.repoDir}/store`, { recursive: true });
-      await this.fs.promises.mkdir(`${this.repoDir}/op_log`, { recursive: true });
-      await this.fs.promises.mkdir(`${this.repoDir}/conflicts`, { recursive: true });
+      await mkdirp(this.fs, `${this.repoDir}/store`);
+      await mkdirp(this.fs, `${this.repoDir}/op_log`);
+      await mkdirp(this.fs, `${this.repoDir}/conflicts`);
 
       // Create default workspace directory
-      await this.fs.promises.mkdir(`${this.workingCopyDir}/default`, { recursive: true });
+      await mkdirp(this.fs, `${this.workingCopyDir}/default`);
     } catch (error) {
       throw new JJError(
         'STORAGE_INIT_FAILED',
@@ -127,7 +128,7 @@ export class Storage {
     try {
       // Ensure parent directory exists
       const dirPath = fullPath.substring(0, fullPath.lastIndexOf('/'));
-      await this.fs.promises.mkdir(dirPath, { recursive: true });
+      await mkdirp(this.fs, dirPath);
 
       // Write to temp file
       await this.fs.promises.writeFile(tmpPath, jsonData, 'utf8');

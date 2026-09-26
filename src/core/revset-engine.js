@@ -666,15 +666,27 @@ export class RevsetEngine {
       }
 
       case 'divergent': {
+        // See issue #32 / converge(): a divergent change has more than one
+        // visible commit sharing its changeId (added via
+        // ChangeGraph.addDivergentCopy(), which is why counting `changeId`
+        // occurrences across getAll() actually finds something now —
+        // every other change has exactly one entry here). `c.divergent ===
+        // true` also matches directly, since addDivergentCopy() sets that
+        // flag on the copy it adds; the count check catches the *primary*
+        // copy too (it's never itself flagged, since nothing about IT
+        // changed) so both/all copies of a divergent changeId are
+        // reported, not just the one(s) added after the first.
         await this.graph.load();
         const all = this.graph.getAll();
         const counts = new Map();
         for (const c of all) {
           counts.set(c.changeId, (counts.get(c.changeId) || 0) + 1);
         }
-        return all
-          .filter((c) => c.divergent === true || counts.get(c.changeId) > 1)
-          .map((c) => c.changeId);
+        const matched = all.filter((c) => c.divergent === true || counts.get(c.changeId) > 1);
+        // De-duplicate: multiple copies of the same divergent changeId
+        // would otherwise each contribute their own (identical) changeId
+        // to the result.
+        return Array.from(new Set(matched.map((c) => c.changeId)));
       }
 
       case 'merges':
