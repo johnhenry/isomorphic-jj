@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.4.0 — `converge()` resolves any number of divergent copies
+
+Follow-up to 0.3.0's `converge()` (#32): it originally capped automatic
+resolution at exactly two divergent copies, throwing `CONVERGE_AMBIGUOUS`
+for a third. That cap is gone — `converge()` now resolves any number of
+copies of one change id in a single call. Real jj's own CLI still only
+converges one *change id* per invocation as of v0.45.1 (an explicit TODO
+in its own source: "consider adding logic to deal with more than one
+divergent change-id in one invocation"), which is what this package's
+changeId-at-a-time API already matched — this follow-up instead closes
+the gap in what happens *within* that one change id, where real jj's
+underlying engine (`TruncatedEvolutionGraph`/`find_divergent_changes`)
+already resolves every divergent revision together, not just a pair.
+
+### Changed
+
+- **`converge()` is N-way, not pairwise.** The per-path resolution rule
+  generalizes directly: for each file, collect every DISTINCT value across
+  all copies that differs from the shared base. Zero distinct changed
+  values means nobody touched it; exactly one means only one side (or
+  several copies that happened to make the identical change) touched it,
+  and that value wins; two or more is a genuine conflict between that many
+  copies. `CONVERGE_AMBIGUOUS` no longer exists — there is nothing left for
+  it to guard against.
+- **A conflict with more than two disagreeing copies carries a new `sides`
+  shape.** Every other conflict in this codebase (from `merge()`/
+  `rebase()`) is inherently two-sided and keeps `sides: { base, left,
+  right }`. An N-way `converge()` conflict instead gets `sides: { base,
+  versions }`, where `versions` is `Array<{ commitId, content }>` — one
+  entry per distinct disagreeing value, so a caller can tell which
+  divergent copy contributed which content without decoding a fixed
+  left/right pair. Added `ConflictModel.createNWayConflict()` as the one
+  place that builds this shape.
+
 ## 0.3.0 — Track jj through v0.45.1
 
 Five fixes/additions found via real usage of isomorphic-jj in a browser
