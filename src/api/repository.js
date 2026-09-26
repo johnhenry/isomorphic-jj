@@ -5344,8 +5344,14 @@ export async function createJJ(options) {
        * @returns {Promise<Object>} Repository root information
        */
       async root() {
-        // Return the directory containing .git
-        const gitDir = path.join(dir, '.git');
+        // `dir` is a real host filesystem path (unlike the repo-relative
+        // git/jj paths `path` — posix-path.js — is for), so it needs the
+        // host's own separator here, not always '/': on Windows Node's real
+        // `fs` still resolves a forward-slash-joined path fine, but this
+        // method hands the string back to the caller as data, and jj's own
+        // `git root` returns a platform-native path there.
+        const isWin32 = typeof process !== 'undefined' && process.platform === 'win32';
+        const gitDir = isWin32 ? `${dir.replace(/[\\/]+$/, '')}\\.git` : path.join(dir, '.git');
 
         try {
           await fs.promises.access(gitDir);
