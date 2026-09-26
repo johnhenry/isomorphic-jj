@@ -355,6 +355,77 @@ describe('ChangeGraph', () => {
     });
   });
 
+  describe('addDivergentCopy / getDivergentSiblings / deleteDivergentCopy (issue #32)', () => {
+    beforeEach(async () => {
+      await graph.init();
+    });
+
+    it('throws CHANGE_NOT_FOUND when there is no primary to diverge from', async () => {
+      await expect(
+        graph.addDivergentCopy({ changeId: 'a'.repeat(32), commitId: 'b'.repeat(40) })
+      ).rejects.toMatchObject({ code: 'CHANGE_NOT_FOUND' });
+    });
+
+    it('getDivergentSiblings() returns just the primary when there is no divergence', async () => {
+      const change = await graph.createChange({ description: 'solo' });
+      expect(graph.getDivergentSiblings(change.changeId)).toEqual([change]);
+    });
+
+    it('adds a second commit sharing the same changeId, both visible via getAll()', async () => {
+      const primary = await graph.createChange({ description: 'primary' });
+      const copy = { ...primary, commitId: 'c'.repeat(40), description: 'divergent copy' };
+
+      await graph.addDivergentCopy(copy);
+
+      const siblings = graph.getDivergentSiblings(primary.changeId);
+      expect(siblings).toHaveLength(2);
+      expect(siblings.map((c) => c.commitId).sort()).toEqual(
+        [copy.commitId, primary.commitId].sort()
+      );
+      // getChange() keeps resolving to the primary specifically.
+      expect((await graph.getChange(primary.changeId)).commitId).toBe(primary.commitId);
+      // The copy is flagged.
+      expect(siblings.find((c) => c.commitId === copy.commitId).divergent).toBe(true);
+    });
+
+    it('findByCommitId() resolves both commitIds to the shared changeId', async () => {
+      const primary = await graph.createChange({ description: 'primary' });
+      const copy = { ...primary, commitId: 'c'.repeat(40) };
+      await graph.addDivergentCopy(copy);
+
+      expect(graph.findByCommitId(primary.commitId)).toBe(primary.changeId);
+      expect(graph.findByCommitId(copy.commitId)).toBe(primary.changeId);
+    });
+
+    it('throws CHANGE_EXISTS for a duplicate (changeId, commitId) pair', async () => {
+      const primary = await graph.createChange({ description: 'primary' });
+      const copy = { ...primary, commitId: 'c'.repeat(40) };
+      await graph.addDivergentCopy(copy);
+
+      await expect(graph.addDivergentCopy(copy)).rejects.toMatchObject({ code: 'CHANGE_EXISTS' });
+    });
+
+    it('deleteDivergentCopy() removes just the copy, leaving the primary intact', async () => {
+      const primary = await graph.createChange({ description: 'primary' });
+      const copy = { ...primary, commitId: 'c'.repeat(40) };
+      await graph.addDivergentCopy(copy);
+
+      const removed = await graph.deleteDivergentCopy(primary.changeId, copy.commitId);
+
+      expect(removed).toBe(true);
+      expect(graph.getDivergentSiblings(primary.changeId)).toHaveLength(1);
+      expect(await graph.getChange(primary.changeId)).not.toBeNull();
+      expect(graph.findByCommitId(copy.commitId)).toBeNull();
+    });
+
+    it('deleteDivergentCopy() returns false for a commitId that was never added', async () => {
+      const primary = await graph.createChange({ description: 'primary' });
+      await expect(graph.deleteDivergentCopy(primary.changeId, 'nope'.repeat(10))).resolves.toBe(
+        false
+      );
+    });
+  });
+
   describe('concurrency (issue #11 — no locking in the storage layer)', () => {
     it('should not lose a change when two addChange()/save() calls race', async () => {
       await graph.init();

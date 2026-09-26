@@ -16,7 +16,7 @@ import { BackgroundOps } from '../core/background-ops.js';
 import { UserConfig } from '../core/user-config.js';
 import { IsomorphicGitBackend } from '../backend/isomorphic-git-backend.js';
 import { JJError } from '../utils/errors.js';
-import { generateChangeId } from '../utils/id-generation.js';
+import { generateChangeId, randomHex } from '../utils/id-generation.js';
 import * as path from '../utils/posix-path.js';
 import { mkdirp } from '../utils/mkdirp.js';
 
@@ -230,7 +230,7 @@ export async function createJJ(options) {
    *   conflictsSnapshot: any,
    * }}
    */
-  const computeGraphReversal = (ops, landingOp) => {
+  const computeGraphReversal = (/** @type {any[]} */ ops, /** @type {any} */ landingOp) => {
     const landingIndex = ops.findIndex((op) => op.id === landingOp.id);
 
     /** @type {Record<string, any>} */
@@ -304,6 +304,37 @@ export async function createJJ(options) {
     // its own conflictsSnapshot, which is nearly every non-merge() op —
     // undoing an unrelated describe() would silently wipe conflicts from
     // an earlier, unrelated merge(). Fixed as part of issue #29.)
+  };
+
+  /**
+   * Re-parent every child of `changeId` onto `newParents` instead — used
+   * when a change is being elided from the graph (abandon(), issue #30;
+   * converge(), issue #32) so its children don't end up pointing at
+   * something no longer meant to be there. Mutates `changeSnapshot` in
+   * place, adding each touched child's PRE-reparent record so the caller's
+   * own oplog entry lets undo()/redo()/operations.restore() reverse this
+   * too (the same mechanism the caller already uses for the elided
+   * change's own snapshot).
+   *
+   * @param {string} changeId - The change being elided
+   * @param {string[]} newParents - What its children should point at instead
+   * @param {Record<string, any>} changeSnapshot - Accumulator to add each touched child's pre-state to
+   * @returns {Promise<void>}
+   */
+  const reparentChildrenOnto = async (changeId, newParents, changeSnapshot) => {
+    const childIds = graph.getChildren(changeId);
+    for (const childId of childIds) {
+      const child = await graph.getChange(childId);
+      if (!child) continue;
+      changeSnapshot[childId] = structuredClone(child);
+      const reparented = child.parents.flatMap((/** @type {string} */ p) =>
+        p === changeId ? newParents : [p]
+      );
+      // De-dupe (e.g. the child could already have one of the new parents
+      // as another of its own parents) while preserving first-seen order.
+      child.parents = [...new Set(reparented)];
+      await graph.updateChange(child);
+    }
   };
 
   /**
@@ -542,6 +573,17 @@ export async function createJJ(options) {
       // "forget this commit" operation (nor should it — Git objects are
       // content-addressed and harmless to leave orphaned).
       deleteChange: (/** @type {any} */ changeId) => baseGraph.deleteChange(changeId),
+
+      // See issue #32 / converge(): a divergent copy is another commit
+      // claiming an existing changeId; no Git sync hook, for the same
+      // reason addChange()'s primary copy already goes through
+      // onAddChange() when it's first created — the divergent copy needs
+      // no additional sync of its own.
+      addDivergentCopy: (/** @type {any} */ change) => baseGraph.addDivergentCopy(change),
+      getDivergentSiblings: (/** @type {any} */ changeId) =>
+        baseGraph.getDivergentSiblings(changeId),
+      deleteDivergentCopy: (/** @type {any} */ changeId, /** @type {any} */ commitId) =>
+        baseGraph.deleteDivergentCopy(changeId, commitId),
 
       // Delegate other operations
       init: () => baseGraph.init(),
@@ -3249,20 +3291,7 @@ export async function createJJ(options) {
       // abandoned commit). Matches real `jj abandon`: the abandoned
       // change is elided from the graph and its children attach directly
       // to whatever it was attached to.
-      const childIds = graph.getChildren(changeId);
-      for (const childId of childIds) {
-        const child = await graph.getChange(childId);
-        if (!child) continue;
-        changeSnapshot[childId] = structuredClone(child);
-        const reparented = child.parents.flatMap((/** @type {string} */ p) =>
-          p === changeId ? change.parents : [p]
-        );
-        // De-dupe (e.g. the child could already have one of the abandoned
-        // change's parents as another of its own parents) while preserving
-        // first-seen order.
-        child.parents = [...new Set(reparented)];
-        await graph.updateChange(child);
-      }
+      await reparentChildrenOnto(changeId, change.parents, changeSnapshot);
 
       // Record operation
       await oplog.recordOperation({
@@ -3293,6 +3322,187 @@ export async function createJJ(options) {
       );
 
       return change;
+    },
+
+    /**
+     * Converge divergent copies of a change (matches `jj converge`, jj
+     * v0.45.0) — issue #32.
+     *
+     * A change is divergent when more than one visible commit shares its
+     * change id (see the `divergent()` revset, and
+     * ChangeGraph.addDivergentCopy() for how a divergent copy gets added
+     * in the first place — nothing in this library creates one on its
+     * own yet; this resolves one once something has, e.g. a future git
+     * fetch/concurrent-operation integration). converge() attempts
+     * automatic resolution using the exact same three-way-merge/conflict-
+     * detection machinery rebase() uses (issue #31) — reused, not
+     * duplicated a third time in this codebase.
+     *
+     * Non-interactive-mode convention, matching this package's other
+     * ambiguous-outcome APIs: like merge(), a genuine per-path conflict is
+     * returned as data (`{ resolved: false, conflicts }`), not thrown —
+     * you get a result back either way and decide what to do with
+     * unresolved conflicts. What DOES throw is anything that isn't even a
+     * well-formed convergence attempt (no divergence to resolve at all, or
+     * more divergent copies than a pairwise merge can attempt) — the same
+     * category as merge()'s own `MERGE_ERROR` throw for "no common
+     * ancestor found".
+     *
+     * @param {Record<string, any>|string} args - `{ changeId }`, or a bare changeId string
+     * @returns {Promise<Object>} `{ changeId, resolved, conflicts, commitId? }`
+     */
+    async converge(args) {
+      const changeId = typeof args === 'string' ? args : args && (args.changeId || args.change);
+      if (!changeId || typeof changeId !== 'string') {
+        throw new JJError('INVALID_ARGUMENT', 'Missing changeId argument', {
+          suggestion: 'Provide the divergent changeId to converge: { changeId: "..." }',
+        });
+      }
+
+      await graph.load();
+      await userConfig.load();
+      const siblings = graph.getDivergentSiblings(changeId);
+
+      if (siblings.length < 2) {
+        throw new JJError(
+          'NOT_DIVERGENT',
+          `Change ${changeId} has no divergent copies to converge`,
+          {
+            changeId,
+            suggestion:
+              'converge() is only meaningful for a changeId the divergent() revset reports',
+          }
+        );
+      }
+
+      if (siblings.length > 2) {
+        throw new JJError(
+          'CONVERGE_AMBIGUOUS',
+          `Change ${changeId} has ${siblings.length} divergent copies; automatic convergence only supports resolving exactly two at a time`,
+          {
+            changeId,
+            copyCount: siblings.length,
+            suggestion:
+              'Converge two copies at a time (e.g. abandon all but two, or resolve manually) — matches real jj aborting non-interactive resolution it cannot disambiguate',
+          }
+        );
+      }
+
+      // The primary copy is whichever one getChange() resolves (stored
+      // under the plain changeId key); the other is the divergent copy
+      // added via addDivergentCopy().
+      const primary = /** @type {any} */ (await graph.getChange(changeId));
+      const other = siblings.find((/** @type {any} */ s) => s.commitId !== primary.commitId);
+
+      // Base for the three-way merge: what this change looked like before
+      // it diverged. This package doesn't retain historical snapshots
+      // (only current content), so — same pragmatic choice rebase() makes
+      // for "old base" — use the shared parent's current content; a
+      // divergent pair realistically shares the same parent, since they're
+      // two rewrites of one prior position in history, not unrelated
+      // commits that happen to collide.
+      const baseParentId = primary.parents && primary.parents[0];
+      const baseParentChange = baseParentId ? await graph.getChange(baseParentId) : null;
+      const baseFiles = new Map(
+        Object.entries((baseParentChange && baseParentChange.fileSnapshot) || {})
+      );
+      const leftFiles = new Map(Object.entries(primary.fileSnapshot || {}));
+      const rightFiles = new Map(Object.entries(other.fileSnapshot || {}));
+
+      await conflicts.load();
+      const conflictsSnapshot = {
+        conflicts: Object.fromEntries(conflicts.conflicts),
+        fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+      };
+
+      const detectedConflicts = await conflicts.detectConflicts({
+        baseFiles,
+        leftFiles,
+        rightFiles,
+        drivers: {},
+        workingCopyDir: /** @type {any} */ (null),
+        baseChange: baseParentId,
+        leftChange: changeId,
+        rightChange: changeId,
+      });
+
+      if (detectedConflicts.length > 0) {
+        // Matches real jj: non-interactive mode aborts automatic
+        // resolution rather than guessing — but per this package's own
+        // merge() convention, that's reported back as data, not thrown.
+        for (const conflict of detectedConflicts) {
+          await conflicts.addConflict(conflict);
+        }
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `converge ${changeId.slice(0, 8)} (unresolved)`,
+          parents: [],
+          conflictsSnapshot,
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: [],
+            workingCopy: workingCopy.getCurrentChangeId(),
+          },
+        });
+        return { changeId, resolved: false, conflicts: detectedConflicts };
+      }
+
+      // Clean resolution: for each path, apply whichever side actually
+      // changed it relative to the shared base (mirrors
+      // ConflictModel._detectPathConflict's own "no conflict" rules, which
+      // is exactly why detectConflicts() found nothing to report here).
+      /** @type {Record<string, string>} */
+      const mergedSnapshot = {};
+      const allPaths = new Set([...baseFiles.keys(), ...leftFiles.keys(), ...rightFiles.keys()]);
+      for (const filePath of allPaths) {
+        const baseValue = baseFiles.get(filePath);
+        const leftValue = leftFiles.get(filePath);
+        const rightValue = rightFiles.get(filePath);
+        const resolved =
+          leftValue === rightValue ? leftValue : baseValue === leftValue ? rightValue : leftValue;
+        if (resolved !== undefined) {
+          mergedSnapshot[filePath] = resolved;
+        }
+      }
+
+      const user = /** @type {any} */ (userConfig.getUser());
+      const changeSnapshot = { [changeId]: structuredClone(primary) };
+
+      const convergedChange = {
+        ...primary,
+        commitId: randomHex(20),
+        fileSnapshot: mergedSnapshot,
+        description:
+          primary.description + `\n\n(converged with divergent copy ${other.commitId.slice(0, 8)})`,
+        timestamp: new Date().toISOString(),
+        committer: {
+          name: user.name,
+          email: user.email,
+          timestamp: new Date().toISOString(),
+        },
+        divergent: false,
+      };
+      await graph.updateChange(convergedChange);
+      await graph.deleteDivergentCopy(changeId, other.commitId);
+
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: `converge ${changeId.slice(0, 8)}`,
+        parents: [],
+        changeSnapshot,
+        conflictsSnapshot,
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: [changeId],
+          workingCopy: workingCopy.getCurrentChangeId(),
+        },
+      });
+
+      return { changeId, resolved: true, conflicts: [], commitId: convergedChange.commitId };
     },
 
     /**

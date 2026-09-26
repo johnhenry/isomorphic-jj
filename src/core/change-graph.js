@@ -97,6 +97,68 @@ export class ChangeGraph {
   }
 
   /**
+   * Add a DIVERGENT copy of an existing change: another commit that also
+   * claims `change.changeId` (see issue #32 / the `divergent()` revset —
+   * "multiple visible commits sharing one change id"). `addChange()`
+   * can't represent this: `nodes` is a `Map<changeId, change>`, one entry
+   * per key, by design — every other API (getChange, getParents,
+   * getChildren, ...) keys on plain changeId and would be ambiguous if
+   * that stopped being unique.
+   *
+   * Divergent copies are therefore stored under a synthetic internal key
+   * (`${changeId}\0${commitId}`) so the `nodes` Map stays a true map, but
+   * each copy's *own* `changeId` field is unchanged — so `getAll()` (and
+   * therefore the existing `divergent()` revset filter, which counts
+   * occurrences of `c.changeId` across `getAll()`) sees both/all of them
+   * and correctly reports the change as divergent. `getChange(changeId)`
+   * deliberately keeps resolving to just the primary copy (the one
+   * actually stored under the plain `changeId` key) — for anything that
+   * needs every copy, see getDivergentSiblings().
+   *
+   * @param {Record<string, any>} change - The divergent copy (must have
+   *   the same `changeId` as an existing change, and its own `commitId`)
+   */
+  async addDivergentCopy(change) {
+    validateChangeId(change.changeId);
+
+    if (!this.nodes.has(change.changeId)) {
+      throw new JJError(
+        'CHANGE_NOT_FOUND',
+        `Cannot add a divergent copy of ${change.changeId}: no existing change with that id`,
+        { changeId: change.changeId, suggestion: 'Use addChange() to create the first copy' }
+      );
+    }
+
+    const key = `${change.changeId}\0${change.commitId}`;
+    if (this.nodes.has(key)) {
+      throw new JJError(
+        'CHANGE_EXISTS',
+        `Change ${change.changeId} already has a divergent copy with commit ${change.commitId}`,
+        { changeId: change.changeId, commitId: change.commitId }
+      );
+    }
+
+    change.divergent = true;
+    this.nodes.set(key, change);
+    this.commitIndex.set(change.commitId, change.changeId);
+
+    await this.save();
+  }
+
+  /**
+   * Get every visible copy of a (possibly divergent) change id — just the
+   * one copy in the common case, or the primary plus every divergent copy
+   * added via addDivergentCopy().
+   *
+   * @param {string} changeId - Change ID
+   * @returns {Array<any>} All copies sharing this changeId, primary first
+   */
+  getDivergentSiblings(changeId) {
+    validateChangeId(changeId);
+    return this.getAll().filter((change) => change.changeId === changeId);
+  }
+
+  /**
    * Get a change by ID
    *
    * @param {string} changeId - Change ID
@@ -205,6 +267,35 @@ export class ChangeGraph {
 
     this.nodes.set(change.changeId, change);
     await this.save();
+  }
+
+  /**
+   * Remove one divergent copy added via addDivergentCopy() — e.g. after
+   * converge() (issue #32) resolves a divergence and only needs to drop
+   * the now-superseded copy. The *primary* copy (stored under the plain
+   * `changeId` key) is never touched by this — use deleteChange() (or
+   * updateChange() to overwrite it with a resolved result) for that.
+   *
+   * @param {string} changeId
+   * @param {string} commitId - The divergent copy's own commit id
+   * @returns {Promise<boolean>} Whether a copy was actually removed
+   */
+  async deleteDivergentCopy(changeId, commitId) {
+    validateChangeId(changeId);
+
+    const key = `${changeId}\0${commitId}`;
+    const change = this.nodes.get(key);
+    if (!change) {
+      return false;
+    }
+
+    this.nodes.delete(key);
+    if (this.commitIndex.get(commitId) === changeId) {
+      this.commitIndex.delete(commitId);
+    }
+
+    await this.save();
+    return true;
   }
 
   /**
