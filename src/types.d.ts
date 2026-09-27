@@ -144,9 +144,36 @@ export interface Bookmark {
 // ============================================================================
 
 /**
- * Types of conflicts
+ * Types of conflicts. `'driver-conflict'` is used when a registered merge
+ * driver (see `MergeDriverRegistry`) itself reports a conflict, instead of
+ * one of the built-in path-conflict categories.
  */
-export type ConflictType = 'content' | 'add-add' | 'delete-modify' | 'modify-delete';
+export type ConflictType =
+  | 'content'
+  | 'path'
+  | 'add-add'
+  | 'delete-modify'
+  | 'modify-delete'
+  | 'driver-conflict';
+
+/**
+ * The competing values a conflict is between. The common, two-way case
+ * (from `merge()`/`rebase()`) populates whichever of `base`/`left`/`right`
+ * actually exist for that path (e.g. `{ left, right }` for an add-add
+ * conflict, `{ base, left, right }` for a three-way content conflict).
+ *
+ * `converge()`'s N-way path (more than two divergent copies of one change,
+ * see `ConflictModel.createNWayConflict()`) instead populates `base` and
+ * `versions`: one entry per distinct value found across all copies that
+ * differs from `base`, each paired with (one of) the commitId(s) that has
+ * it.
+ */
+export interface ConflictSides {
+  base?: string | Uint8Array;
+  left?: string | Uint8Array;
+  right?: string | Uint8Array;
+  versions?: Array<{ commitId: string; content: string | Uint8Array }>;
+}
 
 /**
  * A conflict in the repository
@@ -155,9 +182,13 @@ export interface Conflict {
   conflictId: string;
   path: string;
   type: ConflictType;
-  base?: TreeRef;
-  sides: TreeRef[];
+  sides: ConflictSides;
+  message: string;
   resolved: boolean;
+  timestamp: string;
+  /** Present when a merge driver attempted and failed to resolve this conflict. */
+  driverFailed?: boolean;
+  driverError?: string;
 }
 
 /**
