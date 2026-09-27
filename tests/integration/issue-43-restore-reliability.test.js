@@ -442,11 +442,102 @@ describe('issue #43(4) — conflicts.resolve() records an operation', () => {
   });
 });
 
-// issue #43(5) (minor, PUNTED — see PR description): an initial attempt at
-// "edit() of a non-leaf change should rebase its descendants' files" was
-// reverted after it broke tests/integration/absorb.test.js's "should work
-// after edit()" — automatically folding the edited ancestor's content into
-// descendants on every edit()-away directly conflicts with absorb()'s own
-// job (folding a working-copy edit back into the ancestor it belongs to);
-// with the auto-rebase in place, absorb() found nothing left to absorb.
-// Left for a follow-up that accounts for that interaction.
+// issue #43(5) / issue #45 — edit() of an older (non-leaf) change didn't
+// propagate the edit to its descendants' file content, unlike real jj's
+// automatic rebase-on-edit.
+//
+// edit() itself never touches the content of the change it switches INTO —
+// it's a pure checkout (moves @, syncs disk to the target's existing
+// fileSnapshot). The actual moment a change's committed content changes is
+// inside the public snapshot() API and the internal autoSnapshotWorkingCopy()
+// helper, which reconcile on-disk state into the CURRENT working-copy
+// change's fileSnapshot. If you edit() into a change that already has
+// descendants and then modify a file, those two functions used to update
+// only that change's own fileSnapshot and never propagate the update to its
+// descendants, which stayed stale forever (until/unless you edited into one
+// of them directly, which resyncs disk FROM its own, still-stale, snapshot).
+//
+// Note: edit()'s own checkout-time bookkeeping (capturing disk state for the
+// change being switched AWAY FROM, so a later checkout back into it starts
+// from the right place) is a separate, pre-existing code path in edit() that
+// does not go through snapshot()/autoSnapshotWorkingCopy() and is
+// intentionally left untouched by this fix — so "edit() away" alone does not
+// trigger descendant propagation. Propagation happens the next time
+// snapshot()/autoSnapshotWorkingCopy() actually runs against the edited,
+// non-leaf change (e.g. an explicit jj.snapshot() call, or any op that
+// auto-snapshots — status(), read(), describe(), etc. — while still checked
+// into it).
+describe('issue #45 — edit() of an older change rebases its descendants on snapshot()', () => {
+  let fs;
+  let jj;
+
+  beforeEach(async () => {
+    fs = new MockFS();
+    jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+    await jj.init({ userName: 'Test', userEmail: 't@e.com' });
+  });
+
+  afterEach(() => fs.reset());
+
+  it('propagates an edit to a non-leaf change into its descendant via the public snapshot()', async () => {
+    await jj.write({ path: 'file.txt', data: 'v1' });
+    const change1 = await jj.describe({ message: 'change 1' });
+
+    await jj.new({ message: 'change 2' });
+    const change2 = await jj.describe({ message: 'change 2' });
+
+    // Edit back into change1, which now has change2 as a descendant.
+    await jj.edit({ changeId: change1.changeId });
+    await jj.write({ path: 'file.txt', data: 'v2' });
+
+    // Trigger the content commit + propagation WITHOUT editing away — this
+    // is the moment change1's new content is actually committed.
+    await jj.snapshot();
+
+    // change2's content should already reflect change1's edit, even though
+    // we never edit()'d into change2.
+    const descendant = await jj.show({ change: change2.changeId });
+    expect(descendant.fileSnapshot['file.txt']).toBe('v2');
+
+    // change1 itself picked up the edit too.
+    const ancestor = await jj.show({ change: change1.changeId });
+    expect(ancestor.fileSnapshot['file.txt']).toBe('v2');
+  });
+
+  it('propagates an out-of-band edit to a non-leaf change into its descendant via autoSnapshotWorkingCopy() (status())', async () => {
+    await jj.write({ path: 'file.txt', data: 'v1' });
+    const change1 = await jj.describe({ message: 'change 1' });
+
+    await jj.new({ message: 'change 2' });
+    const change2 = await jj.describe({ message: 'change 2' });
+
+    await jj.edit({ changeId: change1.changeId });
+
+    // Modify the file OUTSIDE of jj.write() (e.g. an editor/shell), which is
+    // exactly what autoSnapshotWorkingCopy() exists to pick up — jj.write()
+    // itself immediately updates the working copy's tracked mtime/size, so
+    // it would never leave anything for the disk-walk to detect as changed.
+    await fs.promises.writeFile('/test/repo/file.txt', 'v2 (out of band, longer)', 'utf8');
+
+    // status() runs autoSnapshotWorkingCopy() internally; it should commit
+    // change1's new content AND propagate it to change2 without us ever
+    // editing into change2.
+    await jj.status();
+
+    const descendant = await jj.show({ change: change2.changeId });
+    expect(descendant.fileSnapshot['file.txt']).toBe('v2 (out of band, longer)');
+  });
+
+  it('leaves a leaf change alone (no descendants to propagate to)', async () => {
+    await jj.write({ path: 'file.txt', data: 'v1' });
+    const change1 = await jj.describe({ message: 'change 1' });
+
+    // change1 has no descendants at all here, so the propagation path
+    // (descendants.length > 0) should simply be skipped.
+    await jj.write({ path: 'file.txt', data: 'v2' });
+    await jj.snapshot();
+
+    const change = await jj.show({ change: change1.changeId });
+    expect(change.fileSnapshot['file.txt']).toBe('v2');
+  });
+});
