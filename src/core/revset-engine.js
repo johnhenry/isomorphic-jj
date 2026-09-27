@@ -539,9 +539,12 @@ export class RevsetEngine {
     const unquote = (/** @type {string} */ s) => s.trim().replace(/^['"]|['"]$/g, '');
 
     switch (name) {
-      case 'all':
+      case 'all': {
         await this.graph.load();
-        return this.graph.getAll().map((c) => c.changeId);
+        const allChanges = this.graph.getAll();
+        const hidden = await this._computeHiddenOrphans(allChanges);
+        return allChanges.filter((c) => !hidden.has(c.changeId)).map((c) => c.changeId);
+      }
 
       // `builtin_log()` (jj v0.44) is the revset the built-in `jj log` uses
       // when no user override is configured. isomorphic-jj's `log()` already
@@ -549,9 +552,12 @@ export class RevsetEngine {
       // `builtin_log()` is a pure alias for that same default — this lets
       // callers compose it (e.g. `builtin_log() & mine()`) instead of
       // duplicating `all()`.
-      case 'builtin_log':
+      case 'builtin_log': {
         await this.graph.load();
-        return this.graph.getAll().map((c) => c.changeId);
+        const allChanges = this.graph.getAll();
+        const hidden = await this._computeHiddenOrphans(allChanges);
+        return allChanges.filter((c) => !hidden.has(c.changeId)).map((c) => c.changeId);
+      }
 
       case 'none':
         return [];
@@ -1010,6 +1016,108 @@ export class RevsetEngine {
     }
 
     return ancestors;
+  }
+
+  /**
+   * Change IDs that `all()`/`builtin_log()` (and therefore the default
+   * `jj.log()`) should exclude — issue #37(b).
+   *
+   * undo()/redo()/operations.restore() deliberately don't delete a change
+   * record for a `new()`/`squash()` that gets reverted — they only un-ref
+   * it (restore the working-copy pointer/heads that made it reachable),
+   * matching real jj where an unreachable change stays resolvable by its
+   * change id (hidden, not gone) until explicitly gc'd — see
+   * computeGraphReversal's doc comment in repository.js. But that means
+   * the orphaned change record lingers in the graph, and before this fix
+   * `all()` (a flat `graph.getAll()`) surfaced it in `log()` right
+   * alongside everything still actually reachable.
+   *
+   * Real jj hides a commit from the default log when it is BOTH:
+   *   - unreachable from any visible head (not itself a head, and not an
+   *     ancestor of one), AND
+   *   - "discardable": empty (no file diff versus its own parent) and
+   *     undescribed.
+   * Merge commits (2+ parents) are conservatively never treated as
+   * "empty" here — real jj's diff-emptiness rule for merges is more
+   * involved and isn't needed by anything this package creates today.
+   *
+   * "Visible head" here deliberately does NOT mean "any change with no
+   * children" (that's what the `visible_heads()` revset function computes,
+   * structurally, from the raw graph) — an orphan `new()`/`squash()`
+   * change that undo() un-referenced has no children EITHER, so it would
+   * trivially count as its own head under that definition and never be
+   * excludable. Real jj instead tracks an explicit, maintained set of
+   * heads in its View (updated as operations run — abandoning/squashing a
+   * change removes it, rebasing children onto a new parent removes the
+   * old parent, etc.). This package doesn't thread the operation log's
+   * `view.heads` through to the revset engine, but the working-copy
+   * pointer plus every bookmark/tag target is the closest available
+   * proxy for "what's actually still in play" — anything only reachable
+   * from those, not from every dangling graph leaf.
+   *
+   * @param {any[]} allChanges - `graph.getAll()`
+   * @returns {Promise<Set<string>>} change IDs to exclude
+   */
+  async _computeHiddenOrphans(allChanges) {
+    const trackedHeads = new Set();
+    try {
+      const wcId = this.workingCopy && this.workingCopy.getCurrentChangeId();
+      if (wcId) trackedHeads.add(wcId);
+    } catch {
+      // working copy not loaded/available — fine, just no wc-based root.
+    }
+    if (this.bookmarkStore) {
+      await this.bookmarkStore.load();
+      for (const bookmark of await this.bookmarkStore.list()) {
+        if (bookmark && bookmark.changeId) trackedHeads.add(bookmark.changeId);
+      }
+    }
+    if (this.tagStore) {
+      for (const tag of await this.tagStore.list()) {
+        if (tag && tag.changeId) trackedHeads.add(tag.changeId);
+      }
+    }
+
+    const reachable = new Set();
+    for (const headId of trackedHeads) {
+      for (const id of await this.getAncestors(headId)) {
+        reachable.add(id);
+      }
+    }
+
+    // Sentinel "no message given" descriptions this package itself writes
+    // (new()'s '(no description)', squash()'s post-squash working-copy
+    // change '(no description set)') are, for visibility purposes, just
+    // as undescribed as a genuinely empty/missing description field.
+    const UNDESCRIBED = new Set([undefined, null, '', '(no description)', '(no description set)']);
+
+    const byId = new Map(allChanges.map((c) => [c.changeId, c]));
+    const isEmpty = (/** @type {any} */ change) => {
+      const parents = change.parents || [];
+      if (parents.length === 0) {
+        return !change.fileSnapshot || Object.keys(change.fileSnapshot).length === 0;
+      }
+      if (parents.length > 1) return false; // merges: not handled by this rule
+      const parent = byId.get(parents[0]);
+      const parentSnapshot = (parent && parent.fileSnapshot) || {};
+      const ownSnapshot = change.fileSnapshot || {};
+      const parentKeys = Object.keys(parentSnapshot);
+      const ownKeys = Object.keys(ownSnapshot);
+      if (parentKeys.length !== ownKeys.length) return false;
+      return parentKeys.every((k) => parentSnapshot[k] === ownSnapshot[k]);
+    };
+
+    const hidden = new Set();
+    for (const change of allChanges) {
+      if (
+        !reachable.has(change.changeId) &&
+        isEmpty(change) &&
+        UNDESCRIBED.has(change.description)
+      ) {
+        hidden.add(change.changeId);
+      }
+    }
+    return hidden;
   }
 
   /**

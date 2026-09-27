@@ -282,7 +282,16 @@ export async function createJJ(options) {
     await graph.load();
     for (const [changeId, snapshot] of Object.entries(reversal.changeSnapshotToApply)) {
       if (await graph.getChange(changeId)) {
-        await graph.updateChange(snapshot);
+        // Bypass the git-sync middleware (baseGraph, not the wrapped
+        // `graph`): undo/restore are pure reverts, and `snapshot` already
+        // carries the change's ORIGINAL commitId from before the reverted
+        // operation(s) ran. Going through graph.updateChange() would fire
+        // onUpdateChange -> syncChangeToGit(), which mints a brand-new
+        // commit (and thus a new commitId) from the CURRENT tree instead
+        // of restoring the one that was actually there — see issue #37(c):
+        // "undo/restore give reverted commits new commit IDs". Writing the
+        // snapshot verbatim via baseGraph puts the original commitId back.
+        await baseGraph.updateChange(snapshot);
       }
     }
 
@@ -2420,6 +2429,16 @@ export async function createJJ(options) {
       // which operation it targeted so a following undo() can walk one
       // step further back (resolveUndoTarget) instead of toggling, and
       // carrying exactly what redo() needs to re-apply (captured above).
+      //
+      // Also record `changeSnapshot: redoChangeSnapshot` — the SAME
+      // ground-truth-before-this-op values, but under the field name
+      // computeGraphReversal() actually scans for. Without this, undo()
+      // itself was the one mutating operation in the whole API that never
+      // recorded its own changeSnapshot, so a LATER undo() targeting THIS
+      // undo (to step back past it) had nothing to restore: it would
+      // repoint the working copy and files, but leave whatever this
+      // undo() overwrote (e.g. a change's description) exactly as this
+      // undo() left it. See issue #37(a).
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
         user: await getUserOplogInfo(),
@@ -2427,6 +2446,7 @@ export async function createJJ(options) {
         eventType: 'undo',
         targetOpId: targetOp.id,
         undoneOpId: targetOp.id, // kept for API/type compatibility
+        changeSnapshot: redoChangeSnapshot,
         redoChangeSnapshot,
         redoFileSnapshot,
         redoConflictsSnapshot,
@@ -2504,9 +2524,25 @@ export async function createJJ(options) {
       // by scanning forward. undo() captured it directly for exactly this
       // reason (see its own comment).
       await graph.load();
+
+      // Capture ground truth right before overwriting, same as undo()
+      // does for its own changeSnapshot (issue #37a) — lets a later
+      // undo() targeting THIS redo op restore what redo() is about to
+      // clobber, instead of finding no changeSnapshot at all.
+      /** @type {Record<string, any>} */
+      const undoChangeSnapshot = {};
+      for (const changeId of Object.keys(undoOp.redoChangeSnapshot || {})) {
+        const current = await graph.getChange(changeId);
+        if (current) undoChangeSnapshot[changeId] = current;
+      }
+
       for (const [changeId, snapshot] of Object.entries(undoOp.redoChangeSnapshot || {})) {
         if (await graph.getChange(changeId)) {
-          await graph.updateChange(snapshot);
+          // Bypass the git-sync middleware — see the matching comment in
+          // applyGraphReversal(). `snapshot` already carries the change's
+          // correct commitId from before the undo it's reversing ran
+          // (issue #37c applies to redo() too).
+          await baseGraph.updateChange(snapshot);
         }
       }
       if (undoOp.redoFileSnapshot !== undefined) {
@@ -2527,6 +2563,7 @@ export async function createJJ(options) {
         description: 'redo operation',
         eventType: 'redo',
         redoOf: undoOp.id,
+        changeSnapshot: undoChangeSnapshot,
         parents: [],
         view: redoneView,
       });
@@ -2817,6 +2854,23 @@ export async function createJJ(options) {
         // Revert the change graph, working-copy files, and conflict state
         // to exactly what they were right after targetOp ran.
         const reversal = computeGraphReversal(ops, targetOp);
+
+        // Capture ground truth for every changeId this restore is about to
+        // overwrite, BEFORE applying the reversal — exactly like undo()
+        // does for its own changeSnapshot. Without this, restore()'s own
+        // oplog entry carried no changeSnapshot at all, so undoing the
+        // restore itself had nothing to put back: a later undo() would
+        // repoint the working copy and files, but leave whatever the
+        // restore had just overwritten (e.g. a change's description)
+        // exactly as the restore left it. See issue #37(a).
+        await graph.load();
+        /** @type {Record<string, any>} */
+        const changeSnapshot = {};
+        for (const changeId of Object.keys(reversal.changeSnapshotToApply)) {
+          const current = await graph.getChange(changeId);
+          if (current) changeSnapshot[changeId] = current;
+        }
+
         await applyGraphReversal(reversal);
 
         // Record this restoration as a new operation
@@ -2825,6 +2879,7 @@ export async function createJJ(options) {
           user: await getUserOplogInfo(),
           description: `restore to operation ${args.operation}`,
           parents: [],
+          changeSnapshot,
           view: targetOp.view,
         });
 
@@ -3184,10 +3239,22 @@ export async function createJJ(options) {
           },
           description: '(no description set)',
           timestamp: new Date().toISOString(),
-          fileSnapshot: {},
+          // Start from the DESTINATION's tree (which now includes source's
+          // folded-in changes, set above), not an empty object — matches
+          // real `jj squash`, where the new working-copy change looks
+          // identical to its new parent until you touch something. Issue
+          // #39: this used to hard-code `{}`, so status()/snapshot() saw
+          // every on-disk file as untracked/new until something re-wrote
+          // it and triggered a fresh auto-snapshot.
+          fileSnapshot: { ...destChange.fileSnapshot },
         };
 
         await graph.addChange(newChange); // Middleware will sync to Git
+        // Sync the working directory to match (issue #30's fix for
+        // new()/edit(); squash()'s own synthetic post-squash change never
+        // did this) — a no-op when source's parent was already dest (the
+        // common case), but necessary whenever source/dest aren't adjacent.
+        await syncWorkingCopyFiles(newChange.fileSnapshot);
         await workingCopy.setCurrentChange(newChangeId);
         newWorkingCopyId = newChangeId;
       }
@@ -3269,6 +3336,12 @@ export async function createJJ(options) {
         throw new JJError('CHANGE_NOT_FOUND', `Change ${changeId} not found`);
       }
 
+      // Captured BEFORE anything mutates — see issue #38: abandoning the
+      // change @ currently points at must move @ off it (real jj checks
+      // out a fresh empty change on the abandoned change's own parent(s));
+      // abandoning any OTHER change must leave @ exactly where it was.
+      const wasWorkingCopy = changeId === workingCopy.getCurrentChangeId();
+
       // Dispatch change:abandoning event (preventable)
       await dispatchEventAsync(jj, 'change:abandoning', {
         operation: 'abandon',
@@ -3320,6 +3393,17 @@ export async function createJJ(options) {
         },
         { cancelable: false }
       );
+
+      // If @ was pointing at the change we just abandoned, it can't stay
+      // there — real jj moves @ to a new empty change on the abandoned
+      // change's own parent(s) (issue #38). Reuse new()'s own "create an
+      // empty change with given parents" logic rather than duplicating it
+      // — this is exactly the workaround callers had to reach for
+      // themselves (`new({ parents: [parentOfAt] })` before abandoning).
+      if (wasWorkingCopy) {
+        const newWorkingCopyChange = await jj.new({ parents: change.parents || [] });
+        return { ...change, newWorkingCopyChangeId: newWorkingCopyChange.changeId };
+      }
 
       return change;
     },
