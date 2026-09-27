@@ -172,16 +172,7 @@ describe('issue #37(c) — undo()/restore() preserve original commit IDs', () =>
       `test-issue37c-${Date.now()}-${Math.random().toString(36).slice(2)}`
     );
     await fs.promises.mkdir(testDir, { recursive: true });
-    // autoSnapshot: false — autoSnapshotWorkingCopy() (v1.6) treats every
-    // previously-tracked file as "modified" on every call regardless of
-    // whether it actually changed (working-copy.js compares stat().mtime
-    // Date objects with `!==`, which are never reference-equal across two
-    // separate stat() calls even when the underlying mtime is identical).
-    // That's a real, separate, pre-existing bug outside issues #37-#39's
-    // scope, but left enabled here it fires on every describe() and syncs
-    // an extra spurious commit each time, contaminating the very
-    // before/after commitId comparisons these tests are trying to isolate.
-    jj = await createJJ({ fs, dir: testDir, git, http: null, autoSnapshot: false });
+    jj = await createJJ({ fs, dir: testDir, git, http: null });
     await jj.init({ userName: 'Test User', userEmail: 'test@example.com' });
   });
 
