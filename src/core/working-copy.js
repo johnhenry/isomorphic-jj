@@ -38,10 +38,11 @@ function mtimeMs(value) {
   if (value === null || value === undefined) return NaN;
   if (typeof value === 'number') return value;
   if (typeof value === 'string') return new Date(value).getTime();
-  if (typeof (/** @type {any} */ (value).getTime) === 'function') {
-    return /** @type {any} */ (value).getTime();
-  }
-  return Number(value);
+  // Per the type contract above, anything left is Date-like -- duck-typed
+  // (see the comment above) rather than `instanceof Date`, so no runtime
+  // check is needed here either; a value outside this contract is a caller
+  // bug, not something to silently coerce.
+  return /** @type {any} */ (value).getTime();
 }
 
 export class WorkingCopy {

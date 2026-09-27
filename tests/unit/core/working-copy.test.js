@@ -273,5 +273,30 @@ describe('WorkingCopy', () => {
       expect(second.modified).toEqual([]);
       expect(second.deleted).toEqual([]);
     });
+
+    it('treats a null stored mtime as unknown (always reports modified), not a crash', async () => {
+      await dateFs.promises.writeFile('/test/repo/a.txt', 'hello');
+      const stats = await dateFs.promises.stat('/test/repo/a.txt');
+      await dateWorkingCopy.trackFile('a.txt', { mtime: null, size: stats.size, mode: stats.mode });
+
+      const modified = await dateWorkingCopy.getModifiedFiles();
+      expect(modified).toEqual(['a.txt']);
+    });
+
+    it('reads a legacy string-typed stored mtime (pre-fix persisted state) via Date parsing', async () => {
+      await dateFs.promises.writeFile('/test/repo/a.txt', 'hello');
+      const stats = await dateFs.promises.stat('/test/repo/a.txt');
+      // Simulates state persisted before this fix normalized stored mtimes
+      // to plain epoch-ms numbers -- an ISO string is what `JSON.stringify`
+      // would have produced from a raw Date at that time.
+      await dateWorkingCopy.trackFile('a.txt', {
+        mtime: new Date(+stats.mtime).toISOString(),
+        size: stats.size,
+        mode: stats.mode,
+      });
+
+      const modified = await dateWorkingCopy.getModifiedFiles();
+      expect(modified).toEqual([]);
+    });
   });
 });
