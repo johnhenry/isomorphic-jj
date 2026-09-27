@@ -194,6 +194,13 @@ export async function createJJ(options) {
    *   - changeSnapshot: { [changeId]: fullRecordBeforeThisOpRan }
    *   - view.fileSnapshot: on-disk file state right BEFORE this op ran
    *   - conflictsSnapshot: ConflictModel state right BEFORE this op ran
+   *   - conflictsSnapshotAfter: ConflictModel state right AFTER this op ran
+   *     (issue #48, R2) — conflicts.resolve()/merge()/converge()/
+   *     moveChange() all record this alongside the "before" value, purely
+   *     as a fallback for landing exactly ON that op with nothing LATER
+   *     also touching conflicts (see below) — every other kind of state
+   *     here only ever needs a "before" value, because it's recovered from
+   *     a LATER op's own before-snapshot, not from itself.
    *
    * Deliberately NOT reverted: changes an operation newly *created* (via
    * graph.addChange() — new(), squash()'s synthetic empty working-copy
@@ -263,6 +270,20 @@ export async function createJJ(options) {
       if (conflictsSnapshot === undefined && op.conflictsSnapshot != null) {
         conflictsSnapshot = op.conflictsSnapshot;
       }
+    }
+
+    // Issue #48 (R2): the loop above recovers "conflicts state right after
+    // landingOp" from a LATER op's own "before" snapshot — but that only
+    // exists if some later op also touched conflicts. When landingOp is
+    // itself the last op to ever touch conflicts (routine for
+    // conflicts.resolve()/merge()/converge()/moveChange() — nothing
+    // naturally re-touches the ConflictModel afterward), the loop finds
+    // nothing and this used to silently leave conflict state exactly as it
+    // already happened to be, which is only correct by coincidence. Fall
+    // back to landingOp's OWN recorded `conflictsSnapshotAfter` (the actual
+    // result of the mutation IT performed), when present.
+    if (conflictsSnapshot === undefined && landingOp.conflictsSnapshotAfter != null) {
+      conflictsSnapshot = landingOp.conflictsSnapshotAfter;
     }
 
     return { changeSnapshotToApply, fileSnapshot, conflictsSnapshot };
@@ -469,7 +490,24 @@ export async function createJJ(options) {
         const change = await graph.getChange(wcId);
         if (change) {
           const oldFileSnapshot = change.fileSnapshot ? structuredClone(change.fileSnapshot) : {};
-          change.fileSnapshot = await snapshotFilesystem();
+          // Issue #48 (R3 / "silent re-snapshot"): this used to mutate the
+          // graph (and rebase descendants) with no operation recorded at
+          // all — the comment above even called it out as reconciling
+          // state "silently". That meant an out-of-band disk edit picked
+          // up here was gone for good the moment a later undo()/redo()/
+          // operations.restore() landed anywhere: there was no op in the
+          // log capturing the transition, so nothing could reverse it, and
+          // — since this is exactly what status()/describe()/read()/etc.
+          // trigger on every call — it fired again on the very next such
+          // call with no drift left to detect, making a real, one-time
+          // content change look like it had simply never happened. Same
+          // treatment as the explicit snapshot() API now gets: capture the
+          // "before" state and record a real operation, so this is exactly
+          // as reversible as calling jj.snapshot() by hand.
+          /** @type {Record<string, any>} */
+          const changeSnapshot = { [wcId]: structuredClone(change) };
+          const newFileSnapshot = await snapshotFilesystem();
+          change.fileSnapshot = newFileSnapshot;
           await graph.updateChange(change);
 
           // Issue #45: if the working-copy change isn't a leaf (e.g. we
@@ -484,10 +522,28 @@ export async function createJJ(options) {
           // in the same enclosing scope and this function only ever runs
           // after `jj` is fully constructed, so the self-reference is safe
           // (same pattern used elsewhere in this file, e.g. `jj.new(...)`).
+          // Issue #48 (R1): pass `changeSnapshot` through as the 4th arg so
+          // a rebased descendant's pre-rebase state is captured too — see
+          // `_rebuildDescendants`'s doc comment.
           const descendants = await jj._findDescendants(wcId, null);
           if (descendants.length > 0) {
-            await jj._rebuildDescendants(wcId, null, oldFileSnapshot);
+            await jj._rebuildDescendants(wcId, null, oldFileSnapshot, changeSnapshot);
           }
+
+          await oplog.recordOperation({
+            timestamp: new Date().toISOString(),
+            user: await getUserOplogInfo(),
+            description: 'auto-snapshot working copy',
+            parents: [],
+            changeSnapshot,
+            view: {
+              bookmarks: {},
+              remoteBookmarks: {},
+              heads: await computeCurrentHeads(),
+              workingCopy: wcId,
+              fileSnapshot: newFileSnapshot,
+            },
+          });
         }
       } catch {
         // Best-effort content refresh; tracking state is already updated.
@@ -690,7 +746,7 @@ export async function createJJ(options) {
   });
 
   // Create revset engine with the middleware-wrapped graph (v0.4: added bookmarkStore)
-  const revset = new RevsetEngine(graph, workingCopy, userConfig, bookmarks, tags);
+  const revset = new RevsetEngine(graph, workingCopy, userConfig, bookmarks, tags, oplog);
 
   /**
    * Helper to resolve conflicts with different strategies (v0.5)
@@ -1461,6 +1517,21 @@ export async function createJJ(options) {
               await mkdirp(fs, path.join(dir, pathParts.slice(0, -1).join('/')));
             }
             await fs.promises.writeFile(fullPath, markerText, 'utf8');
+            // Keep the working-copy tracker in sync with this out-of-band
+            // write (issue #48, discovered via R2's fix) — otherwise the
+            // NEXT autoSnapshotWorkingCopy() call (status()/read()/etc.)
+            // sees a stale tracked mtime for this file, reports a false
+            // "modified", and now (since autoSnapshotWorkingCopy() records
+            // a real operation for that — see its own doc comment) records
+            // a spurious extra op immediately after this one. Every other
+            // direct-to-disk write in this file (write(), syncWorkingCopyFiles)
+            // already does this; this was the one gap.
+            const markerStats = await fs.promises.stat(fullPath);
+            await workingCopy.trackFile(conflict.path, {
+              mtime: markerStats.mtime,
+              size: markerStats.size,
+              mode: markerStats.mode,
+            });
           }
         }
       }
@@ -1468,6 +1539,15 @@ export async function createJJ(options) {
       // Update parent
       change.parents = [newParent];
       await graph.updateChange(change);
+
+      // Issue #48 (R2): the AFTER state, for landing exactly on THIS op
+      // when nothing later also touches conflicts — see
+      // computeGraphReversal's doc comment and conflicts.resolve()'s
+      // matching `conflictsSnapshotAfter`, which this mirrors.
+      const conflictsSnapshotAfter = {
+        conflicts: Object.fromEntries(conflicts.conflicts),
+        fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+      };
 
       // Record operation
       await oplog.recordOperation({
@@ -1477,6 +1557,7 @@ export async function createJJ(options) {
         parents: [],
         changeSnapshot: { [changeId]: changeSnapshotBefore },
         conflictsSnapshot,
+        conflictsSnapshotAfter,
         view: {
           bookmarks: {},
           remoteBookmarks: {},
@@ -2100,9 +2181,18 @@ export async function createJJ(options) {
           // matching real jj's automatic rebase-on-edit. edit() itself is a
           // pure checkout and never mutates content, so this is the actual
           // moment content changes and the right place to propagate.
+          // Issue #48 (R1/R3): pass `changeSnapshot` through as the 4th arg
+          // so a rebased descendant's pre-rebase state is captured into the
+          // SAME op this method records below, not lost the moment
+          // `_rebuildDescendants` mutates it.
           const descendants = await this._findDescendants(wcId, null);
           if (descendants.length > 0) {
-            await this._rebuildDescendants(wcId, null, changeSnapshot[wcId].fileSnapshot);
+            await this._rebuildDescendants(
+              wcId,
+              null,
+              changeSnapshot[wcId].fileSnapshot,
+              changeSnapshot
+            );
           }
         }
       } catch {
@@ -2465,12 +2555,20 @@ export async function createJJ(options) {
             // isn't a leaf (we'd edit()'d into an ancestor), its descendants
             // still have the OLD content and need the same rebase-on-edit
             // treatment applied at the other two commit sites.
+            //
+            // Issue #48 (R1): pass `changeSnapshot` itself as the 4th arg
+            // so every rebased descendant's pre-rebase state lands in the
+            // SAME object this method already records into the op below —
+            // previously only `previousChangeId`'s own before-state was
+            // captured, so undo()/operations.restore() had no way to
+            // reverse the descendant rebase itself.
             const descendants = await this._findDescendants(previousChangeId, null);
             if (descendants.length > 0) {
               await this._rebuildDescendants(
                 previousChangeId,
                 null,
-                changeSnapshot[previousChangeId].fileSnapshot
+                changeSnapshot[previousChangeId].fileSnapshot,
+                changeSnapshot
               );
             }
           }
@@ -2516,7 +2614,17 @@ export async function createJJ(options) {
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: [args.changeId],
+          // Issue #48: previously hardcoded to `[args.changeId]` -- correct
+          // back when edit() was a pure checkout (the target WAS the only
+          // thing that could plausibly have changed), but edit() now also
+          // commits the change being left (see above), which can leave a
+          // second, real, still-live tip that isn't the edit target at all
+          // (e.g. `previousChangeId` itself, if it has no descendants).
+          // Recording only the target here silently dropped that other
+          // live head from `view.heads` -- see `_computeHiddenOrphans` in
+          // revset-engine.js, which reads the latest op's `view.heads` as
+          // one of its signals for "still actually in play."
+          heads: await computeCurrentHeads(),
           workingCopy: args.changeId,
           fileSnapshot: fileSnapshotBeforeSwitch,
         },
@@ -2852,7 +2960,20 @@ export async function createJJ(options) {
        */
       async list(opts = {}) {
         await oplog.load();
-        let ops = await oplog.list();
+        // `oplog.list()` returns its OWN internal array by reference, not a
+        // copy — discovered while fixing issue #48: calling this method
+        // TWICE in the same session (e.g. once to capture a "before" op,
+        // then again later to check what got recorded) used to reverse
+        // that internal array a second time, silently un-reversing it and
+        // scrambling the order any operation recorded in between landed
+        // at. `.slice()` (with no args, i.e. a full copy) unconditionally,
+        // before ever limiting or reversing, so `.reverse()` below always
+        // mutates a throwaway copy — this method itself was the only
+        // caller that needed to be non-destructive; `oplog.list()`'s own
+        // contract (return the live list, oldest-first, for internal
+        // reversal-computation callers like computeGraphReversal) is
+        // unchanged.
+        let ops = (await oplog.list()).slice();
 
         if (opts.limit && opts.limit > 0) {
           ops = ops.slice(-opts.limit);
@@ -3823,12 +3944,20 @@ export async function createJJ(options) {
         for (const conflict of detectedConflicts) {
           await conflicts.addConflict(conflict);
         }
+        // Issue #48 (R2): the AFTER state — see conflicts.resolve()'s
+        // matching `conflictsSnapshotAfter` and computeGraphReversal's doc
+        // comment for why landing exactly on this op needs it.
+        const conflictsSnapshotAfter = {
+          conflicts: Object.fromEntries(conflicts.conflicts),
+          fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+        };
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
           user: await getUserOplogInfo(),
           description: `converge ${changeId.slice(0, 8)} (unresolved)`,
           parents: [],
           conflictsSnapshot,
+          conflictsSnapshotAfter,
           view: {
             bookmarks: {},
             remoteBookmarks: {},
@@ -4730,8 +4859,24 @@ export async function createJJ(options) {
      *   descendants are unaffected (their own immediate parent hasn't been
      *   mutated yet when this function reads it, so the live read is
      *   correct for them). Optional for backward compatibility.
+     * @param {Record<string, any>} [outChangeSnapshot] - If provided,
+     *   populated with `{[descendantId]: fullRecordBeforeRebuild}` for every
+     *   descendant this call actually mutates, BEFORE the mutation —
+     *   matching the `oplog.recordOperation({changeSnapshot})` convention
+     *   used everywhere else in this file (see computeGraphReversal's doc
+     *   comment). Every caller mutates the graph via `graph.updateChange()`
+     *   here without this, so `undo()`/`redo()`/`operations.restore()` had
+     *   nothing to reverse a rebased descendant's content with — the
+     *   descendant rebase itself was simply never recorded in the operation
+     *   (issue #48, R1). Callers should merge this into their own
+     *   `changeSnapshot` before calling `oplog.recordOperation()`.
      */
-    async _rebuildDescendants(ancestorId, stopAtChangeId, originalAncestorSnapshot) {
+    async _rebuildDescendants(
+      ancestorId,
+      stopAtChangeId,
+      originalAncestorSnapshot,
+      outChangeSnapshot
+    ) {
       // Find all descendants of ancestorId
       const allChanges = graph.getAll();
 
@@ -4802,7 +4947,14 @@ export async function createJJ(options) {
         // Get parent's ORIGINAL (before absorb) state
         const originalState = originalParentStates.get(descendantId);
         if (!originalState || originalState.parentId !== descendant.parents[0]) {
-          // Parent relationship changed or no original state, just use current parent
+          // Parent relationship changed or no original state, just use current
+          // parent. Not exercised by any current caller (each always builds
+          // `originalParentStates` from a fresh, internally-consistent scan
+          // immediately before this loop runs, with no mutation in between --
+          // see the loop above) -- left as defensive dead code, matching its
+          // pre-existing, already-untested state before issue #48 rather than
+          // adding an `outChangeSnapshot` capture branch here that could never
+          // be exercised either.
           descendant.fileSnapshot = { ...parent.fileSnapshot };
           await graph.updateChange(descendant);
           continue;
@@ -4900,6 +5052,9 @@ export async function createJJ(options) {
           newSnapshot[filePath] = resultLines.join('\n');
         }
 
+        if (outChangeSnapshot && !(descendantId in outChangeSnapshot)) {
+          outChangeSnapshot[descendantId] = structuredClone(descendant);
+        }
         descendant.fileSnapshot = newSnapshot;
         await graph.updateChange(descendant);
 
@@ -5923,6 +6078,14 @@ export async function createJJ(options) {
         await conflicts.addConflict(conflict);
       }
 
+      // Issue #48 (R2): the AFTER state — see conflicts.resolve()'s
+      // matching `conflictsSnapshotAfter` and computeGraphReversal's doc
+      // comment for why landing exactly on this op needs it.
+      const conflictsSnapshotAfter = {
+        conflicts: Object.fromEntries(conflicts.conflicts),
+        fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+      };
+
       // Record operation with conflicts snapshot
       await oplog.recordOperation({
         timestamp: new Date().toISOString(),
@@ -5936,6 +6099,7 @@ export async function createJJ(options) {
           workingCopy: currentChangeId,
         },
         conflictsSnapshot, // Store conflicts state before merge for undo
+        conflictsSnapshotAfter,
       });
 
       return {
@@ -6045,6 +6209,23 @@ export async function createJJ(options) {
 
         // Write resolved content to file
         await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf8');
+        // Keep the working-copy tracker in sync with this out-of-band
+        // write (issue #48, discovered via R2's fix) — otherwise the NEXT
+        // autoSnapshotWorkingCopy() call (status()/read()/etc.) sees a
+        // stale tracked mtime for this file, reports a false "modified",
+        // and records a spurious extra "auto-snapshot working copy"
+        // operation immediately after this one (autoSnapshotWorkingCopy()
+        // now records a real op for that — see its own doc comment).
+        // write()/syncWorkingCopyFiles already do this for every OTHER
+        // direct-to-disk write in this file; this was a gap.
+        {
+          const resolvedStats = await fs.promises.stat(path.join(dir, conflict.path));
+          await workingCopy.trackFile(conflict.path, {
+            mtime: resolvedStats.mtime,
+            size: resolvedStats.size,
+            mode: resolvedStats.mode,
+          });
+        }
 
         // Mark conflict as resolved
         await conflicts.resolveConflict(args.conflictId, 'manual');
@@ -6064,6 +6245,24 @@ export async function createJJ(options) {
           await graph.updateChange(wcChange);
         }
 
+        // Issue #48 (R2): `computeGraphReversal` recovers "the state right
+        // after landingOp" for conflicts by scanning for a LATER op's
+        // "before" snapshot — that only exists if some later op also
+        // touched conflicts. Conflict resolution is usually a one-off
+        // event with nothing later re-touching the ConflictModel at all, so
+        // landing operations.restore()/undo()/redo() exactly on THIS op
+        // found no candidate and left whatever conflict state happened to
+        // already be live completely untouched — restoring the resolved
+        // FILE content correctly (that part goes through the ordinary
+        // changeSnapshot path, which usually does have a later toucher)
+        // while leaving the change's conflict marked unresolved. Recording
+        // the AFTER state directly closes that gap without needing a later
+        // op to exist at all.
+        const conflictsSnapshotAfter = {
+          conflicts: Object.fromEntries(conflicts.conflicts),
+          fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+        };
+
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
           user: await getUserOplogInfo(),
@@ -6071,6 +6270,7 @@ export async function createJJ(options) {
           parents: [],
           changeSnapshot,
           conflictsSnapshot: conflictsSnapshotBefore,
+          conflictsSnapshotAfter,
           view: {
             bookmarks: {},
             remoteBookmarks: {},
@@ -6117,7 +6317,16 @@ export async function createJJ(options) {
             const resolvedContent = _resolveWithStrategy(conflict, args.strategy);
 
             // Write resolved content
-            await fs.promises.writeFile(path.join(dir, conflict.path), resolvedContent, 'utf8');
+            const resolvedPath = path.join(dir, conflict.path);
+            await fs.promises.writeFile(resolvedPath, resolvedContent, 'utf8');
+            // Keep the working-copy tracker in sync — see resolve()'s
+            // matching comment (issue #48).
+            const resolvedStats = await fs.promises.stat(resolvedPath);
+            await workingCopy.trackFile(conflict.path, {
+              mtime: resolvedStats.mtime,
+              size: resolvedStats.size,
+              mode: resolvedStats.mode,
+            });
 
             // Mark as resolved
             await conflicts.resolveConflict(conflict.conflictId, args.strategy);

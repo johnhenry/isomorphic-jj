@@ -1,5 +1,99 @@
 # Changelog
 
+## 1.12.0 — 2026-09-27 — op-recording gaps left by #43/#45's fixes (#48)
+
+Follow-up to #43/#45 (below). Walking every op backward then forward now
+lands correctly in 49 of 60 restores (up from before); the 11 misses were
+five distinct gaps, all in the operation-recording machinery those fixes
+introduced or depend on, plus one pre-existing bug in `operations.list()`
+discovered while writing regression tests for the others.
+
+### Fixed
+
+- **The descendant rebase performed by `edit()`/`snapshot()`/
+  `autoSnapshotWorkingCopy()` was never itself recorded in the operation
+  (R1).** `_rebuildDescendants()` mutates every rebased descendant via
+  `graph.updateChange()`, but had no way to hand its callers each
+  descendant's pre-rebase state — so `undo()`/`operations.restore()` had
+  nothing to reverse the rebase with, even though the ANCESTOR's own
+  content change was (already) correctly captured. Added an optional 4th
+  parameter, `outChangeSnapshot`, populated with `{[descendantId]:
+  fullRecordBeforeRebuild}` for every descendant actually mutated; all
+  three call sites now pass their own `changeSnapshot` object through so
+  it lands in the same operation record.
+- **Restoring to a `conflicts.resolve()` (or `merge()`/`converge()`/
+  `moveChange()`) op could restore the resolved file but leave the
+  change's conflict state unresolved (R2).** `computeGraphReversal()`
+  recovers "conflict state right after `landingOp`" by scanning for a
+  LATER op's own "before" snapshot — which only exists if some later op
+  also touches conflicts. Conflict resolution is usually a one-off event
+  with nothing later re-touching the `ConflictModel` at all, so landing
+  exactly on it found no candidate and silently left whatever conflict
+  state already happened to be live untouched (file content usually
+  recovered correctly anyway, by coincidence — some unrelated later op
+  touching the same file's `changeSnapshot`). `conflicts.resolve()`,
+  `merge()`, `converge()` (unresolved case), and `moveChange()` now also
+  record `conflictsSnapshotAfter` — the result of the mutation THEY
+  performed — and `computeGraphReversal()` falls back to it when nothing
+  later reveals the answer.
+- **A file changed directly on disk and picked up by
+  `autoSnapshotWorkingCopy()` (not the explicit `snapshot()` API) had no
+  "before" copy recorded anywhere (R3) — described as "silent
+  re-snapshot" when it also rebases descendants.** `autoSnapshotWorkingCopy()`
+  — the implicit reconciliation `status()`/`read()`/`describe()`/etc.
+  trigger on every call — mutated the graph (and rebased descendants) with
+  no operation recorded at all. A later `undo()`/`operations.restore()`
+  had nothing to reverse it with, and since the same function runs again
+  on every subsequent call with no drift left to detect, a real,
+  one-time content change looked exactly like it had simply never
+  happened. Now records a real operation (mirroring the explicit
+  `snapshot()` API, `description: 'auto-snapshot working copy'`) whenever
+  it actually refreshes content — gated on the same `added`/`modified`/
+  `deleted` check it already uses, so a no-op call still records nothing.
+- **After `edit()` moves `@` to an older change, `log()` could hide a real,
+  undescribed tip with real work in it, and `edit()` recorded only its own
+  target in `view.heads`.** `_computeHiddenOrphans`'s `autoCreated ||`
+  branch (needed for two undo-artifact cases — see its doc comment) has no
+  way to distinguish "a synthetic scaffolding change that's still
+  discardable" from "a real, live tip the user simply isn't checked out on
+  right now" once the FLAG is set once at creation and never cleared.
+  `edit()` recording only its own target in `view.heads` (correct back
+  when `edit()` was a pure checkout, wrong now that it also commits the
+  change being left) meant this package's own "explicit, maintained set of
+  live heads" proxy never saw the other, real tip at all. Fixed two ways:
+  `edit()`'s recorded `view.heads` now uses `computeCurrentHeads()` (every
+  non-abandoned change with no non-abandoned children) instead of
+  `[args.changeId]`; and `RevsetEngine` now takes the operation log as a
+  constructor param and `_computeHiddenOrphans` adds the latest op's
+  `view.heads` to its `trackedHeads` signal, alongside the working-copy
+  pointer and every bookmark/tag target — the "explicit, maintained set of
+  heads" this package's own doc comment already said real jj's View keeps,
+  now actually wired through.
+- **`operations.list()` reversed its own internal array in place instead
+  of a copy, silently scrambling operation order on the SECOND call within
+  a session.** `oplog.list()` returns its live internal array by
+  reference (by design — `computeGraphReversal()` and others need the
+  real, oldest-first list); `operations.list()`'s own `.reverse()` (to
+  present newest-first) mutated that same array as a side effect. Calling
+  it twice — a completely reasonable thing to do (list history, do
+  something, list history again) — un-reversed it back to oldest-first,
+  and anything recorded via `oplog.recordOperation()` in between landed
+  appended to what was, at that moment, the WRONG end. Found while writing
+  a regression test for the fixes above (two `operations.list()` calls
+  around one `autoSnapshotWorkingCopy()`), not from the issue's own repro
+  — but real and, in principle, capable of corrupting `undo()`/`redo()`/
+  `operations.restore()` for any caller that also calls
+  `jj.operations.list()` earlier in the same session. Fixed by copying
+  before reversing.
+
+  See `tests/integration/issue-43-restore-reliability.test.js`'s new
+  "issue #48" suites (8 new tests across all five gaps above) and
+  `tests/unit/core/revset-branches-coverage.test.js`'s new oplog-signal
+  suite (2 tests) for the hidden-tips fix specifically. All verified with
+  a negative control: reverting just the source changes fails exactly
+  these new tests while every pre-existing test still passes, confirming
+  they exercise real behavior rather than being tautological.
+
 ## 1.11.0 — 2026-09-26 — edit() of an older change rebases its descendants (#45)
 
 Part 5 of #43 (parts 1-4 shipped in 1.10.0 / #44), previously punted because

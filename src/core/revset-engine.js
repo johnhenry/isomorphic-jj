@@ -356,13 +356,23 @@ export class RevsetEngine {
    * @param {any} [userConfig] - User configuration instance (optional)
    * @param {any} [bookmarkStore] - Bookmark store instance (optional, v0.4)
    * @param {any} [tagStore] - Tag store instance (optional, v1.5)
+   * @param {any} [oplog] - Operation log instance (optional, issue #48) —
+   *   see `_computeHiddenOrphans`'s doc comment for why this is needed.
    */
-  constructor(graph, workingCopy, userConfig = null, bookmarkStore = null, tagStore = null) {
+  constructor(
+    graph,
+    workingCopy,
+    userConfig = null,
+    bookmarkStore = null,
+    tagStore = null,
+    oplog = null
+  ) {
     this.graph = graph;
     this.workingCopy = workingCopy;
     this.userConfig = userConfig;
     this.bookmarkStore = bookmarkStore;
     this.tagStore = tagStore;
+    this.oplog = oplog;
   }
 
   /**
@@ -1049,11 +1059,24 @@ export class RevsetEngine {
    * excludable. Real jj instead tracks an explicit, maintained set of
    * heads in its View (updated as operations run — abandoning/squashing a
    * change removes it, rebasing children onto a new parent removes the
-   * old parent, etc.). This package doesn't thread the operation log's
-   * `view.heads` through to the revset engine, but the working-copy
-   * pointer plus every bookmark/tag target is the closest available
-   * proxy for "what's actually still in play" — anything only reachable
-   * from those, not from every dangling graph leaf.
+   * old parent, etc.).
+   *
+   * Issue #48: the working-copy pointer plus every bookmark/tag target,
+   * alone, missed a real case this rule needs to cover: `edit()`-ing @ to
+   * an OLDER change leaves the change you edited AWAY FROM still fully
+   * live (nobody abandoned/squashed/rebased it away) — but it's a
+   * DESCENDANT of the new @ (not an ancestor), so it's absent from
+   * `reachable` no matter what. If that change also happens to be
+   * `autoCreated` (e.g. it came from `new()`) and was never `describe()`d,
+   * the `autoCreated ||` branch below — needed for the two undo-artifact
+   * cases documented above it — incorrectly swept it up too, hiding a real
+   * tip with real work in it. The operation log's `view.heads` (now
+   * correctly threaded through via the `oplog` constructor param) is
+   * exactly the "explicit, maintained set of heads" real jj's View keeps —
+   * every mutating operation records the actual live heads as of right
+   * after it ran (see `computeCurrentHeads()` in repository.js), so the
+   * latest one is the accurate, low-cost substitute for a full View this
+   * package doesn't otherwise maintain.
    *
    * @param {any[]} allChanges - `graph.getAll()`
    * @returns {Promise<Set<string>>} change IDs to exclude
@@ -1075,6 +1098,18 @@ export class RevsetEngine {
     if (this.tagStore) {
       for (const tag of await this.tagStore.list()) {
         if (tag && tag.changeId) trackedHeads.add(tag.changeId);
+      }
+    }
+    if (this.oplog) {
+      try {
+        const headOp = await this.oplog.getHeadOperation();
+        if (headOp && headOp.view && Array.isArray(headOp.view.heads)) {
+          for (const headId of headOp.view.heads) {
+            if (headId) trackedHeads.add(headId);
+          }
+        }
+      } catch {
+        // oplog not loaded/available — fine, just no op-based roots.
       }
     }
 

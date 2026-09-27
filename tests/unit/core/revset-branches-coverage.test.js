@@ -16,6 +16,7 @@ import { WorkingCopy } from '../../../src/core/working-copy.js';
 import { BookmarkStore } from '../../../src/core/bookmark-store.js';
 import { TagStore } from '../../../src/core/tag-store.js';
 import { Storage } from '../../../src/core/storage-manager.js';
+import { OperationLog } from '../../../src/core/operation-log.js';
 import { MockFS } from '../../fixtures/mock-fs.js';
 
 const ROOT = '0'.repeat(32);
@@ -481,6 +482,74 @@ describe('RevsetEngine branch coverage', () => {
     it('getDescendants returns [] for a leaf', async () => {
       expect(await ctx.revset.getDescendants(E)).toEqual([]);
     });
+  });
+});
+
+describe('RevsetEngine + oplog — issue #48 _computeHiddenOrphans branches', () => {
+  it('an oplog with no recorded operations yet is treated the same as no oplog at all', async () => {
+    const ctx = await buildEngine();
+    const oplog = new OperationLog(ctx.storage);
+    await oplog.init(); // creates the file, but records nothing into it
+    const withEmptyOplog = new RevsetEngine(
+      ctx.graph,
+      ctx.workingCopy,
+      null,
+      ctx.bookmarks,
+      ctx.tags,
+      oplog
+    );
+
+    // getHeadOperation() returning null (no ops recorded yet) must not throw
+    // or change the result versus the baseline engine (no oplog at all).
+    const withOplog = await withEmptyOplog.evaluate('all()');
+    const without = await ctx.revset.evaluate('all()');
+    expect(withOplog).toEqual(without);
+
+    ctx.fs.reset();
+  });
+
+  it("uses the latest op's view.heads to keep an autoCreated, undescribed, otherwise-unreachable tip visible, and skips a falsy entry alongside it without throwing", async () => {
+    const ctx = await buildEngine();
+
+    // B is a child of A (not an ancestor of it, and @ is at A per
+    // buildEngine()), so it's already unreachable via ancestors()/
+    // bookmarks()/tags() alone. Make it autoCreated + undescribed too --
+    // exactly the shape that would otherwise get hidden by
+    // _computeHiddenOrphans's `autoCreated ||` branch (see its doc
+    // comment), even though it has real content different from its parent.
+    const bChange = await ctx.graph.getChange(B);
+    bChange.autoCreated = true;
+    bChange.description = '(no description)';
+    await ctx.graph.updateChange(bChange);
+
+    // Baseline (no oplog at all): B is hidden.
+    const withoutOplog = await ctx.revset.evaluate('all()');
+    expect(withoutOplog).not.toContain(B);
+
+    // With an oplog whose latest op names B as a live head (plus a falsy
+    // entry, which must be skipped rather than throwing or otherwise
+    // corrupting the result): B is visible again.
+    const oplog = new OperationLog(ctx.storage);
+    await oplog.init();
+    await oplog.recordOperation({
+      timestamp: new Date().toISOString(),
+      user: { name: 'x', email: 'x@example.com', hostname: 'localhost' },
+      description: 'test op with a sparse view.heads',
+      parents: [],
+      view: { bookmarks: {}, remoteBookmarks: {}, heads: [B, null, ''], workingCopy: A },
+    });
+    const revset = new RevsetEngine(
+      ctx.graph,
+      ctx.workingCopy,
+      null,
+      ctx.bookmarks,
+      ctx.tags,
+      oplog
+    );
+    const withOplog = await revset.evaluate('all()');
+    expect(withOplog).toContain(B);
+
+    ctx.fs.reset();
   });
 });
 
