@@ -1,5 +1,97 @@
 # Changelog
 
+## 1.9.1 — 2026-09-26 — undo/restore/abandon/squash follow-ups
+
+Three bug-fix follow-ups to 1.9.0's undo/abandon/squash work (#29/#30),
+found by continued use of the same graph/working-copy machinery. Grouped
+into one patch release because all three touch overlapping code
+(`computeGraphReversal()`/`applyGraphReversal()`, the `all()` revset, and
+the synthetic-empty-change pattern `new()`/`squash()` share).
+
+### Fixed
+
+- **`restore()`/`undo()` now record their own `changeSnapshot`, so undoing
+  a restore (or undoing an undo) actually reverts something (#37a).**
+  1.9.0 taught `describe()`/`squash()`/`abandon()` to snapshot the
+  ChangeGraph state they were about to overwrite so a later `undo()` could
+  put it back — but `undo()` and `operations.restore()` themselves never
+  did the same for THEIR OWN oplog entries. Repro: `describe("old")` →
+  `describe("new")` → `restore(<op before the second describe>)` (now
+  "old") → `undo()`. Expected: back to "new". Actual: still "old", because
+  the restore's own oplog entry carried no `changeSnapshot` for
+  `computeGraphReversal()` to find — undoing it moved the working-copy
+  pointer/files but left the change record exactly as the restore had
+  left it. Both `undo()` and `restore()` now capture ground-truth "what
+  am I about to overwrite" (the same way `undo()` already did for
+  `redo()`'s benefit, under `redoChangeSnapshot`) and record it as their
+  own `changeSnapshot`. Extended `redo()` the same way for symmetry, since
+  it shares the identical gap.
+- **`log()` no longer lists changes orphaned by an undone `new()`/`squash()`
+  (#37b).** `undo()`/`redo()`/`operations.restore()` deliberately never
+  delete a change record a reverted `new()`/`squash()` created — they only
+  un-reference it (matching real jj's "hidden, not gone" model for
+  unreachable commits, and this package's own history-editing tests rely
+  on rebasing back onto one still working) — but `log()`'s default
+  `all()` revset was a flat `graph.getAll()`, so the orphan kept showing
+  up as an ordinary visible change forever. `all()`/`builtin_log()` now
+  exclude changes that are BOTH unreachable from every tracked head
+  (working copy, bookmarks, tags — the closest available proxy for real
+  jj's explicitly-maintained View heads, since this package doesn't thread
+  the operation log's `view.heads` through to the revset engine) AND
+  "discardable" (no file diff versus its own parent, and undescribed —
+  including this package's own `'(no description)'`/`'(no description
+  set)'` sentinel strings, which `new()`/`squash()` write when no message
+  is given). The change record itself is still resolvable directly by its
+  change id, matching real jj's hidden-not-gone semantics for unreachable
+  commits. Merge commits are conservatively never treated as "empty" by
+  this rule.
+- **`undo()`/`restore()` now restore the ORIGINAL commit id instead of
+  minting a new one (#37c).** Reverting a `changeSnapshot` went through
+  the same `graph.updateChange()` every normal mutation uses, which fires
+  the git-sync middleware and creates a brand-new commit from the
+  *current* tree — even though the snapshot being reapplied already
+  carried the correct, original commit id from before the reverted
+  operation ran. Since undo/restore are pure reverts, not edits, this
+  undermined the "change id survives, commit id only changes on content
+  edit" story for the revert itself. `applyGraphReversal()` (used by both
+  `undo()` and `restore()`) and `redo()`'s equivalent now write the
+  snapshot verbatim via the un-wrapped graph store, bypassing the git-sync
+  hook entirely and restoring the original commit id byte-for-byte.
+- **`abandon()` of the working-copy change now moves `@` off it (#38).**
+  `abandon(<changeId of @>)` correctly marked the change abandoned but
+  left `@` pointing at it — `status()`/`log()` kept showing the working
+  copy sitting on a change flagged abandoned. Real jj instead moves `@` to
+  a new empty change on the abandoned change's own parent(s). `abandon()`
+  now detects that case and calls `new({ parents: change.parents })` —
+  reusing `new()`'s own "create an empty change with given parents" logic
+  rather than duplicating it — which is exactly the workaround callers
+  previously had to reach for themselves.
+- **`squash()` of the working-copy change no longer gives the new `@` an
+  empty `fileSnapshot` (#39).** 1.9.0 fixed `squash()` to actually move
+  the source's file content into the destination (#30), but when the
+  squashed source WAS the working-copy change, the new `@` squash creates
+  afterward was still hard-coded to `fileSnapshot: {}` instead of starting
+  from the destination's (now-merged) tree — so `status()`/`snapshot()`
+  saw every on-disk file as untracked/new until something rewrote it and
+  triggered a fresh auto-snapshot. The new `@` now starts as a copy of the
+  destination's `fileSnapshot`, matching real `jj squash` (the new
+  working-copy change looks identical to its new parent until you touch
+  something), and the working directory is synced to match too (a no-op
+  in the common case where source's parent already was the destination,
+  but necessary whenever they aren't adjacent).
+
+### Testing
+
+1837 tests passing, including 12 new regression tests added by this pass;
+lint (0 errors), format:check, typecheck, and build all still green; all
+12 `examples/*.mjs` run clean. New test files:
+`tests/integration/undo-restore-residuals.test.js` (#37a/b/c),
+`tests/integration/abandon-working-copy.test.js` (#38),
+`tests/integration/squash-working-copy-file-snapshot.test.js` (#39). Each
+fix was verified against a negative control (reverting just that fix
+reproduces the exact wrong behavior described in its issue) before moving
+to the next.
+
 ## 1.9.0 — merge the scoped and unscoped version lineages
 
 No code change — a deliberate, one-time exception to this family's usual
