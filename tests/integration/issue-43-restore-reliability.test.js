@@ -601,3 +601,286 @@ describe('issue #45 — edit() of an older change rebases its descendants on sna
     expect(rebuilt.fileSnapshot['keep.txt']).toBe('keep (parent touched something else)');
   });
 });
+
+/**
+ * Issue #48 — follow-up to #43. Walking every op backward then forward
+ * landed correctly in 49 of 60 restores; the 11 misses are:
+ *
+ * (R1) The descendant rebase performed by edit()/snapshot()/
+ *      autoSnapshotWorkingCopy() was never itself recorded in the op, so
+ *      restore()/undo() to before the rebase left descendants with their
+ *      NEW content and commit IDs.
+ * (R2) Restoring to a conflicts.resolve() op restored the resolved file but
+ *      left the change's conflict state unresolved.
+ * (R3) A file changed directly on disk and picked up by
+ *      autoSnapshotWorkingCopy() (not the explicit snapshot() API) had no
+ *      "before" copy recorded anywhere, so rewinding past it kept the new
+ *      content.
+ * (Hidden tips) After edit() moves @ to an older change, log() hid an
+ *      undescribed tip with real work in it, and edit() recorded only its
+ *      own target in view.heads.
+ * (Silent re-snapshot) autoSnapshotWorkingCopy() rebased descendants (and
+ *      refreshed content) with no operation recorded at all.
+ */
+describe('issue #48 (R1) — descendant rebase is recorded in the operation', () => {
+  let fs;
+  let jj;
+
+  beforeEach(async () => {
+    fs = new MockFS();
+    jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+    await jj.init({ userName: 'Test', userEmail: 't@e.com' });
+  });
+
+  afterEach(() => fs.reset());
+
+  it('undo() past an edit()-away descendant rebase restores the descendant to its pre-rebase content and commit id', async () => {
+    await jj.write({ path: 'file.txt', data: 'v1' });
+    const change1 = await jj.describe({ message: 'change 1' });
+
+    await jj.new({ message: 'change 2' });
+    const change2 = await jj.describe({ message: 'change 2' });
+    const change2Before = await jj.graph.getChange(change2.changeId);
+    const commitIdBefore = change2Before.commitId;
+
+    // Edit back into change1 (now change2's ancestor), modify it, and edit
+    // away -- this is edit()'s own inline commit site, which rebases
+    // change2 onto the new content.
+    await jj.edit({ changeId: change1.changeId });
+    await jj.write({ path: 'file.txt', data: 'v2' });
+    await jj.edit({ changeId: change2.changeId });
+
+    // Confirm the rebase actually happened before asserting undo() reverses it.
+    const rebased = await jj.show({ change: change2.changeId });
+    expect(rebased.fileSnapshot['file.txt']).toBe('v2');
+
+    // Undo the edit-away (the op that performed the rebase).
+    await jj.undo();
+
+    const restored = await jj.graph.getChange(change2.changeId);
+    expect(restored.fileSnapshot['file.txt']).toBe('v1');
+    // Real jj gives an unrewritten change back its ORIGINAL commit id on
+    // undo -- see issue #37(c); the rebase must not have minted a new one
+    // that survives the undo.
+    expect(restored.commitId).toBe(commitIdBefore);
+  });
+
+  it('operations.restore() to before an autoSnapshotWorkingCopy() rebase restores the descendant too', async () => {
+    await jj.write({ path: 'file.txt', data: 'v1' });
+    const change1 = await jj.describe({ message: 'change 1' });
+
+    await jj.new({ message: 'change 2' });
+    const change2 = await jj.describe({ message: 'change 2' });
+
+    await jj.edit({ changeId: change1.changeId });
+
+    const opsBeforeEdit = await jj.operations.list();
+    const landingOp = opsBeforeEdit[0];
+
+    // Out-of-band disk edit, picked up by autoSnapshotWorkingCopy() (via
+    // status()), which commits it AND rebases change2 onto it.
+    await fs.promises.writeFile('/test/repo/file.txt', 'v2 (out of band)', 'utf8');
+    await jj.status();
+
+    const rebased = await jj.show({ change: change2.changeId });
+    expect(rebased.fileSnapshot['file.txt']).toBe('v2 (out of band)');
+
+    await jj.operations.restore({ operation: landingOp.id });
+
+    const restored = await jj.graph.getChange(change2.changeId);
+    expect(restored.fileSnapshot['file.txt']).toBe('v1');
+  });
+});
+
+describe('issue #48 (R2) — restoring to a conflicts.resolve() op re-establishes the resolved conflict state', () => {
+  let fs;
+  let jj;
+
+  beforeEach(async () => {
+    fs = new MockFS();
+    jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+    await jj.init({ userName: 'Test', userEmail: 't@e.com' });
+  });
+
+  afterEach(() => fs.reset());
+
+  it('lands with the conflict resolved, not just the file content restored, when nothing later touches conflicts', async () => {
+    const base = (await jj.status()).workingCopy.changeId;
+    await jj.write({ path: 'file.txt', data: 'original\n' });
+    await jj.describe({ message: 'base' });
+
+    const changeA = await jj.new({ parents: [base] });
+    await jj.write({ path: 'file.txt', data: 'edited by A\n' });
+    await jj.describe({ message: 'A' });
+
+    await jj.edit({ changeId: base });
+    const changeB = await jj.new({ parents: [base] });
+    await jj.write({ path: 'file.txt', data: 'edited by B\n' });
+    await jj.describe({ message: 'B' });
+
+    await jj.edit({ changeId: changeA.changeId });
+    await jj.moveChange({ changeId: changeA.changeId, newParent: changeB.changeId });
+
+    const conflict = (await jj.conflicts.list())[0];
+
+    await jj.conflicts.resolve({
+      conflictId: conflict.conflictId,
+      resolution: 'manually resolved\n',
+    });
+    expect((await jj.conflicts.list()).length).toBe(0);
+
+    const resolveOp = (await jj.operations.list())[0];
+    expect(resolveOp.description).toContain('resolve conflict');
+
+    // Undo past the resolve (conflict comes back), THEN restore forward
+    // exactly onto the resolve op again -- nothing else in this sequence
+    // ever touches conflicts state after the resolve, which is exactly the
+    // "nothing later reveals it" gap this issue describes.
+    await jj.undo();
+    expect((await jj.conflicts.list()).length).toBe(1);
+
+    await jj.operations.restore({ operation: resolveOp.id });
+
+    expect(await jj.read({ path: 'file.txt' })).toBe('manually resolved\n');
+    expect((await jj.conflicts.list()).length).toBe(0);
+  });
+});
+
+describe('issue #48 (R3) — autoSnapshotWorkingCopy() out-of-band edits are reversible', () => {
+  let fs;
+  let jj;
+
+  beforeEach(async () => {
+    fs = new MockFS();
+    jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+    await jj.init({ userName: 'Test', userEmail: 't@e.com' });
+  });
+
+  afterEach(() => fs.reset());
+
+  it('operations.restore() to before an autoSnapshotWorkingCopy()-caught disk edit restores the ORIGINAL content, even when an explicit snapshot() ran afterward and saw no further drift', async () => {
+    await jj.write({ path: 'file.txt', data: 'original' });
+    const change = await jj.describe({ message: 'change' });
+    const beforeEditOp = (await jj.operations.list())[0];
+
+    // Edit the file OUTSIDE jj.write() and let status() (not the explicit
+    // snapshot() API) be the first thing to observe it.
+    await fs.promises.writeFile('/test/repo/file.txt', 'edited out of band', 'utf8');
+    await jj.status();
+
+    const afterAutoSnapshot = await jj.show({ change: change.changeId });
+    expect(afterAutoSnapshot.fileSnapshot['file.txt']).toBe('edited out of band');
+
+    // A later explicit snapshot() sees no further drift (status() already
+    // caught up) -- it still records its own operation regardless (matching
+    // the "snapshot() always records" test above; unlike autoSnapshot, an
+    // explicit snapshot() is a deliberate action, not implicit background
+    // reconciliation), so this is now TWO operations deep from `change`'s
+    // original content, not one.
+    const snapshotResult = await jj.snapshot();
+    expect(snapshotResult.modified).toEqual([]);
+
+    // Landing exactly back on the op right before the out-of-band edit must
+    // still recover the true original content, regardless of how many
+    // (possibly redundant) operations piled up on top of it in between.
+    await jj.operations.restore({ operation: beforeEditOp.id });
+
+    const restored = await jj.graph.getChange(change.changeId);
+    expect(restored.fileSnapshot['file.txt']).toBe('original');
+  });
+});
+
+describe('issue #48 (hidden tips) — a real, undescribed tip left behind by edit() stays visible', () => {
+  let fs;
+  let jj;
+
+  beforeEach(async () => {
+    fs = new MockFS();
+    jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+    await jj.init({ userName: 'Test', userEmail: 't@e.com' });
+  });
+
+  afterEach(() => fs.reset());
+
+  it('log() still shows an autoCreated, undescribed tip with real content after edit() moves @ to an older change', async () => {
+    await jj.write({ path: 'file.txt', data: 'base' });
+    const base = await jj.describe({ message: 'base' });
+
+    // new() creates an autoCreated, undescribed change -- write into it
+    // (real content) but never describe() it, matching the exact shape
+    // `_computeHiddenOrphans`'s `autoCreated ||` branch exists for.
+    await jj.new({ message: 'tip' });
+    await jj.write({ path: 'file.txt', data: 'real work, never described' });
+    const tipId = (await jj.status()).workingCopy.changeId;
+
+    // Move @ to an older change. The tip we just left is now a descendant
+    // of @, not an ancestor -- unreachable under the old rule.
+    await jj.edit({ changeId: base.changeId });
+
+    const log = await jj.log();
+    const logIds = log.map((c) => c.changeId);
+    expect(logIds).toContain(tipId);
+  });
+
+  it('edit() records every real head in view.heads, not just its own target', async () => {
+    await jj.write({ path: 'file.txt', data: 'base' });
+    const base = await jj.describe({ message: 'base' });
+
+    // Two independent branches off `base`, both real leaves.
+    const branchA = await jj.new({ parents: [base.changeId] });
+    await jj.write({ path: 'file.txt', data: 'branch A' });
+
+    await jj.edit({ changeId: base.changeId });
+    const branchB = await jj.new({ parents: [base.changeId] });
+    await jj.write({ path: 'file.txt', data: 'branch B' });
+
+    // @ is on branchB right now. Editing into branchA must not drop
+    // branchB from view.heads just because it isn't the edit target.
+    await jj.edit({ changeId: branchA.changeId });
+
+    const editOp = (await jj.operations.list())[0];
+    expect(editOp.view.heads).toEqual(expect.arrayContaining([branchA.changeId, branchB.changeId]));
+    expect(editOp.view.heads.length).toBe(2);
+  });
+});
+
+describe('issue #48 (silent re-snapshot) — autoSnapshotWorkingCopy() records a real operation', () => {
+  let fs;
+  let jj;
+
+  beforeEach(async () => {
+    fs = new MockFS();
+    jj = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+    await jj.init({ userName: 'Test', userEmail: 't@e.com' });
+  });
+
+  afterEach(() => fs.reset());
+
+  it('records a new operation when it actually refreshes content, and undo() reverses it', async () => {
+    await jj.write({ path: 'file.txt', data: 'original' });
+    const change = await jj.describe({ message: 'change' });
+
+    const opsBefore = await jj.operations.list();
+
+    await fs.promises.writeFile('/test/repo/file.txt', 'edited out of band', 'utf8');
+    await jj.status();
+
+    const opsAfter = await jj.operations.list();
+    expect(opsAfter.length).toBe(opsBefore.length + 1);
+    expect(opsAfter[0].description).toBe('auto-snapshot working copy');
+
+    await jj.undo();
+    const restored = await jj.graph.getChange(change.changeId);
+    expect(restored.fileSnapshot['file.txt']).toBe('original');
+  });
+
+  it('does NOT record a new operation when nothing on disk actually changed', async () => {
+    await jj.write({ path: 'file.txt', data: 'original' });
+
+    const opsBefore = await jj.operations.list();
+    await jj.status();
+    const opsAfter = await jj.operations.list();
+
+    expect(opsAfter.length).toBe(opsBefore.length);
+  });
+});
