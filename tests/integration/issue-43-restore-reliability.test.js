@@ -448,25 +448,25 @@ describe('issue #43(4) — conflicts.resolve() records an operation', () => {
 //
 // edit() itself never touches the content of the change it switches INTO —
 // it's a pure checkout (moves @, syncs disk to the target's existing
-// fileSnapshot). The actual moment a change's committed content changes is
-// inside the public snapshot() API and the internal autoSnapshotWorkingCopy()
-// helper, which reconcile on-disk state into the CURRENT working-copy
-// change's fileSnapshot. If you edit() into a change that already has
-// descendants and then modify a file, those two functions used to update
-// only that change's own fileSnapshot and never propagate the update to its
-// descendants, which stayed stale forever (until/unless you edited into one
-// of them directly, which resyncs disk FROM its own, still-stale, snapshot).
-//
-// Note: edit()'s own checkout-time bookkeeping (capturing disk state for the
-// change being switched AWAY FROM, so a later checkout back into it starts
-// from the right place) is a separate, pre-existing code path in edit() that
-// does not go through snapshot()/autoSnapshotWorkingCopy() and is
-// intentionally left untouched by this fix — so "edit() away" alone does not
-// trigger descendant propagation. Propagation happens the next time
-// snapshot()/autoSnapshotWorkingCopy() actually runs against the edited,
-// non-leaf change (e.g. an explicit jj.snapshot() call, or any op that
-// auto-snapshots — status(), read(), describe(), etc. — while still checked
-// into it).
+// fileSnapshot). There are, however, THREE separate places a change's
+// committed content actually changes, and the descendant-propagation fix
+// had to cover all three:
+//   1. The public snapshot() API.
+//   2. The internal autoSnapshotWorkingCopy() helper (status(), read(),
+//      describe(), etc. all call this).
+//   3. edit()'s OWN inline bookkeeping for the change being switched AWAY
+//      FROM — it snapshots that change's disk state and commits it via
+//      graph.updateChange() directly, entirely separate from (1) and (2).
+// All three now check whether the change they just committed has any
+// descendants and, if so, propagate via the (now un-deprecated)
+// _rebuildDescendants(). (2) was fixed first; (3) initially looked
+// intentionally out of scope (see the first commit for this test file), but
+// turned out to be the exact path this issue's original repro and
+// tests/integration/absorb.test.js's "should work after edit()" collision
+// were actually about — "edit() away" alone DOES need to trigger
+// propagation, since real jj/expected usage is "edit an ancestor, make a
+// change, edit back to where you were" with no explicit snapshot() in
+// between.
 describe('issue #45 — edit() of an older change rebases its descendants on snapshot()', () => {
   let fs;
   let jj;
@@ -528,6 +528,30 @@ describe('issue #45 — edit() of an older change rebases its descendants on sna
     expect(descendant.fileSnapshot['file.txt']).toBe('v2 (out of band, longer)');
   });
 
+  it('propagates an edit to a non-leaf change into its descendant on edit()-away, with no explicit snapshot() call', async () => {
+    await jj.write({ path: 'file.txt', data: 'v1' });
+    const change1 = await jj.describe({ message: 'change 1' });
+
+    await jj.new({ message: 'change 2' });
+    const change2 = await jj.describe({ message: 'change 2' });
+
+    // Edit back into change1 (which now has change2 as a descendant),
+    // modify it, then edit AWAY without ever calling snapshot()/status()/
+    // read()/etc. in between. This is the third content-commit site —
+    // edit()'s own inline bookkeeping for the change it's leaving — and the
+    // exact sequence this issue's original repro (and the collision with
+    // absorb.test.js's "should work after edit()") was about.
+    await jj.edit({ changeId: change1.changeId });
+    await jj.write({ path: 'file.txt', data: 'v2' });
+    await jj.edit({ changeId: change2.changeId });
+
+    const descendant = await jj.show({ change: change2.changeId });
+    expect(descendant.fileSnapshot['file.txt']).toBe('v2');
+
+    const ancestor = await jj.show({ change: change1.changeId });
+    expect(ancestor.fileSnapshot['file.txt']).toBe('v2');
+  });
+
   it('leaves a leaf change alone (no descendants to propagate to)', async () => {
     await jj.write({ path: 'file.txt', data: 'v1' });
     const change1 = await jj.describe({ message: 'change 1' });
@@ -539,5 +563,41 @@ describe('issue #45 — edit() of an older change rebases its descendants on sna
 
     const change = await jj.show({ change: change1.changeId });
     expect(change.fileSnapshot['file.txt']).toBe('v2');
+  });
+
+  it("preserves a descendant's own file deletion instead of resurrecting it as an empty string", async () => {
+    // _rebuildDescendants() had no way to represent "this file doesn't
+    // exist" separately from "empty content" -- coercing undefined to ''
+    // before diffing meant a descendant that deliberately deleted a file
+    // the parent still has got that file resurrected as ''. This was a
+    // pre-existing, latent bug in the function itself (nothing called it
+    // at all before this issue gave it a real caller), caught by
+    // tests/integration/backout.test.js when a backout change (which
+    // legitimately has no fileSnapshot entry for a removed file at all)
+    // became a descendant of the change it reverses.
+    await jj.write({ path: 'keep.txt', data: 'keep' });
+    await jj.write({ path: 'remove-me.txt', data: 'gone' });
+    const parent = await jj.describe({ message: 'parent' });
+
+    await jj.new({ message: 'child deletes a file' });
+    // Recreate the child with remove-me.txt genuinely absent, matching
+    // what a real deletion (or backout()'s reversal) produces -- not '',
+    // an actual missing key.
+    await jj.write({ path: 'keep.txt', data: 'keep' });
+    const child = await jj.describe({ message: 'child deletes a file' });
+    const childChange = await jj.graph.getChange(child.changeId);
+    delete childChange.fileSnapshot['remove-me.txt'];
+    await jj.graph.updateChange(childChange);
+
+    // Edit the parent (giving it a descendant relationship it already
+    // has) and touch an unrelated file, then edit away -- this is what
+    // triggers _rebuildDescendants on the parent's real descendant.
+    await jj.edit({ changeId: parent.changeId });
+    await jj.write({ path: 'keep.txt', data: 'keep (parent touched something else)' });
+    await jj.edit({ changeId: child.changeId });
+
+    const rebuilt = await jj.show({ change: child.changeId });
+    expect(Object.prototype.hasOwnProperty.call(rebuilt.fileSnapshot, 'remove-me.txt')).toBe(false);
+    expect(rebuilt.fileSnapshot['keep.txt']).toBe('keep (parent touched something else)');
   });
 });

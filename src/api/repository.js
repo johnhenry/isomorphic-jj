@@ -2457,6 +2457,22 @@ export async function createJJ(options) {
             changeSnapshot[previousChangeId] = structuredClone(previousChange);
             previousChange.fileSnapshot = currentSnapshot;
             await graph.updateChange(previousChange);
+
+            // Issue #45: this is the OTHER place a checked-out change's
+            // content gets committed to the graph — not through snapshot()/
+            // autoSnapshotWorkingCopy() at all, but here, inline, when
+            // edit() leaves a change it was checked out on. If that change
+            // isn't a leaf (we'd edit()'d into an ancestor), its descendants
+            // still have the OLD content and need the same rebase-on-edit
+            // treatment applied at the other two commit sites.
+            const descendants = await this._findDescendants(previousChangeId, null);
+            if (descendants.length > 0) {
+              await this._rebuildDescendants(
+                previousChangeId,
+                null,
+                changeSnapshot[previousChangeId].fileSnapshot
+              );
+            }
           }
         }
       }
@@ -4802,30 +4818,78 @@ export async function createJJ(options) {
         const allFiles = new Set([
           ...Object.keys(descendant.fileSnapshot || {}),
           ...Object.keys(parent.fileSnapshot || {}),
+          ...Object.keys(originalParentSnapshot || {}),
         ]);
 
         for (const filePath of allFiles) {
+          const descendantExists = Object.prototype.hasOwnProperty.call(
+            descendant.fileSnapshot || {},
+            filePath
+          );
+          const originalParentExists = Object.prototype.hasOwnProperty.call(
+            originalParentSnapshot || {},
+            filePath
+          );
+          const updatedParentExists = Object.prototype.hasOwnProperty.call(
+            parent.fileSnapshot || {},
+            filePath
+          );
+
+          // A file's EXISTENCE is a separate question from its content —
+          // coercing "doesn't exist" to '' before diffing (the previous
+          // version of this loop did) means a descendant that deliberately
+          // deleted a file the old parent had gets that file resurrected as
+          // an empty string once rebuilt, instead of staying deleted. This
+          // was a real, latent bug: nothing called this function at all
+          // until issue #45 gave it a real caller, so it was never
+          // exercised against a deletion before.
+          if (
+            descendantExists === originalParentExists &&
+            (!descendantExists ||
+              descendant.fileSnapshot[filePath] === originalParentSnapshot[filePath])
+          ) {
+            // Descendant never touched this file relative to its old
+            // parent (same existence + content as before) -- just follow
+            // whatever the updated parent did with it (added, removed, or
+            // changed since the descendant branched off).
+            if (updatedParentExists) newSnapshot[filePath] = parent.fileSnapshot[filePath];
+            continue; // else: stays deleted -- don't add it to newSnapshot
+          }
+
+          if (originalParentExists && !descendantExists) {
+            // Descendant deliberately deleted a file the old parent had —
+            // preserve that deletion rather than resurrecting it.
+            continue;
+          }
+
+          if (!originalParentExists && descendantExists && !updatedParentExists) {
+            // Descendant added a file that didn't exist on either side of
+            // the parent at all -- keep the descendant's own addition.
+            newSnapshot[filePath] = descendant.fileSnapshot[filePath];
+            continue;
+          }
+
+          // Both the descendant and the parent have real content for this
+          // file (whether or not it existed originally) -- do the actual
+          // line-level replay: find which lines the descendant changed
+          // from the OLD parent, then reapply just those lines onto the
+          // NEW parent's content.
           const descendantContent = descendant.fileSnapshot[filePath] || '';
           const originalParentContent = originalParentSnapshot[filePath] || '';
           const updatedParentContent = parent.fileSnapshot[filePath] || '';
 
-          // Find which lines descendant modified from original parent
           const descendantLines = descendantContent.split('\n');
           const originalParentLines = originalParentContent.split('\n');
           const updatedParentLines = updatedParentContent.split('\n');
 
-          // Rebuild file: start with updated parent, apply descendant's modifications
           const resultLines = [...updatedParentLines];
 
-          // Find lines that descendant modified
           for (let i = 0; i < Math.max(descendantLines.length, originalParentLines.length); i++) {
             const descendantLine = i < descendantLines.length ? descendantLines[i] : undefined;
             const originalParentLine =
               i < originalParentLines.length ? originalParentLines[i] : undefined;
 
-            // If descendant modified this line from original parent, apply that modification
             if (descendantLine !== originalParentLine) {
-              // Extend resultLines if needed
               while (resultLines.length <= i) {
                 resultLines.push('');
               }

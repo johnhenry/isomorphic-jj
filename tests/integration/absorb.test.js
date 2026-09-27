@@ -255,13 +255,24 @@ describe('absorb()', () => {
       await jj.edit({ changeId: change1.changeId });
       await jj.write({ path: 'file.txt', data: 'modified' });
 
-      // Return to change2
+      // Return to change2 -- issue #45: change2 now correctly picks up
+      // change1's edit on the way out (real jj's automatic rebase-on-edit),
+      // so at this point change2 already matches change1 exactly. Make a
+      // genuine NEW edit at change2 itself so there's a real diff (not one
+      // manufactured by the staleness bug #45 fixed) for absorb() to fold —
+      // this test's actual intent is "absorb() still works normally in a
+      // session where an ancestor was edited earlier", not "absorb() can
+      // fold back a difference that only exists because a descendant never
+      // picked up its ancestor's edit".
       await jj.edit({ changeId: change2.changeId });
+      await jj.write({ path: 'file.txt', data: 'modified further' });
 
       const result = await jj.absorb();
 
       // Should absorb into change1
       expect(result.affectedChanges).toContain(change1.changeId);
+      const updated = await jj.show({ change: change1.changeId });
+      expect(updated.fileSnapshot['file.txt']).toBe('modified further');
     });
 
     it('should work with describe() to add description', async () => {
