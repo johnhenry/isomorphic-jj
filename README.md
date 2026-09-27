@@ -1020,10 +1020,10 @@ repo/
 
 ## Project Status
 
-**Current Version**: 0.3.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.7.0 before the rename — see the provenance note at the top of this file)
-**Test Coverage**: 1823 tests passing, ~97% statements / 91% branches
+**Current Version**: 1.12.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.8.0 before the rename — see the provenance note at the top of this file, and the CHANGELOG's `1.9.0` entry for how the scoped/unscoped version lineages were merged back together)
+**Test Coverage**: 1874 tests passing, ~97% statements / 90% branches
 **JJ CLI parity**: tracks Jujutsu through v0.45.1
-**Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#family). Not yet 1.0 — API surface can still shift; pin a version and read the CHANGELOG before upgrading.
+**Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#family). Not yet 1.0 in the API-stability sense (the version number is past 1.0 only because merging the scoped/unscoped lineages forced it above the unscoped side's prior ceiling, not because the API is frozen) — API surface can still shift; pin a version and read the CHANGELOG before upgrading.
 
 **Completed:**
 - ✅ v0.1: Core JJ experience (stable IDs, undo, bookmarks, revsets)
@@ -1036,6 +1036,9 @@ repo/
 - ✅ 0.1.0 (post-rename): Parity refresh tracking jj through **v0.44** — `tag.track()`/`tag.untrack()`, the `builtin_log()` revset alias, and `file.search({ nameOnly: true })`; `git_refs()`/`git_head()` documented as deprecated (jj removed both in v0.43). See [CHANGELOG.md](./CHANGELOG.md) for what was deliberately left for a maintainer call (`jj run`, fetch-time remote tag/bookmark import).
 - ✅ 0.2.0: Storage-layer audit fixes — same-process storage locking, `undo()` reverting in-place graph/tag mutations, ambiguous change-id detection, categorized `push()` error codes, a conflict-marker newline fix, atomic protobuf writes, and open-ended revset ranges (`..b`, `a..`, `::`). See [CHANGELOG.md](./CHANGELOG.md).
 - ✅ 0.3.0: Parity refresh tracking jj through **v0.45.1** — a working `/browser` entry (async `createBrowserFS()`, bundle-safe protobuf schema loading, no stray Node-only imports), `undo()`/`operations.restore()` reverting graph rewrites with real progressive undo/redo, `squash()`/`abandon()`/`edit()`/`new()` fully syncing content instead of only metadata, `rebase()` performing a real three-way merge and recording conflicts, and the new `converge()` command (jj v0.45.0) to auto-resolve divergent commits. See [CHANGELOG.md](./CHANGELOG.md).
+- ✅ 0.4.0: `converge()` generalized from pairwise to N-way — any number of divergent copies of one change id resolve in a single call, matching how jj's own underlying engine already treats divergence internally (issue #32). See [CHANGELOG.md](./CHANGELOG.md).
+- ✅ 1.9.0: Scoped (`@johnhenry/isomorphic-jj`) and unscoped (`isomorphic-jj`) version lineages merged into one shared version going forward, with both names dual-published on every release.
+- ✅ 1.9.1 – 1.12.0: Operation-log reliability pass — `undo()`/`operations.restore()` correctness across write/snapshot/squash/rebase/abandon/edit, `log()` visibility fixes, and recording gaps in descendant rebases and conflict-resolution ops (issues #37–#39, #41, #43, #45, #48). See [CHANGELOG.md](./CHANGELOG.md) for the full per-fix breakdown.
 
 See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELOG.md) for the release history.
 

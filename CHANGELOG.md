@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.12.1 — 2026-09-27 — Conflict type shape + README status refresh
+
+A cross-library documentation/typing audit flagged four things to verify
+against current code; two turned out already fixed (`converge()`'s JSDoc
+already documents N-way behavior as of #32/#35's 0.4.0 follow-up), one is
+tracked as a design question instead of guessed at (see the "public,
+untyped internal components" issue on `jj.graph` and its siblings), and
+this release covers the two that were genuinely stale.
+
+### Fixed
+
+- **`Conflict`/`ConflictType` in `src/types.d.ts` didn't match the shape
+  `ConflictModel` actually constructs.** `sides` was typed as `TreeRef[]`
+  (an array of tree hashes); every real `Conflict` object has `sides` as
+  an *object* — `{ left, right }`, `{ base, left, right }`, or (for
+  `converge()`'s N-way case, `ConflictModel.createNWayConflict()`)
+  `{ base, versions }` where `versions` is
+  `Array<{ commitId, content }>`. The interface was also missing
+  `message`, `timestamp`, and the optional `driverFailed`/`driverError`
+  fields that `_createConflict()` actually sets, and `ConflictType` was
+  missing the `'path'` and `'driver-conflict'` values `ConflictModel`
+  uses. Added a `ConflictSides` type covering both the two-way and N-way
+  shapes and corrected `Conflict` to match reality. Type-only change (the
+  `.d.ts` file has no runtime code), so nothing about the library's actual
+  behavior changes — this only fixes what TypeScript consumers see.
+- **README's "Project Status" section was frozen at the pre-`@johnhenry`
+  rename numbering.** It read "Current Version: 0.3.0" (actual:
+  1.12.0), cited "1823 tests" (actual: 1874), and its roadmap stopped at
+  0.3.0 with no mention of 0.4.0's N-way `converge()` (#32/#35), the
+  1.9.0 scoped/unscoped version-lineage merge (#36), or the 1.9.1–1.12.0
+  operation-log reliability pass (#37–#39, #41, #43, #45, #48). Also
+  corrected the provenance note's "reached v1.7.0 before the rename" to
+  the CHANGELOG's own recorded **v1.8.0** ceiling (see the 1.9.0 entry
+  below), and clarified that "Not yet 1.0" refers to API stability, not
+  the version number (which is already past 1.0 purely because merging
+  the two lineages forced it above the unscoped side's prior ceiling).
+  The Node 26 / `engines.node` note was checked too and was already
+  accurate — no change needed there.
+
+### Testing
+
+1874 tests passing, 0 skipped; lint (0 errors), format:check, typecheck,
+and all 12 `examples/*.mjs` green; coverage 97.39% statements / 90.11%
+branches / 99.08% functions / 97.63% lines (branch gate is 90%).
+
 ## 1.12.0 — 2026-09-27 — op-recording gaps left by #43/#45's fixes (#48)
 
 Follow-up to #43/#45 (below). Walking every op backward then forward now
