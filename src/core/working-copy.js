@@ -7,6 +7,43 @@
 import { JJError } from '../utils/errors.js';
 import { validateChangeId, validatePath } from '../utils/validation.js';
 
+/**
+ * Normalize an mtime value to a millisecond epoch number so two stat()
+ * results (or a stat() result and a stored value) can be compared by VALUE
+ * instead of by object identity (see issue #41).
+ *
+ * `fs.promises.stat()` returns a fresh `Date` instance on every call, so two
+ * separate stats of the same unchanged file are never `===`/`!==`-equal even
+ * when the underlying timestamp is identical. Additionally, once a tracked
+ * mtime has been through a `JSON.stringify`/`JSON.parse` round-trip (Storage
+ * persists working-copy state as JSON), a `Date` becomes an ISO string, not a
+ * `Date` — so the stored side of the comparison may be a `Date`, a plain
+ * epoch-ms number (this module now stores numbers going forward), or an ISO
+ * string (older/reloaded-from-disk state). This normalizes all three to a
+ * comparable number.
+ *
+ * Deliberately duck-types the Date case (`typeof value.getTime ===
+ * 'function'`) instead of `value instanceof Date`: Node's built-in `fs`
+ * module constructs `Stats.mtime` using its own realm's `Date`, which is not
+ * always the same `Date` constructor as this module's under test runners
+ * that sandbox each test file in its own VM context (observed under Jest
+ * with `--experimental-vm-modules`) — there, a real `Date` instance from
+ * `fs.promises.stat()` fails `instanceof Date` here even though it's a
+ * genuine Date. Duck-typing survives that realm mismatch.
+ *
+ * @param {Date|number|string|undefined} value
+ * @returns {number}
+ */
+function mtimeMs(value) {
+  if (value === null || value === undefined) return NaN;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return new Date(value).getTime();
+  if (typeof (/** @type {any} */ (value).getTime) === 'function') {
+    return /** @type {any} */ (value).getTime();
+  }
+  return Number(value);
+}
+
 export class WorkingCopy {
   /**
    * @param {Storage} storage - Storage manager instance
@@ -178,8 +215,10 @@ export class WorkingCopy {
       try {
         const stats = await this.fs.promises.stat(fullPath);
 
-        // Fast path: check mtime and size
-        if (stats.mtime !== tracked.mtime || stats.size !== tracked.size) {
+        // Fast path: check mtime and size. Compare by VALUE (see mtimeMs
+        // above) — comparing the raw stat()/stored values with !== is
+        // always "different" even when nothing changed (issue #41).
+        if (mtimeMs(stats.mtime) !== mtimeMs(tracked.mtime) || stats.size !== tracked.size) {
           modified.push(path);
         }
       } catch (error) {
@@ -290,12 +329,19 @@ export class WorkingCopy {
       }
 
       const prev = this.state.fileStates[rel];
-      const next = { mtime: stats.mtime, size: stats.size, mode: stats.mode };
+      // Store mtime as a plain epoch-ms number (not the raw stat() value):
+      // numbers round-trip through JSON exactly, so state reloaded from disk
+      // later compares identically to state still cached in-memory. Goes
+      // through mtimeMs() rather than assuming `.getTime()` exists directly —
+      // some fs implementations (e.g. the in-memory mock used in tests)
+      // return mtime as a plain epoch-ms number already, not a Date (see
+      // mtimeMs above and issue #41).
+      const next = { mtime: mtimeMs(stats.mtime), size: stats.size, mode: stats.mode };
 
       if (!prev) {
         this.state.fileStates[rel] = next;
         added.push(rel);
-      } else if (prev.mtime !== stats.mtime || prev.size !== stats.size) {
+      } else if (mtimeMs(stats.mtime) !== mtimeMs(prev.mtime) || prev.size !== stats.size) {
         this.state.fileStates[rel] = next;
         modified.push(rel);
       }

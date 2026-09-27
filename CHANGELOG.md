@@ -1,5 +1,62 @@
 # Changelog
 
+## 1.9.2 — 2026-09-26 — auto-snapshot mtime comparison (#41)
+
+### Fixed
+
+- **`getModifiedFiles()`/`snapshot()` no longer treat every previously-tracked
+  file as "modified" on every call (#41).** Both compared `fs.stat().mtime`
+  values with `!==`. `mtime` is a `Date`, and `fs.promises.stat()` returns a
+  fresh `Date` instance on every call — two stats of the same, unchanged file
+  are never `===`/`!==`-equal even when the underlying timestamp is
+  identical (object identity, not value equality). Fixed by normalizing both
+  sides through a new `mtimeMs()` helper before comparing, and by storing
+  tracked mtimes as plain epoch-ms numbers going forward (numbers round-trip
+  through the JSON-based `Storage` persistence exactly, unlike `Date`, which
+  serializes to an ISO string and never comes back as a `Date` on reload).
+  `mtimeMs()` deliberately duck-types the Date case (checks for a `.getTime`
+  method) rather than using `instanceof Date`: under Jest's
+  `--experimental-vm-modules`, each test file's `Date` constructor can be a
+  different realm than the one `fs`'s internal `Stats` object was built
+  with, so a real `Date` from `fs.promises.stat()` can fail `instanceof
+  Date` — silently reintroducing the exact bug this fix is for, only inside
+  the test suite that's supposed to catch it.
+
+  **Real-world impact, not just a wrong return value.** Every repository
+  created with a Git backend wraps `graph.updateChange()` in middleware that
+  syncs to Git and mints a new commit (`syncChangeToGit()`). Because
+  `autoSnapshotWorkingCopy()` — which runs before `status()`/`describe()`/
+  `diff()`/`read()`/`file.*` — treated the file list as "always modified", it
+  called `graph.updateChange()` on essentially every one of those calls even
+  when nothing on disk had changed, silently minting a spurious Git commit
+  and changing the working-copy change's `commitId` each time. This is
+  exactly what forced the `{ autoSnapshot: false }` workaround added in
+  `tests/integration/undo-restore-residuals.test.js` for issue #37(c) (see
+  PR #40) — that test's own before/after `commitId` comparisons were being
+  contaminated by these spurious commits. That workaround has been removed
+  now that the underlying bug is fixed; the test passes with auto-snapshot
+  enabled.
+
+  **Why existing tests never caught this.** The in-memory `MockFS` fixture
+  used across almost this whole test suite stores `mtime` as a plain
+  `Date.now()` number, not a `Date` instance — numbers compare by value with
+  `!==`, so `MockFS`-backed tests never exercised the object-identity bug a
+  real filesystem's `Date`-returning `stat()` hits on every call. Added
+  regression tests in `tests/unit/core/working-copy.test.js` using a
+  `RealDateStatFS` wrapper that returns a fresh `Date` instance per `stat()`
+  call (mirroring real `fs` semantics) and asserting that two consecutive
+  `getModifiedFiles()`/`snapshot()` calls with no real file changes in
+  between report zero modified/added/deleted files. Verified against a
+  negative control: reverting just the comparison fix reproduces exactly the
+  "every tracked file looks modified" symptom described in #41.
+
+### Testing
+
+1839 tests passing (2 new regression tests for #41), including the
+previously-`autoSnapshot: false`-gated issue #37(c) test now passing with
+auto-snapshot enabled; lint (0 errors), format:check, typecheck, and build
+all green; all 12 `examples/*.mjs` run clean.
+
 ## 1.9.1 — 2026-09-26 — undo/restore/abandon/squash follow-ups
 
 Three bug-fix follow-ups to 1.9.0's undo/abandon/squash work (#29/#30),
