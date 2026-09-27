@@ -468,8 +468,26 @@ export async function createJJ(options) {
         const wcId = workingCopy.getCurrentChangeId();
         const change = await graph.getChange(wcId);
         if (change) {
+          const oldFileSnapshot = change.fileSnapshot ? structuredClone(change.fileSnapshot) : {};
           change.fileSnapshot = await snapshotFilesystem();
           await graph.updateChange(change);
+
+          // Issue #45: if the working-copy change isn't a leaf (e.g. we
+          // edit()'d into an older change earlier in the session), its
+          // descendants' fileSnapshot still reflects the OLD content and
+          // needs to be rebased onto the content just committed above —
+          // matching real jj's automatic rebase-on-edit. edit() itself is a
+          // pure checkout and never mutates content, so this is the actual
+          // moment content changes and the right place to propagate. `jj`
+          // (not `this`) is used here because this function is a plain
+          // closure, not a method of the `jj` object — but `jj` is a const
+          // in the same enclosing scope and this function only ever runs
+          // after `jj` is fully constructed, so the self-reference is safe
+          // (same pattern used elsewhere in this file, e.g. `jj.new(...)`).
+          const descendants = await jj._findDescendants(wcId, null);
+          if (descendants.length > 0) {
+            await jj._rebuildDescendants(wcId, null, oldFileSnapshot);
+          }
         }
       } catch {
         // Best-effort content refresh; tracking state is already updated.
@@ -2074,9 +2092,21 @@ export async function createJJ(options) {
           changeSnapshot[wcId] = structuredClone(change);
           change.fileSnapshot = currentDiskSnapshot;
           await graph.updateChange(change);
+
+          // Issue #45: if the working-copy change isn't a leaf (e.g. we
+          // edit()'d into an older change earlier in the session), its
+          // descendants' fileSnapshot still reflects the OLD content and
+          // needs to be rebased onto the content just committed above —
+          // matching real jj's automatic rebase-on-edit. edit() itself is a
+          // pure checkout and never mutates content, so this is the actual
+          // moment content changes and the right place to propagate.
+          const descendants = await this._findDescendants(wcId, null);
+          if (descendants.length > 0) {
+            await this._rebuildDescendants(wcId, null, changeSnapshot[wcId].fileSnapshot);
+          }
         }
       } catch {
-        // Best-effort content refresh.
+        // Best-effort content refresh (including descendant propagation).
       }
 
       await oplog.recordOperation({
@@ -4665,9 +4695,27 @@ export async function createJJ(options) {
      * @private
      * @param {string} ancestorId - The ancestor change that was updated
      * @param {string} stopAtChangeId - Don't rebuild this change (usually working copy)
-     * @deprecated Use _rebuildDescendantsWithStates instead
+     * @param {Record<string, string>} [originalAncestorSnapshot] - The
+     *   ancestor's fileSnapshot as it was BEFORE the caller's own
+     *   `graph.updateChange()` for `ancestorId` ran. Callers must invoke this
+     *   function AFTER committing the ancestor's new content (that's the
+     *   natural order — the ancestor's content must exist before its
+     *   descendants can be rebased onto it), but that means a live
+     *   `graph.getChange(ancestorId).fileSnapshot` read inside this function
+     *   would already see the NEW content. For the ancestor's DIRECT
+     *   children, this function compares each descendant's stale content
+     *   against "the original parent state" to figure out which lines are
+     *   the descendant's own edits; if that "original" state were actually
+     *   the already-new ancestor content, every line of the stale
+     *   descendant would look like a deliberate edit (stale != new) and get
+     *   preserved verbatim — silently reproducing the staleness instead of
+     *   fixing it. Passing the pre-mutation snapshot here lets the ancestor's
+     *   direct children be diffed against the correct baseline. Deeper
+     *   descendants are unaffected (their own immediate parent hasn't been
+     *   mutated yet when this function reads it, so the live read is
+     *   correct for them). Optional for backward compatibility.
      */
-    async _rebuildDescendants(ancestorId, stopAtChangeId) {
+    async _rebuildDescendants(ancestorId, stopAtChangeId, originalAncestorSnapshot) {
       // Find all descendants of ancestorId
       const allChanges = graph.getAll();
 
@@ -4675,11 +4723,16 @@ export async function createJJ(options) {
       const originalParentStates = new Map();
       for (const change of allChanges) {
         if (change.parents && change.parents.length > 0) {
-          const parent = await graph.getChange(change.parents[0]);
+          const parentId = change.parents[0];
+          const parent = await graph.getChange(parentId);
           if (parent) {
+            const parentSnapshot =
+              parentId === ancestorId && originalAncestorSnapshot !== undefined
+                ? JSON.parse(JSON.stringify(originalAncestorSnapshot))
+                : JSON.parse(JSON.stringify(parent.fileSnapshot || {}));
             originalParentStates.set(change.changeId, {
-              parentId: change.parents[0],
-              parentSnapshot: JSON.parse(JSON.stringify(parent.fileSnapshot || {})),
+              parentId,
+              parentSnapshot,
             });
           }
         }

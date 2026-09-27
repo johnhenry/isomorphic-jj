@@ -1,5 +1,79 @@
 # Changelog
 
+## 1.11.0 — 2026-09-26 — edit() of an older change rebases its descendants (#45)
+
+Part 5 of #43 (parts 1-4 shipped in 1.10.0 / #44), previously punted because
+an initial attempt broke `tests/integration/absorb.test.js`'s "should work
+after edit()" test.
+
+### Fixed
+
+- **`snapshot()` and `autoSnapshotWorkingCopy()` now propagate an edited
+  non-leaf change's new content onto its descendants (#45).** `edit()`
+  itself never touches content — it's a pure checkout (moves `@`, syncs disk
+  to the target's existing `fileSnapshot`). The actual moment a change's
+  *committed* content changes is inside the public `snapshot()` and the
+  internal `autoSnapshotWorkingCopy()`, which reconcile on-disk state into
+  the CURRENT working-copy change's `fileSnapshot`. If you `edit()`'d into a
+  change that already had descendants and then modified a file, both
+  functions updated only that change's own `fileSnapshot` and never
+  propagated the update, so the descendants stayed permanently stale unless
+  you happened to `edit()` directly into one of them (which just re-synced
+  disk FROM its own still-stale snapshot — no help). Both now check for
+  descendants (`_findDescendants`) after committing the new content and, if
+  any exist, rebase them onto it (`_rebuildDescendants`) — matching real
+  jj's automatic rebase-on-edit. `edit()` was correctly left untouched: it
+  never mutates content on the way IN, so it was never the right hook point.
+- **Un-deprecated `_rebuildDescendants()` and fixed a real-content-vs-
+  synthetic-edit ordering bug in it (#45).** This line-level, three-way-
+  merge-style rebase helper had been marked `@deprecated` with zero callers
+  (`absorb()` uses a different function, `_rebuildDescendantsWithStates`) —
+  reused here instead of writing a second rebase implementation. Its first
+  pass builds "the original parent state" for every change by reading the
+  parent's CURRENT `fileSnapshot` live from the graph. Called (as it must
+  be) *after* the ancestor's own `graph.updateChange()` has already written
+  its new content, that live read captures the NEW content as if it were
+  the pre-edit baseline for the ancestor's DIRECT children — every line of
+  a stale descendant then looks like the descendant's own deliberate edit
+  (stale != "original"), so the old content gets preserved verbatim: a
+  silent no-op that reproduces the exact bug rather than fixing it. Added an
+  optional third parameter, `originalAncestorSnapshot`, that callers supply
+  with the ancestor's pre-mutation snapshot; the first pass uses it in place
+  of the live read specifically for the ancestor's direct children. Deeper
+  descendants are unaffected (their own immediate parent hasn't been mutated
+  yet when the function reads it, so the live read is correct for them).
+- **`tests/integration/absorb.test.js`'s "should work after edit()" required
+  no change, on inspection.** The design going into this fix assumed that
+  fixture would break, on the theory that `edit()`-ing away from an edited
+  ancestor would now sync its descendant to match (leaving `absorb()`
+  nothing to do). Running it first (as required before touching a passing
+  test) showed it still passes unmodified: `edit()`'s own checkout-time
+  bookkeeping — capturing disk state for the change being switched AWAY FROM
+  so a later checkout back into it starts from the right place — is a
+  separate code path inside `edit()` that does not go through `snapshot()`/
+  `autoSnapshotWorkingCopy()`, and per this fix's scope `edit()` itself is
+  untouched. So "`write()` then immediately `edit()`-away" alone never
+  reaches the new propagation logic, and the fixture's manufactured diff
+  survives exactly as before. Left as-is.
+
+### Testing
+
+New file `tests/integration/issue-43-restore-reliability.test.js`, describe
+block "issue #45": edit into a non-leaf change, modify a file, and confirm
+the descendant picks up the edit (a) via an explicit `jj.snapshot()` call,
+and (b) via `autoSnapshotWorkingCopy()` triggered by `jj.status()` after an
+out-of-band disk write (a same-size `jj.write()` wouldn't reach this path —
+`write()` immediately updates the tracked mtime/size itself, so the
+disk-walk would see nothing "modified") — in both cases checked via
+`jj.show()` without ever `edit()`-ing into the descendant. A third test
+confirms a leaf change (no descendants) still works, exercising the other
+side of the new `descendants.length > 0` branch. Negative control: with the
+`src/api/repository.js` changes reverted, both new propagation tests fail
+(stale pre-edit content returned) and the leaf-change test still passes;
+reapplying the fix makes all three pass. 1862 tests passing (3 new); lint
+(0 errors), format:check, typecheck, and build all green; all 12
+`examples/*.mjs` run clean; branch coverage 90.1% (gate: 90%).
+
 ## 1.10.0 — 2026-09-26 — operations.restore() reliability (#43)
 
 A substantial follow-up to 1.9.1/1.9.2's undo/restore work (#37/#38/#39/#41):

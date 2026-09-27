@@ -1,6 +1,6 @@
 {
   "name": "@johnhenry/isomorphic-jj",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "Jujutsu (jj) version control semantics in pure JavaScript — stable change IDs, fearless undo, no staging area — for Node.js and browsers",
   "type": "module",
   "bin": {
