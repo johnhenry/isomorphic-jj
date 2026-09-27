@@ -316,6 +316,38 @@ export async function createJJ(options) {
   };
 
   /**
+   * Compute the full current set of "head" changeIds — every non-abandoned
+   * change with no non-abandoned child. Used to record an accurate
+   * `view.heads` when an operation runs (issue #43).
+   *
+   * Before this helper existed, several oplog-recording call sites
+   * (squash(), rebase()/moveChange(), abandon()) hand-wrote a single-
+   * element or empty `heads` array covering only the changeId(s) that
+   * specific call happened to touch. That silently dropped any OTHER
+   * live head the operation didn't itself touch (e.g. a sibling branch
+   * left untouched by an abandon()/squash() of a different branch — "two
+   * sibling changes report only one head between them"), and squash() in
+   * particular recorded the OLD destination changeId instead of the fresh
+   * working-copy change it creates on top of it when squashing @ ("after
+   * a squash [heads] points at the parent instead of the new tip").
+   *
+   * @returns {Promise<string[]>}
+   */
+  const computeCurrentHeads = async () => {
+    await graph.load();
+    const allChanges = await graph.getAllChanges();
+    const nonAbandoned = allChanges.filter((/** @type {any} */ c) => !c.abandoned);
+    const nonAbandonedIds = new Set(nonAbandoned.map((/** @type {any} */ c) => c.changeId));
+    const heads = [];
+    for (const change of nonAbandoned) {
+      const children = graph.getChildren(change.changeId);
+      const hasLiveChild = children.some((/** @type {string} */ id) => nonAbandonedIds.has(id));
+      if (!hasLiveChild) heads.push(change.changeId);
+    }
+    return heads;
+  };
+
+  /**
    * Re-parent every child of `changeId` onto `newParents` instead — used
    * when a change is being elided from the graph (abandon(), issue #30;
    * converge(), issue #32) so its children don't end up pointing at
@@ -345,6 +377,18 @@ export async function createJJ(options) {
       await graph.updateChange(child);
     }
   };
+
+  // NOTE (issue #43(5), punted — see PR description): an earlier version of
+  // this file added a `rebaseDescendantsOntoUpdatedParent()` helper, called
+  // from edit(), to propagate an edited ancestor's content onto descendants
+  // automatically. It was reverted: it directly conflicts with absorb()'s
+  // job (folding a working-copy edit back into an ancestor it actually
+  // belongs to) — with the auto-rebase in place, edit()+write()+edit()-away
+  // already changes the descendant before absorb() ever runs, so absorb()
+  // finds nothing left to do (see tests/integration/absorb.test.js
+  // "should work after edit()", which regressed against this). Fixing
+  // #43(5) properly needs to account for that interaction rather than
+  // duplicate it; left for a follow-up.
 
   /**
    * Determine which operation a fresh undo() call should revert, matching
@@ -781,6 +825,17 @@ export async function createJJ(options) {
         });
       }
 
+      await workingCopy.load();
+
+      // Capture disk state right before this write mutates it, and record
+      // an operation for it (issue #43(1)): write() previously recorded NO
+      // operation at all, so an edit typed into a change's working copy
+      // could never be rewound by undo()/operations.restore() regardless
+      // of which op you targeted — the change kept its post-edit content
+      // forever. Mirrors the "snapshot before, record after" pattern every
+      // other mutator in this file uses (see describe(), moveChange()).
+      const fileSnapshotBefore = await snapshotFilesystem();
+
       const fullPath = `${dir}/${args.path}`;
 
       // Ensure directory exists
@@ -796,12 +851,25 @@ export async function createJJ(options) {
       await fs.promises.writeFile(fullPath, data, 'utf8');
 
       // Track the file in working copy
-      await workingCopy.load();
       const stats = await fs.promises.stat(fullPath);
       await workingCopy.trackFile(args.path, {
         mtime: stats.mtime,
         size: stats.size,
         mode: stats.mode,
+      });
+
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: `write ${args.path}`,
+        parents: [],
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: await computeCurrentHeads(),
+          workingCopy: workingCopy.getCurrentChangeId(),
+          fileSnapshot: fileSnapshotBefore, // Store filesystem state from before this write
+        },
       });
 
       // Return useful information about the written file
@@ -1232,6 +1300,15 @@ export async function createJJ(options) {
     async moveChange(args) {
       await graph.load();
 
+      // Capture disk state right before this rebase mutates anything, so
+      // undo()/redo()/operations.restore() can rewind past it — see issue
+      // #43(1): rebase()/moveChange() previously recorded no "files
+      // before" snapshot at all, so restoring to a point right before a
+      // rebase ran had no on-disk state to fall back to and would instead
+      // pick up whatever a LATER operation happened to record (the wrong
+      // point in time).
+      const fileSnapshotBefore = await snapshotFilesystem();
+
       // Support multiple parameter names for flexibility
       const changeId = args.changeId || args.from || args.source;
       const newParent = args.newParent || args.to || args.destination;
@@ -1344,6 +1421,32 @@ export async function createJJ(options) {
         await conflicts.addConflict(conflict);
       }
 
+      // Materialize real conflict-marker text into the moved change's file
+      // content — issue #43(3): rebase()/moveChange() used to record the
+      // conflict correctly as DATA (via conflicts.addConflict() above) but
+      // left the file's content exactly as it was pre-rebase ("ours"),
+      // never writing marker text into change.fileSnapshot or, when this
+      // change is the checked-out working copy, onto disk. Reuses
+      // conflicts.markers()'s own marker-formatting logic (the same format
+      // jj.conflicts.markers() already returns) instead of re-deriving
+      // marker text a second way.
+      if (detectedConflicts.length > 0) {
+        change.fileSnapshot = { ...(change.fileSnapshot || {}) };
+        const isCheckedOut = changeId === workingCopy.getCurrentChangeId();
+        for (const conflict of detectedConflicts) {
+          const markerText = await jj.conflicts.markers({ conflictId: conflict.conflictId });
+          change.fileSnapshot[conflict.path] = markerText;
+          if (isCheckedOut) {
+            const fullPath = path.join(dir, conflict.path);
+            const pathParts = conflict.path.split('/');
+            if (pathParts.length > 1) {
+              await mkdirp(fs, path.join(dir, pathParts.slice(0, -1).join('/')));
+            }
+            await fs.promises.writeFile(fullPath, markerText, 'utf8');
+          }
+        }
+      }
+
       // Update parent
       change.parents = [newParent];
       await graph.updateChange(change);
@@ -1359,8 +1462,9 @@ export async function createJJ(options) {
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: [],
+          heads: await computeCurrentHeads(),
           workingCopy: workingCopy.getCurrentChangeId(),
+          fileSnapshot: fileSnapshotBefore,
         },
       });
 
@@ -1815,6 +1919,16 @@ export async function createJJ(options) {
         description: args.message || '(no description)',
         timestamp: new Date().toISOString(),
         fileSnapshot: initialSnapshot, // Initialize with parent's snapshot
+        // Issue #43(2): marks this as an internal, synthetic artifact
+        // rather than something the user actually created, so the revset
+        // engine's orphan-visibility filter (_computeHiddenOrphans) can
+        // still hide it after it's un-referenced by a later undo()/
+        // operations.restore(), even if some out-of-band mutation (e.g.
+        // write()+snapshot() before the undo unwinds this far) has since
+        // made it look "non-empty" relative to its parent. A real
+        // description (args.message, or a later describe()) still makes
+        // it visible regardless, via the UNDESCRIBED check.
+        autoCreated: true,
       };
 
       // Dispatch change:creating event (preventable)
@@ -1935,17 +2049,51 @@ export async function createJJ(options) {
       await graph.load();
       await workingCopy.load();
       const result = await workingCopy.snapshot();
+
+      // Disk content itself is not mutated by this call (it's a read,
+      // not a write) — the same value is therefore valid both as the
+      // refreshed change.fileSnapshot AND as the recorded operation's
+      // `view.fileSnapshot` "before" value (nothing on disk changes
+      // between the two).
+      const wcId = workingCopy.getCurrentChangeId();
+      const currentDiskSnapshot = await snapshotFilesystem();
+
       // Refresh the working-copy change's content snapshot from disk.
+      /** @type {Record<string, any>} */
+      const changeSnapshot = {};
       try {
-        const wcId = workingCopy.getCurrentChangeId();
         const change = await graph.getChange(wcId);
         if (change) {
-          change.fileSnapshot = await snapshotFilesystem();
+          // Snapshot BEFORE mutating so undo()/redo()/operations.restore()
+          // can reverse this content refresh — see issue #43(1):
+          // snapshot() previously mutated `change.fileSnapshot` in place
+          // with no "before" capture and recorded no operation at all, so
+          // computeGraphReversal() had nothing to find for this changeId
+          // if a restore()/undo() landed between an out-of-band edit and
+          // the next real command.
+          changeSnapshot[wcId] = structuredClone(change);
+          change.fileSnapshot = currentDiskSnapshot;
           await graph.updateChange(change);
         }
       } catch {
         // Best-effort content refresh.
       }
+
+      await oplog.recordOperation({
+        timestamp: new Date().toISOString(),
+        user: await getUserOplogInfo(),
+        description: 'snapshot working copy',
+        parents: [],
+        changeSnapshot,
+        view: {
+          bookmarks: {},
+          remoteBookmarks: {},
+          heads: await computeCurrentHeads(),
+          workingCopy: wcId,
+          fileSnapshot: currentDiskSnapshot,
+        },
+      });
+
       return result;
     },
 
@@ -2409,8 +2557,20 @@ export async function createJJ(options) {
         const current = await graph.getChange(changeId);
         if (current) redoChangeSnapshot[changeId] = current;
       }
+      // Capture disk state right before this undo() runs. Used both as
+      // `redoFileSnapshot` (for a later redo() — only meaningful when this
+      // reversal actually touches files) AND, unconditionally, as THIS
+      // undo operation's own `view.fileSnapshot` "before" value below —
+      // see issue #43(1): undo()/redo()/operations.restore() used to
+      // record `view: landingView` verbatim, i.e. reusing the LANDING
+      // operation's own recorded fileSnapshot (disk state before THAT op
+      // ran) instead of disk state before THIS undo ran. A later
+      // restore()/undo() scanning forward past this one would then pick
+      // up that stale, wrong snapshot instead of what was actually on disk
+      // right before this undo executed.
+      const diskSnapshotBeforeThisOp = await snapshotFilesystem();
       const redoFileSnapshot =
-        reversal.fileSnapshot !== undefined ? await snapshotFilesystem() : undefined;
+        reversal.fileSnapshot !== undefined ? diskSnapshotBeforeThisOp : undefined;
       let redoConflictsSnapshot;
       if (reversal.conflictsSnapshot !== undefined) {
         await conflicts.load();
@@ -2451,7 +2611,7 @@ export async function createJJ(options) {
         redoFileSnapshot,
         redoConflictsSnapshot,
         parents: [],
-        view: landingView,
+        view: { ...landingView, fileSnapshot: diskSnapshotBeforeThisOp },
       });
 
       const restoredFileCount =
@@ -2545,6 +2705,15 @@ export async function createJJ(options) {
           await baseGraph.updateChange(snapshot);
         }
       }
+
+      // Capture disk state right before THIS redo() mutates it — see issue
+      // #43(1)/the matching fix in undo(): `view: redoneView` below reuses
+      // the ORIGINAL (re-applied) operation's own recorded pointers, but
+      // its `fileSnapshot` sub-field must reflect disk state before THIS
+      // redo ran, not before that original operation ran, or a later
+      // restore()/undo() scanning forward past this redo would pick up a
+      // stale, wrong snapshot.
+      const diskSnapshotBeforeThisOp = await snapshotFilesystem();
       if (undoOp.redoFileSnapshot !== undefined) {
         await syncWorkingCopyFiles(undoOp.redoFileSnapshot);
       }
@@ -2565,7 +2734,7 @@ export async function createJJ(options) {
         redoOf: undoOp.id,
         changeSnapshot: undoChangeSnapshot,
         parents: [],
-        view: redoneView,
+        view: { ...redoneView, fileSnapshot: diskSnapshotBeforeThisOp },
       });
 
       const restoredFileCount =
@@ -2871,6 +3040,17 @@ export async function createJJ(options) {
           if (current) changeSnapshot[changeId] = current;
         }
 
+        // Capture disk state right before THIS restore() mutates it — see
+        // issue #43(1)/the matching fix in undo()/redo(): recording
+        // `view: targetOp.view` verbatim reused targetOp's OWN recorded
+        // `fileSnapshot` (disk state before targetOp ran), not disk state
+        // before THIS restore ran. A later restore()/undo() scanning
+        // forward past this one would then pick up that stale, wrong
+        // snapshot instead of what was actually on disk right before this
+        // restore executed — this is exactly the "forward restore to
+        // 'edit tip' lost style.css" repro.
+        const diskSnapshotBeforeThisOp = await snapshotFilesystem();
+
         await applyGraphReversal(reversal);
 
         // Record this restoration as a new operation
@@ -2880,7 +3060,7 @@ export async function createJJ(options) {
           description: `restore to operation ${args.operation}`,
           parents: [],
           changeSnapshot,
-          view: targetOp.view,
+          view: { ...targetOp.view, fileSnapshot: diskSnapshotBeforeThisOp },
         });
 
         return {
@@ -3116,6 +3296,15 @@ export async function createJJ(options) {
       await workingCopy.load();
       await userConfig.load();
 
+      // Capture disk state right before this squash mutates anything, so
+      // undo()/redo()/operations.restore() can rewind past it — see issue
+      // #43(1): squash() previously recorded no "files before" snapshot at
+      // all, so restoring to a point right before a squash ran had no
+      // recorded on-disk state and would fall through to whatever a LATER
+      // operation happened to record instead (the repro: a forward
+      // restore to "edit tip" lost `style.css`).
+      const fileSnapshotBefore = await snapshotFilesystem();
+
       // Support 'into' as alias for 'dest' (matches JJ CLI)
       const dest = args.into || args.dest;
 
@@ -3247,6 +3436,18 @@ export async function createJJ(options) {
           // every on-disk file as untracked/new until something re-wrote
           // it and triggered a fresh auto-snapshot.
           fileSnapshot: { ...destChange.fileSnapshot },
+          // Marks this as an internal, synthetic artifact rather than
+          // something the user actually created — issue #43(2): if this
+          // squash is later undone, this change becomes unreferenced, and
+          // by then `destChange` may have been reverted to pre-squash
+          // content, making this change look "non-empty" relative to its
+          // (now-reverted) parent even though it never held any real user
+          // content of its own. The revset engine's orphan-visibility
+          // filter (_computeHiddenOrphans) treats `autoCreated` as
+          // sufficient on its own (given it's also unreferenced and
+          // undescribed) rather than re-diffing against a parent that may
+          // no longer resemble what this change was actually created from.
+          autoCreated: true,
         };
 
         await graph.addChange(newChange); // Middleware will sync to Git
@@ -3269,8 +3470,18 @@ export async function createJJ(options) {
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: [destChangeId],
+          // issue #43(1): this used to hard-code `[destChangeId]` — wrong
+          // whenever squash() created a fresh working-copy change on top
+          // of dest (the real new tip was `newWorkingCopyId`, not
+          // `destChangeId` itself), and incomplete whenever a sibling head
+          // elsewhere in the graph existed and wasn't touched by this
+          // squash at all ("two sibling changes report only one head
+          // between them"). computeCurrentHeads() reflects the WHOLE
+          // repo's actual head set after this squash, not just the
+          // changeId(s) this call happened to touch.
+          heads: await computeCurrentHeads(),
           workingCopy: newWorkingCopyId,
+          fileSnapshot: fileSnapshotBefore,
         },
       });
 
@@ -3342,6 +3553,12 @@ export async function createJJ(options) {
       // abandoning any OTHER change must leave @ exactly where it was.
       const wasWorkingCopy = changeId === workingCopy.getCurrentChangeId();
 
+      // Capture disk state right before this abandon mutates anything, so
+      // undo()/redo()/operations.restore() can rewind past it — see issue
+      // #43(1): abandon() previously recorded no "files before" snapshot
+      // at all.
+      const fileSnapshotBefore = await snapshotFilesystem();
+
       // Dispatch change:abandoning event (preventable)
       await dispatchEventAsync(jj, 'change:abandoning', {
         operation: 'abandon',
@@ -3376,8 +3593,16 @@ export async function createJJ(options) {
         view: {
           bookmarks: {},
           remoteBookmarks: {},
-          heads: [],
+          // issue #43(1): this used to hard-code `[]`, dropping every live
+          // head from the recorded operation (including any untouched
+          // sibling branch — "two sibling changes report only one head
+          // between them"). computeCurrentHeads() reflects the actual
+          // repo-wide head set right after this abandon (and its
+          // reparenting) ran, before the compensating jj.new() below (if
+          // any) records its own separate operation.
+          heads: await computeCurrentHeads(),
           workingCopy: workingCopy.getCurrentChangeId(),
+          fileSnapshot: fileSnapshotBefore,
         },
       });
 
@@ -5639,6 +5864,32 @@ export async function createJJ(options) {
           throw new JJError('CONFLICT_NOT_FOUND', `Conflict ${args.conflictId} not found`);
         }
 
+        // Snapshot BEFORE mutating so undo()/redo()/operations.restore()
+        // can reverse this resolution — issue #43(4): conflicts.resolve()
+        // previously recorded no operation at all, so resolving a conflict
+        // could never be undone: no changeSnapshot of the working-copy
+        // change's content, no conflictsSnapshot of the pre-resolve
+        // conflict state, and no fileSnapshot of the on-disk content
+        // before the resolved content was written.
+        await graph.load();
+        await workingCopy.load();
+        // structuredClone matters here (unlike the read-only conflictsSnapshot
+        // capture in moveChange()/merge()): resolveConflict() below mutates
+        // the SAME conflict object in place (`conflict.resolved = true`),
+        // and Object.fromEntries() on the live Map would otherwise leave
+        // this "before" snapshot holding a reference to that very object —
+        // corrupting it into already showing `resolved: true` by the time
+        // it's recorded.
+        const conflictsSnapshotBefore = structuredClone({
+          conflicts: Object.fromEntries(conflicts.conflicts),
+          fileConflicts: Object.fromEntries(conflicts.fileConflicts),
+        });
+        const fileSnapshotBefore = await snapshotFilesystem();
+        const wcId = workingCopy.getCurrentChangeId();
+        const wcChange = await graph.getChange(wcId);
+        /** @type {Record<string, any>} */
+        const changeSnapshot = wcChange ? { [wcId]: structuredClone(wcChange) } : {};
+
         let resolvedContent;
 
         // v0.5: Support different resolution methods
@@ -5681,6 +5932,36 @@ export async function createJJ(options) {
         // Mark conflict as resolved
         await conflicts.resolveConflict(args.conflictId, 'manual');
         await conflicts.save();
+
+        // Refresh the working-copy change's own fileSnapshot to match the
+        // resolved on-disk content (conflicted files always live under
+        // the checked-out working copy — see the writeFile above), so
+        // undo()/restore() has an accurate "after" state to compare
+        // against, and log()/read() see the resolution immediately rather
+        // than waiting for the next auto-snapshot.
+        if (wcChange) {
+          wcChange.fileSnapshot = {
+            ...(wcChange.fileSnapshot || {}),
+            [conflict.path]: resolvedContent,
+          };
+          await graph.updateChange(wcChange);
+        }
+
+        await oplog.recordOperation({
+          timestamp: new Date().toISOString(),
+          user: await getUserOplogInfo(),
+          description: `resolve conflict ${args.conflictId} (${conflict.path})`,
+          parents: [],
+          changeSnapshot,
+          conflictsSnapshot: conflictsSnapshotBefore,
+          view: {
+            bookmarks: {},
+            remoteBookmarks: {},
+            heads: await computeCurrentHeads(),
+            workingCopy: wcId,
+            fileSnapshot: fileSnapshotBefore,
+          },
+        });
 
         return { resolved: true };
       },

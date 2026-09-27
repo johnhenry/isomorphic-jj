@@ -1107,11 +1107,39 @@ export class RevsetEngine {
       return parentKeys.every((k) => parentSnapshot[k] === ownSnapshot[k]);
     };
 
+    // issue #43(2): the original #37(b) rule above (unreachable + isEmpty +
+    // undescribed) only hides an orphan while it still happens to have
+    // zero file diff versus its CURRENT parent. Two real shapes slip past
+    // that once undo()/operations.restore() are involved, because both are
+    // purely internal rewrite/undo artifacts that were never "empty" in
+    // any way a user would recognize — they simply never held real user
+    // content of their own, and a later revert of something else can make
+    // isEmpty() disagree even though nothing about THIS change changed:
+    //
+    //   1. squash() creates a fresh empty `@` on top of `dest` when
+    //      squashing the working copy. If that squash is later undone,
+    //      the fresh `@` becomes unreferenced — but if `dest` itself gets
+    //      reverted back to its pre-squash content by the SAME undo,
+    //      isEmpty() now compares the orphan's (frozen, post-squash)
+    //      fileSnapshot against dest's (reverted, pre-squash) one and
+    //      finds a mismatch, even though the orphan is exactly as
+    //      "discardable" as it was the instant it was created.
+    //   2. new() creates a fresh empty change on top of the previous `@`.
+    //      If something writes into it (write()/snapshot()) before an
+    //      undo() unwinds back past the new(), the orphan is left with
+    //      real file content that no longer matches its parent, even
+    //      though the user never gave it a real description.
+    //
+    // Changes created by squash()/new() are tagged `autoCreated: true` at
+    // creation (see squash()/new() in repository.js) specifically so this
+    // filter can hide them on that basis alone — still gated on being
+    // unreachable and undescribed, so a change the user actually described
+    // (or that's still live) is never hidden by this rule.
     const hidden = new Set();
     for (const change of allChanges) {
       if (
         !reachable.has(change.changeId) &&
-        isEmpty(change) &&
+        (isEmpty(change) || change.autoCreated) &&
         UNDESCRIBED.has(change.description)
       ) {
         hidden.add(change.changeId);
