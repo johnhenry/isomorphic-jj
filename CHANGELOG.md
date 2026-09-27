@@ -42,37 +42,76 @@ after edit()" test.
   of the live read specifically for the ancestor's direct children. Deeper
   descendants are unaffected (their own immediate parent hasn't been mutated
   yet when the function reads it, so the live read is correct for them).
-- **`tests/integration/absorb.test.js`'s "should work after edit()" required
-  no change, on inspection.** The design going into this fix assumed that
-  fixture would break, on the theory that `edit()`-ing away from an edited
-  ancestor would now sync its descendant to match (leaving `absorb()`
-  nothing to do). Running it first (as required before touching a passing
-  test) showed it still passes unmodified: `edit()`'s own checkout-time
-  bookkeeping — capturing disk state for the change being switched AWAY FROM
-  so a later checkout back into it starts from the right place — is a
-  separate code path inside `edit()` that does not go through `snapshot()`/
-  `autoSnapshotWorkingCopy()`, and per this fix's scope `edit()` itself is
-  untouched. So "`write()` then immediately `edit()`-away" alone never
-  reaches the new propagation logic, and the fixture's manufactured diff
-  survives exactly as before. Left as-is.
+- **`edit()`'s OWN inline content-commit — a third site the first pass
+  missed — now propagates too (#45).** There are three places a checked-out
+  change's content actually gets committed, not two: alongside the public
+  `snapshot()` and the internal `autoSnapshotWorkingCopy()` above, `edit()`
+  has its own separate inline step that snapshots disk for the change being
+  switched AWAY FROM and commits it via `graph.updateChange()` directly —
+  entirely bypassing both other functions. The first pass explicitly left
+  `edit()` untouched, on the theory (recorded in this same entry, in an
+  earlier draft) that this site was pure checkout bookkeeping unrelated to
+  content commits, and that `tests/integration/absorb.test.js`'s "should
+  work after edit()" would therefore keep passing unmodified. Both halves of
+  that theory were wrong: this inline step *is* a real content commit (it's
+  literally how `write()`-then-`edit()`-away ever reaches the graph at all,
+  since `write()` itself only touches disk), and it needed the exact same
+  descendant-propagation treatment as the other two sites. Once added, the
+  `absorb.test.js` collision the very first attempt at #45 hit *did*
+  materialize here — confirming this was the actual site that original
+  attempt (and this issue's own motivating repro: "edit an ancestor, modify
+  it, edit back") was about all along.
+- **Fixed the `absorb.test.js` fixture, not the feature.** Traced exactly
+  why: "should work after edit()" wrote `file.txt` on `change1`, edited away
+  to `change2`, then called `absorb()` expecting it to fold `change2`'s
+  (stale) content back into `change1`. That "diff" only existed because
+  `change2` hadn't picked up `change1`'s edit — precisely the bug being
+  fixed. Once fixed, `change2` correctly matches `change1` the moment you
+  edit away, the manufactured diff disappears, and `absorb()` correctly
+  finds nothing to do. Updated the fixture to make a genuine *new* edit at
+  `change2` after returning to it, so `absorb()` has a real, bug-independent
+  diff to fold — preserving the test's actual intent ("absorb still works
+  normally in a session where an ancestor was edited earlier") without
+  depending on the bug.
+- **Fixed a second, pre-existing bug in `_rebuildDescendants()` that this
+  same follow-up surfaced: file deletions were resurrected as empty
+  strings.** The function had no way to represent "this file doesn't exist"
+  separately from "empty content" — every file was coerced with `|| ''`
+  before diffing. A descendant that deliberately deleted a file the parent
+  still has (e.g. `backout()`'s reversal change, which legitimately has no
+  `fileSnapshot` entry at all for a removed file) got that file rebuilt as
+  `''` instead of staying deleted, breaking
+  `tests/integration/backout.test.js`'s two file-addition-reversal tests.
+  This was always latent — `_rebuildDescendants()` had zero callers at all
+  before this issue gave it a real one, so the bug was never exercised.
+  Fixed by tracking each file's existence (`hasOwnProperty`, not `||`) on
+  all three sides (descendant, original parent, updated parent) and
+  handling "descendant deleted it," "descendant added it fresh," and "both
+  sides have real content" as distinct cases, rather than collapsing all of
+  them into one string-diff.
 
 ### Testing
 
 New file `tests/integration/issue-43-restore-reliability.test.js`, describe
 block "issue #45": edit into a non-leaf change, modify a file, and confirm
 the descendant picks up the edit (a) via an explicit `jj.snapshot()` call,
-and (b) via `autoSnapshotWorkingCopy()` triggered by `jj.status()` after an
+(b) via `autoSnapshotWorkingCopy()` triggered by `jj.status()` after an
 out-of-band disk write (a same-size `jj.write()` wouldn't reach this path —
 `write()` immediately updates the tracked mtime/size itself, so the
-disk-walk would see nothing "modified") — in both cases checked via
-`jj.show()` without ever `edit()`-ing into the descendant. A third test
-confirms a leaf change (no descendants) still works, exercising the other
-side of the new `descendants.length > 0` branch. Negative control: with the
-`src/api/repository.js` changes reverted, both new propagation tests fail
-(stale pre-edit content returned) and the leaf-change test still passes;
-reapplying the fix makes all three pass. 1862 tests passing (3 new); lint
-(0 errors), format:check, typecheck, and build all green; all 12
-`examples/*.mjs` run clean; branch coverage 90.1% (gate: 90%).
+disk-walk would see nothing "modified"), and (c) via `edit()`-away alone
+with no explicit `snapshot()`/`status()` call in between — all three checked
+via `jj.show()`. A fourth test confirms a leaf change (no descendants) still
+works, exercising the other side of the `descendants.length > 0` branch. A
+fifth test constructs a descendant that deliberately deleted a file and
+confirms rebuilding it preserves that deletion instead of resurrecting an
+empty string. Negative controls: with the `src/api/repository.js` changes
+reverted, the propagation tests fail with stale pre-edit content, the
+deletion test fails with a resurrected `''`, and the leaf-change test still
+passes; reapplying the fix makes all five pass, and
+`tests/integration/backout.test.js`'s two previously-broken tests pass
+again too. 1864 tests passing; lint (0 errors), format:check, typecheck,
+and build all green; all 12 `examples/*.mjs` run clean; branch coverage
+90.06% (gate: 90%).
 
 ## 1.10.0 — 2026-09-26 — operations.restore() reliability (#43)
 
