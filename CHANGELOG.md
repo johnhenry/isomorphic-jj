@@ -1,5 +1,131 @@
 # Changelog
 
+## 1.10.0 — 2026-09-26 — operations.restore() reliability (#43)
+
+A substantial follow-up to 1.9.1/1.9.2's undo/restore work (#37/#38/#39/#41):
+five distinct gaps that all fed the same root symptom — `operations.restore()`
+(and `undo()`/`redo()`) not reliably reproducing the repository state at an
+arbitrary past operation. Grouped into one minor release because all five
+touch the same reversal machinery (`computeGraphReversal()`/
+`applyGraphReversal()`, the `all()` revset's orphan filter, and the conflict
+model), and because two of the fixes are real behavioral changes (`log()`'s
+default visibility, and what `rebase()` actually writes into a conflicted
+file) rather than pure bugfixes.
+
+### Fixed
+
+- **`write()` and `snapshot()` now record their own operation (#43 part 1).**
+  Both mutated the working copy (disk content, and for `snapshot()` the
+  working-copy change's `fileSnapshot` too) without ever calling
+  `oplog.recordOperation()`. An edit typed into a change's working copy via
+  either was therefore completely invisible to `undo()`/`operations.restore()`
+  — the change kept its post-edit content forever regardless of which
+  operation you restored to, because there was no oplog entry to target and
+  no "before" snapshot for `computeGraphReversal()` to find. Both now follow
+  the same "snapshot the before-state, then record" pattern every other
+  mutator in this file already uses (see `describe()`), including a
+  `changeSnapshot` for `snapshot()` (which mutates a `ChangeGraph` node in
+  place) and a `view.fileSnapshot` for both.
+- **`squash()`, `rebase()`/`moveChange()`, and `abandon()` now record a
+  "files before" snapshot as part of their own operation (#43 part 1).**
+  `computeGraphReversal()` reconstructs "the state right after operation X"
+  by scanning forward from X for the first LATER operation that recorded a
+  `view.fileSnapshot` "before" value. These three operations never recorded
+  one, so restoring to a point right before one of them ran had nothing
+  accurate to fall back on: the scan would skip straight over the gap and
+  either find nothing (leaving disk untouched) or land on a much later,
+  unrelated operation's "before" value — the wrong point in time entirely.
+  Reproduced via a stack-walk (build a chain of describe/new/write/squash/
+  describe operations, `operations.restore()` to every operation in it, and
+  compare on-disk files against an independently-tracked expectation) — this
+  is what surfaces as "a forward restore to an earlier op loses a file that
+  was added between a squash and the target". All three now capture disk
+  state before mutating anything and include it in their own `view`.
+- **`undo()`/`redo()`/`operations.restore()` now record disk state right
+  before THEMSELVES ran, not the landing/target operation's own "before"
+  value (#43 part 1).** All three used to record `view: landingView` (or
+  `redoneView`/`targetOp.view`) verbatim — reusing that OTHER operation's
+  own recorded `fileSnapshot`, which represents disk state before THAT
+  operation ran, not before this undo/redo/restore call mutated anything.
+  A later `restore()`/`undo()` scanning forward past one of these would then
+  pick up that stale, wrong snapshot. Each now captures its own disk state
+  immediately before applying its reversal and merges it into the pointer
+  fields (`workingCopy`/`heads`/`bookmarks`) it still legitimately inherits
+  from the landing operation.
+- **`view.heads` no longer silently drops live heads (#43 part 1).** Every
+  operation that recorded `view.heads` hand-wrote it as either `[]` or a
+  single changeId — whatever that specific call happened to touch —
+  instead of the repository's actual current head set. `squash()` in
+  particular recorded the destination changeId even when squashing the
+  working copy creates a fresh new tip on top of it (so `heads` pointed at
+  the parent, not the tip), and any operation that didn't itself touch an
+  untouched sibling branch silently reported only one head where two
+  existed. Added `computeCurrentHeads()` (every non-abandoned change with no
+  non-abandoned child) and switched `squash()`/`rebase()`/`moveChange()`/
+  `abandon()`/`conflicts.resolve()` to use it.
+- **`log()` now hides orphans that are purely internal rewrite/undo
+  artifacts, even once they differ from their reverted parent (#43 part 2).**
+  The #37(b) fix hid an orphan only while it stayed exactly empty relative
+  to its CURRENT parent. Two shapes slip past that once undo() is involved:
+  (a) `squash()`'s synthetic post-squash `@`, if that squash is later undone
+  and the same undo reverts the destination's content out from under it —
+  the orphan's frozen (post-squash) `fileSnapshot` no longer matches the
+  destination's (reverted, pre-squash) one, even though nothing about the
+  orphan itself changed; (b) `new()`'s freshly created change, if something
+  writes into it before an `undo()` unwinds back past the `new()`. Both
+  `squash()`'s synthetic working-copy change and `new()`'s created change
+  are now tagged `autoCreated: true` at creation, and the revset engine's
+  `_computeHiddenOrphans()` hides an unreachable, undescribed change if it's
+  EITHER still empty relative to its parent OR `autoCreated` — the latter
+  doesn't need to re-diff against a parent that may no longer resemble what
+  the change was actually created from.
+- **`rebase()`/`moveChange()` now writes real conflict-marker text into the
+  working copy instead of leaving the pre-rebase ("ours") content verbatim
+  (#43 part 3) — behavioral change.** Rebase already recorded a detected
+  conflict correctly as data (via `conflicts.addConflict()`), but never
+  touched the file's actual content: `change.fileSnapshot` (and, when the
+  rebased change was checked out, the on-disk file) kept showing whatever
+  content it had before the rebase, with no indication a conflict existed
+  short of calling `conflicts.list()` separately. It now calls
+  `jj.conflicts.markers()` for each detected conflict (reusing that
+  existing marker-formatting logic rather than re-deriving it a second way)
+  and writes the result into both `change.fileSnapshot` and, when
+  applicable, the working copy on disk.
+- **`conflicts.resolve()` now records an operation, so a resolution can be
+  undone (#43 part 4).** It wrote the resolved content straight to disk and
+  mutated the `ConflictModel`'s persisted state directly, with no
+  `oplog.recordOperation()` call at all — resolving a conflict was
+  completely invisible to `undo()`/`operations.restore()`. It now captures
+  a `changeSnapshot` of the working-copy change, a `conflictsSnapshot` of
+  the pre-resolve conflict state (deep-cloned — `resolveConflict()` mutates
+  the same conflict object in place, so a naive `Object.fromEntries()` over
+  the live `Map` would otherwise leave the "before" snapshot aliased to the
+  post-mutation object), and a `view.fileSnapshot`, then records them.
+
+### Not fixed (punted)
+
+- **#43 part 5 (minor): `edit()` of a non-leaf change doesn't rebase its
+  descendants' file content.** An initial fix (propagate the edited
+  ancestor's content onto descendants when moving away from it) was
+  implemented and then reverted: it directly conflicts with `absorb()`'s own
+  job of folding a working-copy edit back into the ancestor it actually
+  belongs to — with the auto-rebase in place, `edit()` + `write()` +
+  `edit()`-away already changes the descendant before `absorb()` ever runs,
+  so `absorb()` finds nothing left to do (caught by the existing
+  `tests/integration/absorb.test.js` "should work after edit()" test).
+  Fixing this properly needs to account for that interaction; left for a
+  follow-up.
+
+### Testing
+
+1859 tests passing (12 new regression tests, matched by a new negative
+control confirming that 12 of them fail against the pre-fix code — the
+other 3 are supplementary correctness checks that already held, e.g.
+"a descendant's own edit is never clobbered"); lint (0 errors),
+format:check, typecheck, and build all still green; all 12 `examples/*.mjs`
+run clean; branch coverage 90.07% (gate: 90%). New test file:
+`tests/integration/issue-43-restore-reliability.test.js`.
+
 ## 1.9.2 — 2026-09-26 — auto-snapshot mtime comparison (#41)
 
 ### Fixed
