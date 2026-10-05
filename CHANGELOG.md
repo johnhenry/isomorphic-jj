@@ -2,6 +2,8 @@
 
 ## 1.13.0 — 2026-10-05 — Write-path fixes: converge on a fresh instance, new files lost on edit(), rebase content
 
+Fixed in [PR #52](https://github.com/johnhenry/isomorphic-jj/pull/52).
+
 Three bugs found while wiring a consumer (JJHub's isomorphic jj engine)
 to write through this library, constructing one fresh `createJJ()`
 instance per call so no read is ever served from a stale cache. Two of
