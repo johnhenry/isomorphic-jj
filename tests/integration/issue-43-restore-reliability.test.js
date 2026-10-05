@@ -580,14 +580,20 @@ describe('issue #45 — edit() of an older change rebases its descendants on sna
     const parent = await jj.describe({ message: 'parent' });
 
     await jj.new({ message: 'child deletes a file' });
-    // Recreate the child with remove-me.txt genuinely absent, matching
-    // what a real deletion (or backout()'s reversal) produces -- not '',
-    // an actual missing key.
-    await jj.write({ path: 'keep.txt', data: 'keep' });
+    // A real deletion, so the child's snapshot has remove-me.txt genuinely
+    // absent (what backout()'s reversal produces too) -- not '', an actual
+    // missing key. This used to delete the key from the graph alone,
+    // leaving the file on disk and tracked; that only worked while edit()
+    // deleted tracked files absent from the change being left, which it no
+    // longer does (the disk is the checked-out change's content).
+    await jj.remove({ path: 'remove-me.txt' });
     const child = await jj.describe({ message: 'child deletes a file' });
-    const childChange = await jj.graph.getChange(child.changeId);
-    delete childChange.fileSnapshot['remove-me.txt'];
-    await jj.graph.updateChange(childChange);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        (await jj.graph.getChange(child.changeId)).fileSnapshot,
+        'remove-me.txt'
+      )
+    ).toBe(false);
 
     // Edit the parent (giving it a descendant relationship it already
     // has) and touch an unrelated file, then edit away -- this is what

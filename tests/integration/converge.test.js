@@ -273,4 +273,48 @@ describe('issue #32 — converge() resolves divergent copies', () => {
       expect((await jj.graph.getChange(root)).fileSnapshot['b.txt']).toBeUndefined();
     });
   });
+
+  // A fresh createJJ() instance has loaded nothing yet — the way any caller
+  // that constructs one instance per call (e.g. to avoid stale cached reads
+  // after another process wrote the repo) always meets converge(). Both
+  // outcomes record an operation naming the working copy, so both must load
+  // it themselves rather than relying on an earlier call on the same
+  // instance having done so.
+  describe('on a fresh instance (nothing loaded yet)', () => {
+    const divergeWith = async (contents) => {
+      await jj.write({ path: 'a.txt', data: 'base' });
+      await jj.describe({ message: 'root' });
+      const base = await currentId();
+      const change = await jj.new({ parents: [base] });
+      await jj.describe({ message: 'work' });
+      for (const [i, content] of contents.entries()) {
+        await makeDivergent(change.changeId, {
+          commitId: String(i + 1).repeat(40),
+          parents: [base],
+          fileSnapshot: { 'a.txt': content },
+        });
+      }
+      return change.changeId;
+    };
+
+    it('reports an unresolved convergence instead of throwing WORKING_COPY_NOT_LOADED', async () => {
+      const changeId = await divergeWith(['two', 'three']);
+      const fresh = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+      const result = await fresh.converge({ changeId });
+      expect(result.resolved).toBe(false);
+      expect(result.conflicts.map((c) => c.path)).toEqual(['a.txt']);
+      const [op] = await fresh.operations.list();
+      expect(op.description).toBe(`converge ${changeId.slice(0, 8)} (unresolved)`);
+      expect(op.view.workingCopy).toBe(await currentId());
+    });
+
+    it('resolves on a fresh instance too, recording the real working copy', async () => {
+      const changeId = await divergeWith(['two']);
+      const fresh = await createJJ({ fs, dir: '/test/repo', backend: 'mock' });
+      const result = await fresh.converge({ changeId });
+      expect(result.resolved).toBe(true);
+      const [op] = await fresh.operations.list();
+      expect(op.view.workingCopy).toBe(await currentId());
+    });
+  });
 });

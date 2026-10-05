@@ -119,4 +119,75 @@ describe('issue #31 — rebase() detects conflicts via three-way merge', () => {
     expect((await jj.conflicts.list()).length).toBe(0);
     expect((await jj.graph.getChange(changeA.changeId)).parents).toEqual([base]);
   });
+
+  // The rebased change's content is (new base) + (what the change itself
+  // did relative to its old base), path by path, as in jj's rebase. It
+  // used to keep its own full tree verbatim, so it kept every file only the
+  // OLD base had (resurrecting what the new base doesn't have) and never
+  // picked up anything only the NEW base changed.
+  describe('content of the rebased change', () => {
+    const files = async (changeId) => (await jj.graph.getChange(changeId)).fileSnapshot;
+    const exists = (p) =>
+      fs.promises.readFile(`/test/repo/${p}`, 'utf8').then(
+        () => true,
+        () => false
+      );
+
+    /** base(a.txt) <- work(adds b.txt) <- sibling(adds own.txt); other(base + edits a.txt) */
+    const world = async () => {
+      await jj.write({ path: 'a.txt', data: 'a\n' });
+      await jj.describe({ message: 'base' });
+      const base = await currentId();
+      const work = (await jj.new({ parents: [base] })).changeId;
+      await jj.write({ path: 'b.txt', data: 'b1\n' });
+      await jj.describe({ message: 'work' });
+      const other = (await jj.new({ parents: [base] })).changeId;
+      await jj.write({ path: 'a.txt', data: 'a edited by other\n' });
+      await jj.describe({ message: 'other' });
+      const sibling = (await jj.new({ parents: [work] })).changeId;
+      await jj.write({ path: 'own.txt', data: 'mine\n' });
+      await jj.describe({ message: 'sibling' });
+      return { base, work, other, sibling };
+    };
+
+    it("drops files only the old base added, and keeps the change's own", async () => {
+      const { base, sibling } = await world();
+      const result = await jj.moveChange({ changeId: sibling, newParent: base });
+      expect(result.conflicts).toEqual([]);
+      const snapshot = await files(sibling);
+      expect(snapshot).not.toHaveProperty(['b.txt']);
+      expect(snapshot['own.txt']).toBe('mine\n');
+      expect(snapshot['a.txt']).toBe('a\n');
+    });
+
+    it('picks up what only the new base changed', async () => {
+      const { other, sibling } = await world();
+      await jj.moveChange({ changeId: sibling, newParent: other });
+      const snapshot = await files(sibling);
+      expect(snapshot['a.txt']).toBe('a edited by other\n');
+      expect(snapshot).not.toHaveProperty(['b.txt']);
+      expect(snapshot['own.txt']).toBe('mine\n');
+    });
+
+    it('updates the files on disk when the moved change is checked out', async () => {
+      const { other, sibling } = await world();
+      expect(await currentId()).toBe(sibling);
+      await jj.moveChange({ changeId: sibling, newParent: other });
+      expect(await exists('b.txt')).toBe(false);
+      expect(await fs.promises.readFile('/test/repo/a.txt', 'utf8')).toBe('a edited by other\n');
+      expect(await fs.promises.readFile('/test/repo/own.txt', 'utf8')).toBe('mine\n');
+      // and nothing is left for the next command's auto-snapshot to pick up
+      const [before] = await jj.operations.list();
+      await jj.status();
+      const [after] = await jj.operations.list();
+      expect(after.id).toBe(before.id);
+    });
+
+    it("undo() restores the change's pre-rebase content", async () => {
+      const { base, sibling } = await world();
+      await jj.moveChange({ changeId: sibling, newParent: base });
+      await jj.undo();
+      expect(await files(sibling)).toHaveProperty(['b.txt'], 'b1\n');
+    });
+  });
 });

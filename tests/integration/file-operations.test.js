@@ -79,6 +79,53 @@ describe('File Operations Integration', () => {
     });
   });
 
+  // edit() commits the change it leaves, like new()/describe(). It used to
+  // first delete every tracked file missing from that change's recorded
+  // fileSnapshot, as cross-branch "pollution" — and write() tracks a new
+  // file without recording it in the change (the next command commits it),
+  // so every NEW file write() created in a change, top-level or nested
+  // alike, was deleted when edit() moved away. Edits to already-recorded
+  // files survived, which made it look path-dependent.
+  describe('write() then edit() away', () => {
+    const changeFiles = async (changeId) =>
+      Object.keys((await jj.graph.getChange(changeId)).fileSnapshot || {}).sort();
+    const exists = (p) =>
+      fs.promises.readFile(`/test/repo/${p}`, 'utf8').then(
+        () => true,
+        () => false
+      );
+
+    it('keeps new files written into an edit()-ed change, and rebases its descendant onto them', async () => {
+      await jj.write({ path: 'a.txt', data: 'a' });
+      await jj.describe({ message: 'base' });
+      const base = (await jj.status()).workingCopy.changeId;
+      const work = (await jj.new({ message: 'work' })).changeId;
+
+      await jj.edit({ changeId: base });
+      await jj.write({ path: 'top-new.txt', data: 'top' });
+      await jj.write({ path: 'src/new.txt', data: 'nested' });
+      await jj.edit({ changeId: work });
+
+      expect(await changeFiles(base)).toEqual(['a.txt', 'src/new.txt', 'top-new.txt']);
+      expect((await jj.graph.getChange(base)).fileSnapshot['src/new.txt']).toBe('nested');
+      expect(await changeFiles(work)).toEqual(['a.txt', 'src/new.txt', 'top-new.txt']);
+      expect(await exists('src/new.txt')).toBe(true);
+      expect(await exists('top-new.txt')).toBe(true);
+    });
+
+    it('still leaves no file of the change being left behind in a target that lacks it', async () => {
+      await jj.write({ path: 'a.txt', data: 'a' });
+      await jj.describe({ message: 'base' });
+      const base = (await jj.status()).workingCopy.changeId;
+      await jj.new({ message: 'work' });
+      await jj.write({ path: 'only-in-work.txt', data: 'w' });
+      await jj.edit({ changeId: base });
+
+      expect(await exists('only-in-work.txt')).toBe(false);
+      expect(await changeFiles(base)).toEqual(['a.txt']);
+    });
+  });
+
   describe('moveFile()', () => {
     it('should move a file to a new location', async () => {
       // Create a file first

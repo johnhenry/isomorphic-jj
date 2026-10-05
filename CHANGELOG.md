@@ -1,5 +1,66 @@
 # Changelog
 
+## 1.13.0 — 2026-10-05 — Write-path fixes: converge on a fresh instance, new files lost on edit(), rebase content
+
+Three bugs found while wiring a consumer (JJHub's isomorphic jj engine)
+to write through this library, constructing one fresh `createJJ()`
+instance per call so no read is ever served from a stale cache. Two of
+them change observable behavior, hence a minor bump.
+
+### Fixed
+
+- **`converge()` threw `WORKING_COPY_NOT_LOADED` on a fresh instance.**
+  Both outcomes record the working copy in their operation, but
+  `converge()` loaded only the graph and user config — so it only worked
+  after some earlier call on the same instance had loaded the working
+  copy. It now loads it itself. Regression tests: "on a fresh instance"
+  in `tests/integration/converge.test.js`.
+- **A new file `write()` created was deleted by the next `edit()` away.**
+  `write()` tracks a file without recording it in the working-copy
+  change (the next command commits it, as in jj), but `edit()` first
+  deleted every tracked file missing from the change being left, as
+  cross-branch "pollution" from an earlier checkout. Since issue #30 every
+  switch fully syncs the working directory to its target, so nothing
+  leaks that way any more; what the cleanup actually removed was every new
+  file — top-level or nested — written into that change. Edits to files
+  already recorded survived, which made it look path-dependent. `edit()`
+  now commits every tracked file into the change it leaves, like
+  `new()`/`describe()`. **Behavior change:** a tracked file on disk is
+  now always the checked-out change's content when `edit()` leaves it;
+  code that removed a file from a change by editing the graph alone (not
+  `remove()`) must now remove it from disk too —
+  `tests/integration/issue-43-restore-reliability.test.js`'s
+  descendant-deletion test did exactly that and now uses `remove()`.
+  Regression tests: "write() then edit() away" in
+  `tests/integration/file-operations.test.js`.
+- **`moveChange()`/`rebase()` kept the change's own tree verbatim.** The
+  three-way conflict check from issue #31 ran, but the rebased content
+  was never derived from it: the change kept every file only its OLD
+  parent had and never picked up what only the NEW parent changed. Its
+  content is now jj's rebase, path by path — the new parent's value
+  wherever the change didn't touch a path relative to its old parent,
+  the change's own value wherever it did (a path both sides changed
+  differently is the conflict #31 already reports, with markers). When
+  the moved change is checked out, its files on disk are synced to the
+  result. **Behavior change:** a rebased change's `fileSnapshot` now
+  differs from before for any path its old and new parents disagree on.
+  Regression tests: "content of the rebased change" in
+  `tests/integration/rebase-conflict-detection.test.js`.
+
+### Not changed
+
+- `moveChange()` still re-derives only the moved change's own content,
+  not that of its descendants (they follow it structurally, by parent
+  change id, but keep their trees) — see the README's status section.
+- Conflict detection still compares whole files, not lines: two sides
+  changing different lines of one file is a conflict.
+
+### Testing
+
+1882 tests passing, 0 skipped; lint, format:check, typecheck, and all 12
+`examples/*.mjs` green; coverage 97.39% statements / 90.13% branches
+(gate 90%). Each new regression test fails against 1.12.1's source.
+
 ## 1.12.1 — 2026-09-27 — Conflict type shape + README status refresh
 
 A cross-library documentation/typing audit flagged four things to verify
