@@ -1020,8 +1020,8 @@ repo/
 
 ## Project Status
 
-**Current Version**: 1.12.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.8.0 before the rename — see the provenance note at the top of this file, and the CHANGELOG's `1.9.0` entry for how the scoped/unscoped version lineages were merged back together)
-**Test Coverage**: 1874 tests passing, ~97% statements / 90% branches
+**Current Version**: 1.13.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.8.0 before the rename — see the provenance note at the top of this file, and the CHANGELOG's `1.9.0` entry for how the scoped/unscoped version lineages were merged back together)
+**Test Coverage**: 1882 tests passing, ~97% statements / 90% branches
 **JJ CLI parity**: tracks Jujutsu through v0.45.1
 **Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#family). Not yet 1.0 in the API-stability sense (the version number is past 1.0 only because merging the scoped/unscoped lineages forced it above the unscoped side's prior ceiling, not because the API is frozen) — API surface can still shift; pin a version and read the CHANGELOG before upgrading.
 
@@ -1038,6 +1038,7 @@ repo/
 - ✅ 0.3.0: Parity refresh tracking jj through **v0.45.1** — a working `/browser` entry (async `createBrowserFS()`, bundle-safe protobuf schema loading, no stray Node-only imports), `undo()`/`operations.restore()` reverting graph rewrites with real progressive undo/redo, `squash()`/`abandon()`/`edit()`/`new()` fully syncing content instead of only metadata, `rebase()` performing a real three-way merge and recording conflicts, and the new `converge()` command (jj v0.45.0) to auto-resolve divergent commits. See [CHANGELOG.md](./CHANGELOG.md).
 - ✅ 0.4.0: `converge()` generalized from pairwise to N-way — any number of divergent copies of one change id resolve in a single call, matching how jj's own underlying engine already treats divergence internally (issue #32). See [CHANGELOG.md](./CHANGELOG.md).
 - ✅ 1.9.0: Scoped (`@johnhenry/isomorphic-jj`) and unscoped (`isomorphic-jj`) version lineages merged into one shared version going forward, with both names dual-published on every release.
+- ✅ 1.13.0: Write-path fixes — `converge()` works on a fresh instance, `edit()` no longer deletes new files `write()` created in the change it leaves, and `moveChange()`/`rebase()` derives the rebased change's content (new parent + the change's own edits) instead of keeping its tree verbatim. Not done: a rebase re-derives only the moved change's content, not its descendants', and conflicts are detected per whole file, not per line. See [CHANGELOG.md](./CHANGELOG.md).
 - ✅ 1.9.1 – 1.12.0: Operation-log reliability pass — `undo()`/`operations.restore()` correctness across write/snapshot/squash/rebase/abandon/edit, `log()` visibility fixes, and recording gaps in descendant rebases and conflict-resolution ops (issues #37–#39, #41, #43, #45, #48). See [CHANGELOG.md](./CHANGELOG.md) for the full per-fix breakdown.
 
 See [ROADMAP.md](./ROADMAP.md) for detailed plans, and [CHANGELOG.md](./CHANGELOG.md) for the release history.

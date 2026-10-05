@@ -1495,6 +1495,27 @@ export async function createJJ(options) {
         await conflicts.addConflict(conflict);
       }
 
+      // The rebased change's content, path by path: (new base) + (what the
+      // change itself did relative to its old base), as jj's rebase. It
+      // used to keep its own full tree verbatim — keeping every file only
+      // the OLD base had and never picking up what only the NEW base
+      // changed. A path both sides changed differently keeps the change's
+      // own value here; if that's a real conflict, detectConflicts() above
+      // reported it and the marker text below replaces it.
+      const contentChanged = Boolean(oldParentChange);
+      if (oldParentChange) {
+        /** @type {Record<string, string>} */
+        const rebased = {};
+        const allPaths = new Set([...baseFiles.keys(), ...leftFiles.keys(), ...rightFiles.keys()]);
+        for (const filePath of allPaths) {
+          const baseValue = baseFiles.get(filePath);
+          const ownValue = leftFiles.get(filePath);
+          const value = ownValue === baseValue ? rightFiles.get(filePath) : ownValue;
+          if (value !== undefined) rebased[filePath] = value;
+        }
+        change.fileSnapshot = rebased;
+      }
+
       // Materialize real conflict-marker text into the moved change's file
       // content — issue #43(3): rebase()/moveChange() used to record the
       // conflict correctly as DATA (via conflicts.addConflict() above) but
@@ -1534,6 +1555,13 @@ export async function createJJ(options) {
             });
           }
         }
+      }
+
+      // A checked-out change's files on disk are its content: bring them in
+      // line with the rebased snapshot (markers included), tracked, so the
+      // next command's auto-snapshot finds nothing to re-record.
+      if (contentChanged && changeId === workingCopy.getCurrentChangeId()) {
+        await syncWorkingCopyFiles(change.fileSnapshot || {});
       }
 
       // Update parent
@@ -2519,29 +2547,18 @@ export async function createJJ(options) {
       // see issue #29.
       const fileSnapshotBeforeSwitch = await snapshotFilesystem();
 
-      // CRITICAL FIX: Clean working directory BEFORE snapshotting to prevent cross-branch pollution
-      // Remove files that don't belong to the current changeId before we snapshot it
+      // Commit the change being left: every tracked file on disk is its
+      // content, as in new()/describe(). This used to first DELETE every
+      // tracked file missing from the change's recorded fileSnapshot, as
+      // "pollution" from an earlier checkout — but a switch now fully syncs
+      // the working directory to its target (issue #30, below), so nothing
+      // leaks that way any more, and what that cleanup actually deleted was
+      // every new file write() had created in this change: write() tracks a
+      // file without recording it in the change, so it is only committed
+      // here, by the next command.
       if (previousChangeId !== args.changeId) {
         const previousChange = await graph.getChange(previousChangeId);
         if (previousChange) {
-          const previousSnapshot = previousChange.fileSnapshot || {};
-          const workingDirFiles = await workingCopy.listFiles();
-
-          // Delete files that exist in working dir but NOT in previous changeId's snapshot
-          // This removes pollution from other branches that were previously checked out
-          for (const filePath of workingDirFiles) {
-            if (!previousSnapshot[filePath]) {
-              try {
-                const fullPath = path.join(dir, filePath);
-                await fs.promises.unlink(fullPath);
-                await workingCopy.untrackFile(filePath);
-              } catch (error) {
-                // Ignore errors - file might already be deleted or inaccessible
-              }
-            }
-          }
-
-          // Now snapshot the CLEAN working directory (no pollution!)
           const currentSnapshot = await snapshotFilesystem();
           if (currentSnapshot && Object.keys(currentSnapshot).length > 0) {
             changeSnapshot[previousChangeId] = structuredClone(previousChange);
@@ -3846,6 +3863,9 @@ export async function createJJ(options) {
       }
 
       await graph.load();
+      // Both outcomes below record the working copy in their operation —
+      // a fresh instance hasn't loaded it yet.
+      await workingCopy.load();
       await userConfig.load();
       const siblings = graph.getDivergentSiblings(changeId);
 
