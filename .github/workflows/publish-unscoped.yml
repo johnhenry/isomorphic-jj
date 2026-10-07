@@ -1,17 +1,16 @@
 name: Publish to npm (unscoped mirror)
 
-# Permanent parallel release: every tagged release publishes under BOTH
-# `@johnhenry/isomorphic-jj` and the unscoped `isomorphic-jj` name, same
-# version, same tag, same trigger as publish.yml -- deliberately not a
-# matrix, since the two publishes share one identical build/test run and
-# differ only in package.json's `name` field at the very end; a matrix
-# would just pay for that build/test twice for no benefit. Two names, one
-# job, each gated by its own `npm view` idempotency check so a partial
-# failure (e.g. the scoped one lands but this one fails) is safe to retry.
+# Publish model: main is the release branch. A push to main publishes only if
+# package.json's version isn't on npm yet (otherwise a clean no-op), then tags
+# v<version> and creates a GitHub Release. See johnhenry/workflows' README.
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -31,21 +30,12 @@ jobs:
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Verify tag matches package.json version
-        run: |
-          PKG_VERSION="v$(node -p "require('./package.json').version")"
-          TAG_VERSION="${GITHUB_REF#refs/tags/}"
-          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
-            echo "::error::Tag $TAG_VERSION does not match package.json version $PKG_VERSION"
-            exit 1
-          fi
-
       - name: Verify this version moves both names' latest tag forward
         # Both names publish the same version every release (see
         # CHANGELOG.md's 1.9.0 entry) -- refuse to publish a version that
-        # isn't strictly greater than what's already live under EITHER
-        # name, so this can't silently move npm's `latest` tag backward on
-        # either side again.
+        # is LOWER than what's already live under EITHER name (equal is fine:
+        # that name's publish below is then an idempotent no-op), so this can't
+        # silently move npm's `latest` tag backward on either side again.
         run: |
           node -e '
             const semverParts = (v) => v.split(".").map(Number);
@@ -55,8 +45,8 @@ jobs:
             const newVersion = require("./package.json").version;
             const scoped = live("@johnhenry/isomorphic-jj");
             const unscoped = live("isomorphic-jj");
-            if (!gt(newVersion, scoped) || !gt(newVersion, unscoped)) {
-              console.error(`::error::${newVersion} must be greater than both the scoped (${scoped}) and unscoped (${unscoped}) published versions`);
+            if (gt(scoped, newVersion) || gt(unscoped, newVersion)) {
+              console.error(`::error::${newVersion} must not be lower than the scoped (${scoped}) or unscoped (${unscoped}) published versions`);
               process.exit(1);
             }
           '
@@ -80,8 +70,8 @@ jobs:
         run: npm run build
 
       - name: Rename package for the unscoped mirror
-        # Only the `name` field changes -- version stays whatever the tag
-        # already checked out (see the tag/version gate above), so both
+        # Only the `name` field changes -- version stays whatever package.json
+        # already has at the checked-out commit, so both
         # names always ship the exact same version together.
         run: npm pkg set name=isomorphic-jj
 
