@@ -85,5 +85,26 @@ describe('operations.restore() restores the view', () => {
       await jj.edit({ changeId: turnX });
       expect(await describe_('all()')).toContain('turn X');
     });
+    it('redo() of an undone restore hides it again', async () => {
+      await jj.undo();
+      await jj.redo();
+      expect(await describe_('all()')).not.toContain('turn X');
+    });
+
+    it('a second restore keeps earlier hidden changes hidden', async () => {
+      const mid = (await jj.operations.list({ limit: 1 }))[0];
+      await jj.new({ message: 'turn Y' });
+      await jj.operations.restore({ operation: mid.id });
+      const descriptions = await describe_('all()');
+      expect(descriptions).not.toContain('turn X');
+      expect(descriptions).not.toContain('turn Y');
+    });
+
+    it('restoring to an op before the restore re-exposes the hidden change', async () => {
+      const ops = await jj.operations.list({ limit: 10 });
+      const withX = ops.find((o) => o.description && o.description.startsWith('new'));
+      await jj.operations.restore({ operation: withX.id });
+      expect(await describe_('all()')).toContain('turn X');
+    });
   });
 });

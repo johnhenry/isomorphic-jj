@@ -1102,33 +1102,14 @@ export class RevsetEngine {
   async _computeRestoreHidden() {
     const hidden = new Set();
     if (!this.oplog) return hidden;
-    let listed = [];
-    try {
-      const headOp = await this.oplog.getHeadOperation();
-      listed = (headOp && headOp.view && headOp.view.hiddenChanges) || [];
-    } catch {
-      return hidden;
-    }
-    if (!Array.isArray(listed) || listed.length === 0) return hidden;
+    const headOp = await this.oplog.getHeadOperation();
+    const listed = (headOp && headOp.view && headOp.view.hiddenChanges) || [];
+    if (listed.length === 0) return hidden;
 
-    const roots = new Set();
-    try {
-      const wcId = this.workingCopy && this.workingCopy.getCurrentChangeId();
-      if (wcId) roots.add(wcId);
-    } catch {
-      // working copy not loaded
-    }
-    if (this.bookmarkStore) {
-      await this.bookmarkStore.load();
-      for (const bookmark of await this.bookmarkStore.list()) {
-        if (bookmark && bookmark.changeId) roots.add(bookmark.changeId);
-      }
-    }
-    if (this.tagStore) {
-      for (const tag of await this.tagStore.list()) {
-        if (tag && tag.changeId) roots.add(tag.changeId);
-      }
-    }
+    const roots = new Set([this.workingCopy.getCurrentChangeId()]);
+    await this.bookmarkStore.load();
+    for (const bookmark of await this.bookmarkStore.list()) roots.add(bookmark.changeId);
+    for (const tag of await this.tagStore.list()) roots.add(tag.changeId);
     const reachable = new Set();
     for (const rootId of roots) {
       for (const id of await this.getAncestors(rootId)) reachable.add(id);

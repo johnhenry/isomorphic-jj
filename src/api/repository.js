@@ -387,7 +387,7 @@ export async function createJJ(options) {
       const stack = [...seeds];
       while (stack.length > 0) {
         const id = /** @type {string} */ (stack.pop());
-        if (!id || seen.has(id)) continue;
+        if (seen.has(id)) continue;
         seen.add(id);
         for (const parent of graph.getParents(id)) stack.push(parent);
       }
@@ -404,18 +404,10 @@ export async function createJJ(options) {
     }
     const known = ancestorsOf(knownSeeds);
 
-    const roots = new Set();
-    const wcId = workingCopy.getCurrentChangeId();
-    if (wcId) roots.add(wcId);
+    const roots = new Set([workingCopy.getCurrentChangeId()]);
     await bookmarks.load();
-    for (const bookmark of await bookmarks.list()) {
-      if (bookmark && bookmark.changeId) roots.add(bookmark.changeId);
-    }
-    if (tags) {
-      for (const tag of await tags.list()) {
-        if (tag && tag.changeId) roots.add(tag.changeId);
-      }
-    }
+    for (const bookmark of await bookmarks.list()) roots.add(bookmark.changeId);
+    for (const tag of await tags.list()) roots.add(tag.changeId);
     const reachable = ancestorsOf(roots);
 
     const hidden = new Set(

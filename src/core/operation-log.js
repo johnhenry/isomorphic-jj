@@ -69,8 +69,8 @@ export class OperationLog {
       operation.eventType !== 'redo'
     ) {
       const headOp = this.operations.find((op) => op.id === this.headOperationId);
-      const inherited = headOp && headOp.view && headOp.view.hiddenChanges;
-      if (Array.isArray(inherited) && inherited.length > 0) {
+      const inherited = headOp.view && headOp.view.hiddenChanges;
+      if (inherited && inherited.length > 0) {
         operation.view = { ...operation.view, hiddenChanges: inherited };
       }
     }
