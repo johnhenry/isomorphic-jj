@@ -149,12 +149,7 @@ export interface Bookmark {
  * one of the built-in path-conflict categories.
  */
 export type ConflictType =
-  | 'content'
-  | 'path'
-  | 'add-add'
-  | 'delete-modify'
-  | 'modify-delete'
-  | 'driver-conflict';
+  'content' | 'path' | 'add-add' | 'delete-modify' | 'modify-delete' | 'driver-conflict';
 
 /**
  * The competing values a conflict is between. The common, two-way case
@@ -195,8 +190,7 @@ export interface Conflict {
  * Conflict resolution
  */
 export type ConflictResolution =
-  | { side: 'ours' | 'theirs' | 'base' }
-  | { content: Uint8Array | string };
+  { side: 'ours' | 'theirs' | 'base' } | { content: Uint8Array | string };
 
 // ============================================================================
 // Workspace Types
@@ -422,6 +416,10 @@ export interface WriteStreamArgs {
  */
 export interface DescribeArgs {
   message?: string;
+  /** Change to describe (default: the working-copy change). */
+  changeId?: ChangeID;
+  /** Older spelling of `changeId`. */
+  revision?: ChangeID;
   author?: User;
   metadata?: Record<string, any>;
 }
@@ -1029,12 +1027,7 @@ export interface MergeDriver {
   /** Detect if this driver should handle a file */
   detect(path: string, content: string): boolean;
   /** Merge three versions of a file */
-  merge(args: {
-    path: string;
-    base: string;
-    ours: string;
-    theirs: string;
-  }): {
+  merge(args: { path: string; base: string; ours: string; theirs: string }): {
     merged: string;
     conflicts?: Array<{ line: number; message: string }>;
   };
@@ -1093,7 +1086,7 @@ export interface JJ {
 
   // Change operations
   describe(args?: DescribeArgs): Promise<Change>;
-  new(args?: NewArgs): Promise<Change>;
+  new (args?: NewArgs): Promise<Change>;
   amend(args?: AmendArgs): Promise<Change>;
   commit(args?: CommitArgs): Promise<Change>;
   edit(args: EditArgs): Promise<void>;
@@ -1132,7 +1125,13 @@ export interface JJ {
    * Create a change that reverses another change (matches `jj revert`, v1.5).
    * Canonical replacement for the deprecated `backout()`.
    */
-  revert(args: { revision?: ChangeID; change?: ChangeID; changeId?: ChangeID; target?: ChangeID; message?: string }): Promise<{
+  revert(args: {
+    revision?: ChangeID;
+    change?: ChangeID;
+    changeId?: ChangeID;
+    target?: ChangeID;
+    message?: string;
+  }): Promise<{
     changeId: ChangeID;
     description: string;
     revertedFrom: ChangeID;
@@ -1141,7 +1140,13 @@ export interface JJ {
   }>;
 
   /** @deprecated Use {@link JJ.revert}. Retained for backward compatibility. */
-  backout(args: { revision?: ChangeID; change?: ChangeID; changeId?: ChangeID; target?: ChangeID; message?: string }): Promise<{
+  backout(args: {
+    revision?: ChangeID;
+    change?: ChangeID;
+    changeId?: ChangeID;
+    target?: ChangeID;
+    message?: string;
+  }): Promise<{
     changeId: ChangeID;
     description: string;
     backedOut: ChangeID;
@@ -1149,7 +1154,13 @@ export interface JJ {
   }>;
 
   /** Sign a change, recording signature metadata (matches `jj sign`, v1.5). */
-  sign(args?: { revision?: ChangeID; change?: ChangeID; changeId?: ChangeID; backend?: string; key?: string }): Promise<{
+  sign(args?: {
+    revision?: ChangeID;
+    change?: ChangeID;
+    changeId?: ChangeID;
+    backend?: string;
+    key?: string;
+  }): Promise<{
     changeId: ChangeID;
     signed: true;
     signature: { status: string; backend: string; key: string | null; timestamp: string };
@@ -1232,11 +1243,22 @@ export interface JJ {
     create(args: BookmarkCreateArgs): Promise<{ name: string; changeId: ChangeID }>;
     move(args: BookmarkMoveArgs): Promise<{ name: string; from: ChangeID; to: ChangeID }>;
     /** Move a bookmark forward only; rejects non-descendant targets (matches `jj bookmark advance`, v1.5). */
-    advance(args: { name: string; to?: ChangeID; target?: ChangeID; changeId?: ChangeID; change?: ChangeID; revision?: ChangeID }): Promise<{ name: string; from: ChangeID; to: ChangeID }>;
+    advance(args: {
+      name: string;
+      to?: ChangeID;
+      target?: ChangeID;
+      changeId?: ChangeID;
+      change?: ChangeID;
+      revision?: ChangeID;
+    }): Promise<{ name: string; from: ChangeID; to: ChangeID }>;
     delete(args: BookmarkDeleteArgs): Promise<{ deleted: string }>;
-    rename(args: BookmarkRenameArgs): Promise<{ oldName: string; newName: string; changeId: ChangeID }>;
+    rename(
+      args: BookmarkRenameArgs
+    ): Promise<{ oldName: string; newName: string; changeId: ChangeID }>;
     track(args: BookmarkTrackArgs): Promise<{ name: string; remote: string; tracking: boolean }>;
-    untrack(args: BookmarkUntrackArgs): Promise<{ name: string; tracking: boolean; wasTracking: boolean }>;
+    untrack(
+      args: BookmarkUntrackArgs
+    ): Promise<{ name: string; tracking: boolean; wasTracking: boolean }>;
     forget(args: BookmarkForgetArgs): Promise<{ name: string; remote: string; forgotten: boolean }>;
   };
 
@@ -1270,17 +1292,25 @@ export interface JJ {
     show(args: ReadArgs): Promise<string | Uint8Array>;
     list(args?: ListFilesArgs): Promise<string[]>;
     /** Search tracked file contents (matches `jj file search`, v1.5). Regex by default. */
-    search(args: { pattern: string; changeId?: ChangeID; change?: ChangeID; kind?: 'regex' | 'substring'; path?: string }): Promise<Array<{ path: string; lineNumber: number; line: string }>>;
+    search(args: {
+      pattern: string;
+      changeId?: ChangeID;
+      change?: ChangeID;
+      kind?: 'regex' | 'substring';
+      path?: string;
+    }): Promise<Array<{ path: string; lineNumber: number; line: string }>>;
     write(args: WriteArgs): Promise<WriteResult>;
     move(args: MoveFileArgs): Promise<MoveResult>;
     remove(args: RemoveArgs): Promise<RemoveResult>;
-    annotate(args: FileAnnotateArgs): Promise<Array<{
-      lineNumber: number;
-      changeId: ChangeID;
-      author: Author;
-      timestamp: Date;
-      content: string;
-    }>>;
+    annotate(args: FileAnnotateArgs): Promise<
+      Array<{
+        lineNumber: number;
+        changeId: ChangeID;
+        author: Author;
+        timestamp: Date;
+        content: string;
+      }>
+    >;
     chmod(args: FileChmodArgs): Promise<{
       path: string;
       mode: number;
@@ -1315,7 +1345,9 @@ export interface JJ {
     get(args: { id: string }): Promise<Workspace | null>;
     rename(args: WorkspaceRenameArgs): Promise<Workspace>;
     root(args?: { workspace?: string }): Promise<string>;
-    updateStale(args?: { workspace?: string }): Promise<{ updated: number; workspaces: Array<{ id: string; name: string }> }>;
+    updateStale(args?: {
+      workspace?: string;
+    }): Promise<{ updated: number; workspaces: Array<{ id: string; name: string }> }>;
   };
 
   // Background operations (only available in Node.js)
@@ -1392,9 +1424,17 @@ export interface JJ {
 
   // Tags (immutable references; `set` is the v1.5 upsert)
   tag: {
-    create(args: { name: string; changeId?: ChangeID }): Promise<{ name: string; changeId: ChangeID }>;
+    create(args: {
+      name: string;
+      changeId?: ChangeID;
+    }): Promise<{ name: string; changeId: ChangeID }>;
     /** Create or move a tag (matches `jj tag set`, v1.5). */
-    set(args: { name: string; changeId?: ChangeID; change?: ChangeID; revision?: ChangeID }): Promise<{ name: string; changeId: ChangeID; updated: boolean }>;
+    set(args: {
+      name: string;
+      changeId?: ChangeID;
+      change?: ChangeID;
+      revision?: ChangeID;
+    }): Promise<{ name: string; changeId: ChangeID; updated: boolean }>;
     list(args?: { pattern?: string }): Promise<Array<{ name: string; changeId: ChangeID }>>;
     delete(args: { name: string }): Promise<{ deleted: string }>;
   };
@@ -1421,5 +1461,9 @@ export class JJError extends Error {
   context: Record<string, any>;
   details: Record<string, any>;
 
-  constructor(code: string, message: string, context?: { suggestion?: string } & Record<string, any>);
+  constructor(
+    code: string,
+    message: string,
+    context?: { suggestion?: string } & Record<string, any>
+  );
 }

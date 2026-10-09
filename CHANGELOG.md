@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.14.0 — 2026-10-09 — describe()/metaedit() honor changeId; operations.restore() restores the view
+
+Fixes [#55](https://github.com/johnhenry/isomorphic-jj/issues/55) and
+[#56](https://github.com/johnhenry/isomorphic-jj/issues/56). Both change
+observable behavior, hence a minor bump.
+
+### Fixed
+
+- **`describe()` and `metaedit()` ignored `changeId`.** Both only read the
+  older `revision` option (`metaedit` also `change`), so
+  `describe({ changeId, message })` silently rewrote the working-copy change
+  instead of the named one -- the documented option (API.md) did nothing and
+  `DescribeArgs` in `types.d.ts` didn't list it. Both now accept `changeId`
+  (alongside `revision`), rewrite exactly that change, leave the working
+  copy's description alone, and keep change IDs stable. `DescribeArgs` gains
+  `changeId` and `revision`. Regression tests:
+  `tests/integration/describe-change-id.test.js`.
+- **`operations.restore()` left changes created after the target operation
+  visible.** The restore operation recorded the right view (heads, working
+  copy), but the revset layer only hid orphaned changes that were empty and
+  undescribed, so a described change stayed in `log()`, `heads(all())` and
+  `visible_heads()`. As in jj, restoring now restores the *view*: every
+  change created after the target operation and unreachable from the
+  restored working copy, bookmarks and tags is hidden (not deleted -- it
+  stays in the graph and resolvable by change ID). The hidden set is stored
+  in the operation's `view.hiddenChanges`, so it persists across later
+  operations, `undo()`/`redo()` of the restore bring the changes back, and
+  they reappear if the working copy/bookmarks make them reachable again
+  (e.g. `edit({ changeId })`). **Behavior change:** `log()` after a restore
+  no longer lists such changes. Regression tests:
+  `tests/integration/op-restore-view.test.js`.
+
 ## 1.13.0 — 2026-10-05 — Write-path fixes: converge on a fresh instance, new files lost on edit(), rebase content
 
 Fixed in [PR #52](https://github.com/johnhenry/isomorphic-jj/pull/52).

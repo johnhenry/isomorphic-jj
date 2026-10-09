@@ -2150,7 +2150,7 @@ await jj.undo({ steps: 3 });
 ---
 
 ### `jj.operations.restore(options)`
-Restore repository to a specific operation.
+Restore repository to a specific operation. Restores the view: changes created after that operation and not reachable from the restored working copy/bookmarks are hidden from `log()` (not deleted).
 
 **CLI equivalent**: `jj operation restore`
 

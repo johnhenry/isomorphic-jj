@@ -587,16 +587,18 @@ export class RevsetEngine {
       case 'visible_heads': {
         await this.graph.load();
         const allChanges = this.graph.getAll();
-        const changeIdSet = new Set(allChanges.map((c) => c.changeId));
+        const restoreHidden = await this._computeRestoreHidden();
+        const visibleChanges = allChanges.filter((c) => !restoreHidden.has(c.changeId));
+        const changeIdSet = new Set(visibleChanges.map((c) => c.changeId));
         const hasChildren = new Set();
-        for (const change of allChanges) {
+        for (const change of visibleChanges) {
           if (change.parents) {
             for (const parent of change.parents) {
               if (changeIdSet.has(parent)) hasChildren.add(parent);
             }
           }
         }
-        return allChanges.filter((c) => !hasChildren.has(c.changeId)).map((c) => c.changeId);
+        return visibleChanges.filter((c) => !hasChildren.has(c.changeId)).map((c) => c.changeId);
       }
 
       // `git_refs()` and `git_head()` are deprecated compatibility shims.
@@ -1082,6 +1084,49 @@ export class RevsetEngine {
    * @returns {Promise<Set<string>>} change IDs to exclude
    */
   async _computeHiddenOrphans(allChanges) {
+    const restoreHidden = await this._computeRestoreHidden();
+    const hidden = await this._computeUnreferencedOrphans(allChanges);
+    for (const id of restoreHidden) hidden.add(id);
+    return hidden;
+  }
+
+  /**
+   * Changes hidden by `operations.restore()` (issue #56): the head
+   * operation's `view.hiddenChanges`, minus any that the current working
+   * copy / bookmarks / tags make reachable again. Deliberately does NOT use
+   * the operation log's recorded heads for reachability -- later operations
+   * record structural heads, which would include the hidden leaf itself.
+   *
+   * @returns {Promise<Set<string>>}
+   */
+  async _computeRestoreHidden() {
+    const hidden = new Set();
+    if (!this.oplog) return hidden;
+    const headOp = await this.oplog.getHeadOperation();
+    const listed = (headOp && headOp.view && headOp.view.hiddenChanges) || [];
+    if (listed.length === 0) return hidden;
+
+    const roots = new Set([this.workingCopy.getCurrentChangeId()]);
+    await this.bookmarkStore.load();
+    for (const bookmark of await this.bookmarkStore.list()) roots.add(bookmark.changeId);
+    for (const tag of await this.tagStore.list()) roots.add(tag.changeId);
+    const reachable = new Set();
+    for (const rootId of roots) {
+      for (const id of await this.getAncestors(rootId)) reachable.add(id);
+    }
+    for (const id of listed) {
+      if (!reachable.has(id)) hidden.add(id);
+    }
+    return hidden;
+  }
+
+  /**
+   * The #37(b)/#43(2)/#48 rule: unreachable, undescribed orphans.
+   *
+   * @param {any[]} allChanges
+   * @returns {Promise<Set<string>>}
+   */
+  async _computeUnreferencedOrphans(allChanges) {
     const trackedHeads = new Set();
     try {
       const wcId = this.workingCopy && this.workingCopy.getCurrentChangeId();
