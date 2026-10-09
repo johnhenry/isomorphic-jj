@@ -422,6 +422,10 @@ export interface WriteStreamArgs {
  */
 export interface DescribeArgs {
   message?: string;
+  /** Change to describe (default: the working-copy change). */
+  changeId?: ChangeID;
+  /** Older spelling of `changeId`. */
+  revision?: ChangeID;
   author?: User;
   metadata?: Record<string, any>;
 }

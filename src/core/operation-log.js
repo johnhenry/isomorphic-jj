@@ -57,6 +57,24 @@ export class OperationLog {
       operation.parents = operation.parents || [];
     }
 
+    // `view.hiddenChanges` (written by operations.restore()) is part of the
+    // view, so it persists across later operations. undo()/redo()/restore()
+    // set it explicitly (their view is a snapshot of another operation);
+    // every other operation carries the current head's value forward.
+    if (
+      this.headOperationId &&
+      operation.view &&
+      !('hiddenChanges' in operation.view) &&
+      operation.eventType !== 'undo' &&
+      operation.eventType !== 'redo'
+    ) {
+      const headOp = this.operations.find((op) => op.id === this.headOperationId);
+      const inherited = headOp && headOp.view && headOp.view.hiddenChanges;
+      if (Array.isArray(inherited) && inherited.length > 0) {
+        operation.view = { ...operation.view, hiddenChanges: inherited };
+      }
+    }
+
     // Generate operation ID
     const id = await generateOperationId(operation);
     const fullOperation = {

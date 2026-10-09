@@ -26,32 +26,64 @@ describe('operations.restore() restores the view', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  // Known bug: https://github.com/johnhenry/isomorphic-jj/issues/56
-  // `it.failing` keeps the suite green while the bug exists; once fixed this
-  // test will start "failing" -- switch it back to a plain `it`.
-  it.failing(
-    'does not list a change created (and edited) after the target operation in log()',
-    async () => {
+  it('does not list a change created (and edited) after the target operation in log()', async () => {
+    await jj.write({ path: 'a.txt', data: 'one' });
+    await jj.snapshot();
+    const before = (await jj.operations.list({ limit: 1 }))[0];
+
+    await jj.new({ message: 'turn X' });
+    await jj.write({ path: 'a.txt', data: 'two' });
+    await jj.snapshot();
+
+    await jj.operations.restore({ operation: before.id });
+
+    // Working copy is correctly back at the pre-`new` state...
+    expect(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8')).toBe('one');
+
+    // ...so the view's heads should be too.
+    const after = (await jj.operations.list({ limit: 1 }))[0];
+    expect(after.view.heads).toEqual(before.view.heads);
+
+    // And `turn X` must no longer be visible in log().
+    const descriptions = (await jj.log()).map((c) => c.description);
+    expect(descriptions).not.toContain('turn X');
+  });
+
+  describe('after restoring away a described change', () => {
+    let before;
+    let turnX;
+
+    beforeEach(async () => {
       await jj.write({ path: 'a.txt', data: 'one' });
       await jj.snapshot();
-      const before = (await jj.operations.list({ limit: 1 }))[0];
-
+      before = (await jj.operations.list({ limit: 1 }))[0];
       await jj.new({ message: 'turn X' });
-      await jj.write({ path: 'a.txt', data: 'two' });
-      await jj.snapshot();
-
+      turnX = (await jj.status()).workingCopy.changeId;
       await jj.operations.restore({ operation: before.id });
+    });
 
-      // Working copy is correctly back at the pre-`new` state...
-      expect(fs.readFileSync(path.join(dir, 'a.txt'), 'utf8')).toBe('one');
+    const describe_ = async (revset) => (await jj.log({ revset })).map((c) => c.description);
 
-      // ...so the view's heads should be too.
-      const after = (await jj.operations.list({ limit: 1 }))[0];
-      expect(after.view.heads).toEqual(before.view.heads);
+    it('hides it from heads(all()) and visible_heads() but keeps it in the graph', async () => {
+      expect(await describe_('heads(all())')).not.toContain('turn X');
+      expect(await describe_('visible_heads()')).not.toContain('turn X');
+      expect(await jj.show({ change: turnX })).toBeTruthy();
+    });
 
-      // And `turn X` must no longer be visible in log().
-      const descriptions = (await jj.log()).map((c) => c.description);
-      expect(descriptions).not.toContain('turn X');
-    }
-  );
+    it('stays hidden after later operations', async () => {
+      await jj.new({ message: 'later' });
+      expect(await describe_('all()')).not.toContain('turn X');
+      expect(await describe_('visible_heads()')).not.toContain('turn X');
+    });
+
+    it('reappears when the restore is undone', async () => {
+      await jj.undo();
+      expect(await describe_('all()')).toContain('turn X');
+    });
+
+    it('reappears when edit() makes it reachable again', async () => {
+      await jj.edit({ changeId: turnX });
+      expect(await describe_('all()')).toContain('turn X');
+    });
+  });
 });

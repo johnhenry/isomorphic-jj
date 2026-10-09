@@ -369,6 +369,69 @@ export async function createJJ(options) {
   };
 
   /**
+   * Changes that `operations.restore(targetOp)` must hide (issue #56): every
+   * change created after `targetOp` (i.e. not among the heads / working copy /
+   * touched changes recorded up to targetOp, nor their ancestors) that is not
+   * reachable from the restored working copy, bookmarks or tags. Hidden, not
+   * deleted -- they reappear if a later operation makes them reachable again.
+   * Previously hidden changes that targetOp's own view already hid stay hidden.
+   *
+   * @param {any[]} ops - Full operation list (chronological)
+   * @param {any} targetOp
+   * @returns {Promise<string[]>}
+   */
+  const computeRestoreHiddenChanges = async (ops, targetOp) => {
+    await graph.load();
+    const ancestorsOf = (/** @type {Iterable<string>} */ seeds) => {
+      const seen = new Set();
+      const stack = [...seeds];
+      while (stack.length > 0) {
+        const id = /** @type {string} */ (stack.pop());
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        for (const parent of graph.getParents(id)) stack.push(parent);
+      }
+      return seen;
+    };
+
+    const targetIndex = ops.findIndex((o) => o.id === targetOp.id);
+    const knownSeeds = new Set();
+    for (const op of ops.slice(0, targetIndex + 1)) {
+      const view = op.view || {};
+      for (const id of view.heads || []) knownSeeds.add(id);
+      if (view.workingCopy) knownSeeds.add(view.workingCopy);
+      for (const id of Object.keys(op.changeSnapshot || {})) knownSeeds.add(id);
+    }
+    const known = ancestorsOf(knownSeeds);
+
+    const roots = new Set();
+    const wcId = workingCopy.getCurrentChangeId();
+    if (wcId) roots.add(wcId);
+    await bookmarks.load();
+    for (const bookmark of await bookmarks.list()) {
+      if (bookmark && bookmark.changeId) roots.add(bookmark.changeId);
+    }
+    if (tags) {
+      for (const tag of await tags.list()) {
+        if (tag && tag.changeId) roots.add(tag.changeId);
+      }
+    }
+    const reachable = ancestorsOf(roots);
+
+    const hidden = new Set(
+      ((targetOp.view && targetOp.view.hiddenChanges) || []).filter(
+        (/** @type {string} */ id) => !reachable.has(id)
+      )
+    );
+    for (const change of graph.getAll()) {
+      if (!known.has(change.changeId) && !reachable.has(change.changeId)) {
+        hidden.add(change.changeId);
+      }
+    }
+    return [...hidden];
+  };
+
+  /**
    * Re-parent every child of `changeId` onto `newParents` instead — used
    * when a change is being elided from the graph (abandon(), issue #30;
    * converge(), issue #32) so its children don't end up pointing at
@@ -1702,6 +1765,11 @@ export async function createJJ(options) {
      * @param {Record<string, any>} [args]
      */
     async describe(args = {}) {
+      // Documented option is `changeId`; `revision` is the older spelling.
+      if (args.changeId && !args.revision) {
+        args = { ...args, revision: args.changeId };
+      }
+
       await graph.load();
       await workingCopy.load();
       await userConfig.load();
@@ -1851,9 +1919,12 @@ export async function createJJ(options) {
      * @returns {Promise<Object>} Updated change object
      */
     async metaedit(args = {}) {
-      // Normalize: accept 'change' as alias for 'revision'
+      // Normalize: accept 'change' / 'changeId' as aliases for 'revision'
       if (args.change && !args.revision) {
         args = { ...args, revision: args.change };
+      }
+      if (args.changeId && !args.revision) {
+        args = { ...args, revision: args.changeId };
       }
 
       // Normalize: accept 'message' as alias for 'description'
@@ -2782,7 +2853,11 @@ export async function createJJ(options) {
         redoFileSnapshot,
         redoConflictsSnapshot,
         parents: [],
-        view: { ...landingView, fileSnapshot: diskSnapshotBeforeThisOp },
+        view: {
+          ...landingView,
+          fileSnapshot: diskSnapshotBeforeThisOp,
+          hiddenChanges: landingView.hiddenChanges || [],
+        },
       });
 
       const restoredFileCount =
@@ -2905,7 +2980,11 @@ export async function createJJ(options) {
         redoOf: undoOp.id,
         changeSnapshot: undoChangeSnapshot,
         parents: [],
-        view: { ...redoneView, fileSnapshot: diskSnapshotBeforeThisOp },
+        view: {
+          ...redoneView,
+          fileSnapshot: diskSnapshotBeforeThisOp,
+          hiddenChanges: redoneView.hiddenChanges || [],
+        },
       });
 
       const restoredFileCount =
@@ -3237,6 +3316,13 @@ export async function createJJ(options) {
 
         await applyGraphReversal(reversal);
 
+        // Restoring the view hides (not deletes) every change that was
+        // created after targetOp and is not reachable from the restored
+        // working copy / bookmarks / tags -- see issue #56. The list is
+        // recorded in the view so it survives later operations, and so
+        // undo()/redo() of the restore bring the changes back.
+        const hiddenChanges = await computeRestoreHiddenChanges(ops, targetOp);
+
         // Record this restoration as a new operation
         await oplog.recordOperation({
           timestamp: new Date().toISOString(),
@@ -3244,7 +3330,7 @@ export async function createJJ(options) {
           description: `restore to operation ${args.operation}`,
           parents: [],
           changeSnapshot,
-          view: { ...targetOp.view, fileSnapshot: diskSnapshotBeforeThisOp },
+          view: { ...targetOp.view, fileSnapshot: diskSnapshotBeforeThisOp, hiddenChanges },
         });
 
         return {
