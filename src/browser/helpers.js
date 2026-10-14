@@ -44,18 +44,22 @@
  * ```
  */
 export async function createBrowserFS(opts = {}) {
-  // Check if we're in a browser environment
-  if (typeof window === 'undefined') {
-    throw new Error('createBrowserFS() should only be used in browser environments');
-  }
-
-  // Caller supplied their own filesystem — use it directly instead of
-  // pulling in LightningFS at all.
+  // Caller supplied their own filesystem — use it directly. No window check:
+  // this must work in Web Workers (no `window`) and other non-DOM runtimes.
   if (opts.fs) {
     if (typeof opts.fs === 'function') {
       return new opts.fs(opts.name || 'jj', { wipe: opts.wipe || false });
     }
     return opts.fs;
+  }
+
+  // The default LightningFS backend needs IndexedDB, which exists in both
+  // windows and workers. Check for that feature rather than for `window`.
+  if (typeof indexedDB === 'undefined') {
+    throw new Error(
+      'createBrowserFS() requires IndexedDB (available in browsers and Web Workers). ' +
+        'Pass your own filesystem via opts.fs to use it elsewhere.'
+    );
   }
 
   // Dynamic `import()` (not `require`) so this resolves in an ESM browser

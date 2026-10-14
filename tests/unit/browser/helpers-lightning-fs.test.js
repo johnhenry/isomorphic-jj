@@ -28,12 +28,12 @@ jest.unstable_mockModule('@isomorphic-git/lightning-fs', () => ({
 
 describe('createBrowserFS() default LightningFS path', () => {
   afterEach(() => {
-    delete globalThis.window;
+    delete globalThis.indexedDB;
     ctorCalls.length = 0;
   });
 
   it('dynamically imports and constructs a LightningFS instance', async () => {
-    globalThis.window = {};
+    globalThis.indexedDB = {};
     const { createBrowserFS } = await import('../../../src/browser/helpers.js');
 
     const fs = await createBrowserFS({ name: 'my-repo', wipe: true });
@@ -42,7 +42,7 @@ describe('createBrowserFS() default LightningFS path', () => {
   });
 
   it('defaults the db name and wipe flag', async () => {
-    globalThis.window = {};
+    globalThis.indexedDB = {};
     const { createBrowserFS } = await import('../../../src/browser/helpers.js');
 
     await createBrowserFS();

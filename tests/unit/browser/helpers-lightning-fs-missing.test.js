@@ -15,11 +15,11 @@ jest.unstable_mockModule('@isomorphic-git/lightning-fs', () => {
 
 describe('createBrowserFS() when @isomorphic-git/lightning-fs is unavailable', () => {
   afterEach(() => {
-    delete globalThis.window;
+    delete globalThis.indexedDB;
   });
 
   it('throws a helpful, actionable error instead of the raw import failure', async () => {
-    globalThis.window = {};
+    globalThis.indexedDB = {};
     const { createBrowserFS } = await import('../../../src/browser/helpers.js');
     await expect(createBrowserFS({ name: 'repo' })).rejects.toThrow(
       /LightningFS not found.*npm install @isomorphic-git\/lightning-fs/s

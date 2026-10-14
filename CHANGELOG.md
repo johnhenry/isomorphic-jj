@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.14.1 — 2026-10-14 — createBrowserFS works in Web Workers
+
+Fixes [#58](https://github.com/johnhenry/isomorphic-jj/issues/58).
+
+### Fixed
+
+- **`createBrowserFS()` threw in a Web Worker even when `opts.fs` was supplied.**
+  It required `window`, which workers lack. A supplied `opts.fs` is now used
+  directly with no environment check; the default LightningFS path checks for
+  `indexedDB` (present in windows and workers) instead of `window`, and the
+  error when neither is available now says so and points at `opts.fs`.
+
 ## 1.14.0 — 2026-10-09 — describe()/metaedit() honor changeId; operations.restore() restores the view
 
 Fixes [#55](https://github.com/johnhenry/isomorphic-jj/issues/55) and

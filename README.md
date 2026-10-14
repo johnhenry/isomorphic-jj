@@ -1020,7 +1020,7 @@ repo/
 
 ## Project Status
 
-**Current Version**: 1.14.0 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.8.0 before the rename — see the provenance note at the top of this file, and the CHANGELOG's `1.9.0` entry for how the scoped/unscoped version lineages were merged back together)
+**Current Version**: 1.14.1 (`@johnhenry/isomorphic-jj`; same library/API lineage as the old `isomorphic-jj`, which reached v1.8.0 before the rename — see the provenance note at the top of this file, and the CHANGELOG's `1.9.0` entry for how the scoped/unscoped version lineages were merged back together)
 **Test Coverage**: 1882 tests passing, ~97% statements / 90% branches
 **JJ CLI parity**: tracks Jujutsu through v0.45.1
 **Status**: Actively developed; broad JJ CLI semantic parity, used in the examples/apps in this repo and in [JJHub](#family). Not yet 1.0 in the API-stability sense (the version number is past 1.0 only because merging the scoped/unscoped lineages forced it above the unscoped side's prior ceiling, not because the API is frozen) — API surface can still shift; pin a version and read the CHANGELOG before upgrading.

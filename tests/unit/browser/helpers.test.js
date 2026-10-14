@@ -51,8 +51,16 @@ afterEach(() => {
 });
 
 describe('createBrowserFS', () => {
-  it('throws when not in a browser (no window)', async () => {
-    await expect(createBrowserFS()).rejects.toThrow(/only be used in browser/);
+  it('throws a clear error when neither opts.fs nor indexedDB exist', async () => {
+    await expect(createBrowserFS()).rejects.toThrow(/requires IndexedDB.*opts\.fs/s);
+  });
+
+  it('works in a Worker-like global (no window) when opts.fs is supplied', async () => {
+    // No window, no indexedDB: a bare worker-ish global with a caller-supplied fs
+    // (e.g. lightning-fs over MemoryBackend).
+    const fakeFs = { promises: { readFile: async () => {}, writeFile: async () => {} } };
+    expect(typeof globalThis.window).toBe('undefined');
+    await expect(createBrowserFS({ fs: fakeFs })).resolves.toBe(fakeFs);
   });
 
   it('returns an injected fs instance as-is, skipping the LightningFS import', async () => {
